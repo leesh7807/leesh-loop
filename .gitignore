@@ -1,0 +1,22 @@
+# Elixir / Mix build artifacts
+**/_build/
+**/deps/
+**/.elixir_ls/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Temporary files
+tmp/
+.tmp/
+
+# Editors and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# JavaScript dependencies
+**/node_modules/
