@@ -72,4 +72,28 @@ describe("Notion coordination policy", () => {
     expect(appends.length).toBeGreaterThan(0);
     expect(appends.every(request => request.block_id === "page-id" && request.children.length <= 100)).toBe(true);
   });
+
+  it("fails instead of choosing arbitrarily when duplicate surfaces match", async () => {
+    const surface = (id: string) => ({ id, object: "data_source", title: [{ plain_text: "Tasks" }], parent: { page_id: "12345678-1234-5678-1234-567812345678" } });
+    const fake: any = { search: async () => ({ results: [surface("one"), surface("two")], has_more: false }), dataSources: {} };
+    const publisher = new NotionPublisher(fake, resolvePolicy());
+    await expect(publisher.findOrBootstrap("https://www.notion.so/acme/Example-12345678123456781234567812345678")).rejects.toThrow(/multiple 'Tasks' surfaces/);
+  });
+
+  it("batches oversized Workpad updates", async () => {
+    const appends: any[] = [];
+    const fake: any = {
+      blocks: {
+        children: {
+          list: async () => ({ results: [{ id: "workpad", type: "heading_2", heading_2: { rich_text: [{ plain_text: "Workpad" }] } }], has_more: false }),
+          append: async (request: any) => appends.push(request)
+        },
+        delete: async () => undefined
+      }
+    };
+    const publisher = new NotionPublisher(fake, resolvePolicy());
+    await publisher.updateWorkpad("page-id", "x".repeat(1900 * 101));
+    expect(appends.length).toBeGreaterThan(1);
+    expect(appends.every(request => request.block_id === "page-id" && request.children.length <= 100)).toBe(true);
+  });
 });

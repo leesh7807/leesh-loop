@@ -70,9 +70,11 @@ export class NotionPublisher {
     try {
       sources = await allPages((cursor) => this.client.search({ query: this.policy.surfaceName, filter: { property: "object", value: surface.object }, start_cursor: cursor }));
     } catch (error) { throw classifyNotionError(error); }
-    const matching = sources.find(source => source.object === surface.object &&
+    const matches = sources.filter(source => source.object === surface.object &&
       pageId(source.parent?.page_id ?? "") === pageId(parentId) &&
       source.title?.some((item: any) => item.plain_text === this.policy.surfaceName));
+    if (matches.length > 1) throw new PublicationError("schema compatibility", `multiple '${this.policy.surfaceName}' surfaces exist under the configured parent`);
+    const matching = matches[0];
     if (matching) {
       try { const source = await surface.api.retrieve({ [surface.idKey]: matching.id }); validateDataSourceSchema(source, this.policy); return source; } catch (error) { if (error instanceof PublicationError) throw error; throw classifyNotionError(error); }
     }
@@ -135,7 +137,7 @@ export class NotionPublisher {
       const old = blocks.slice(start + 1, end < 0 ? undefined : start + 1 + end);
       for (const block of old) await this.client.blocks.delete({ block_id: block.id });
       const children = chunks(content).map(part => ({ object: "block", type: "paragraph", paragraph: { rich_text: richText(part) } }));
-      if (children.length) await this.client.blocks.children.append({ block_id: pageIdValue, children });
+      for (const batch of batches(children, MAX_CHILDREN_PER_REQUEST)) await this.client.blocks.children.append({ block_id: pageIdValue, children: batch });
     } catch (error) { if (error instanceof PublicationError) throw error; throw classifyNotionError(error); }
   }
 }
