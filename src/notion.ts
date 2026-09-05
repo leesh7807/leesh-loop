@@ -33,7 +33,7 @@ export function validateDataSourceSchema(source: any, policy: Policy): void {
   if (!targets.some(target => pageId(target) === pageId(source.id))) throw new PublicationError("schema compatibility", `property '${policy.propertyNames.blockedBy}' must relate to Tasks itself`);
 }
 
-function classify(error: any): PublicationError {
+export function classifyNotionError(error: any): PublicationError {
   const status = error?.status;
   if (status === 401) return new PublicationError("authentication failure", "Notion rejected NOTION_TOKEN");
   if (status === 403) return new PublicationError("target inaccessible", "the integration cannot access the configured parent or data source");
@@ -62,12 +62,12 @@ export class NotionPublisher {
     let sources: any[];
     try {
       sources = await allPages((cursor) => this.client.search({ query: this.policy.surfaceName, filter: { property: "object", value: surface.object }, start_cursor: cursor }));
-    } catch (error) { throw classify(error); }
+    } catch (error) { throw classifyNotionError(error); }
     const matching = sources.find(source => source.object === surface.object &&
       pageId(source.parent?.page_id ?? "") === pageId(parentId) &&
       source.title?.some((item: any) => item.plain_text === this.policy.surfaceName));
     if (matching) {
-      try { const source = await surface.api.retrieve({ [surface.idKey]: matching.id }); validateDataSourceSchema(source, this.policy); return source; } catch (error) { if (error instanceof PublicationError) throw error; throw classify(error); }
+      try { const source = await surface.api.retrieve({ [surface.idKey]: matching.id }); validateDataSourceSchema(source, this.policy); return source; } catch (error) { if (error instanceof PublicationError) throw error; throw classifyNotionError(error); }
     }
     try {
       const source = await surface.api.create({ parent: { type: "page_id", page_id: parentId }, title: richText(this.policy.surfaceName), properties: canonicalProperties(this.policy) });
@@ -76,7 +76,7 @@ export class NotionPublisher {
       } });
       validateDataSourceSchema(updated, this.policy);
       return updated;
-    } catch (error) { if (error instanceof PublicationError) throw error; throw classify(error); }
+    } catch (error) { if (error instanceof PublicationError) throw error; throw classifyNotionError(error); }
   }
 
   async publish(config: Config, plan: PlanArtifact): Promise<PublishedTask> {
@@ -98,7 +98,7 @@ export class NotionPublisher {
       };
       const page = await this.client.pages.create({ parent: { type: surface.parentKey, [surface.parentKey]: source.id }, properties, children: sectionBlocks(config.policy, plan.content) });
       return { id: page.id, url: page.url, identifier: plan.identifier, title: plan.title };
-    } catch (error) { if (error instanceof PublicationError) throw error; throw classify(error); }
+    } catch (error) { if (error instanceof PublicationError) throw error; throw classifyNotionError(error); }
   }
 
   async readSection(pageIdValue: string, heading: string): Promise<string> {
@@ -113,7 +113,7 @@ export class NotionPublisher {
         content.push(...(payload?.rich_text ?? []).map((x: any) => x.plain_text ?? x.text?.content ?? ""));
       }
       return content.join("");
-    } catch (error) { if (error instanceof PublicationError) throw error; throw classify(error); }
+    } catch (error) { if (error instanceof PublicationError) throw error; throw classifyNotionError(error); }
   }
 
   async updateWorkpad(pageIdValue: string, content: string): Promise<void> {
@@ -126,7 +126,7 @@ export class NotionPublisher {
       for (const block of old) await this.client.blocks.delete({ block_id: block.id });
       const children = chunks(content).map(part => ({ object: "block", type: "paragraph", paragraph: { rich_text: richText(part) } }));
       if (children.length) await this.client.blocks.children.append({ block_id: pageIdValue, children });
-    } catch (error) { if (error instanceof PublicationError) throw error; throw classify(error); }
+    } catch (error) { if (error instanceof PublicationError) throw error; throw classifyNotionError(error); }
   }
 }
 

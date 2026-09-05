@@ -1,0 +1,18 @@
+parent_url: https://app.notion.com/p/workspace/00000000000000000000000000000000
+
+# Optional supported publication defaults:
+# surface_name: Tasks
+# initial_state: Todo
+# default_priority: 2
+# default_labels: [coordination]
+# plan_source_url: https://github.com/example/repo/blob/main/docs/plans/completed/example.md
+# property_names:
+#   title: Title
+#   identifier: Identifier
+#   state: State
+#   priority: Priority
+#   labels: Labels
+#   blockedBy: Blocked By
+#   planSource: Plan Source
+#   created: Created
+#   updated: Updated

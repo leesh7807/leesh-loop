@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultPolicy } from "../src/policy.js";
-import { NotionPublisher, PublicationError, sectionBlocks, validateDataSourceSchema } from "../src/notion.js";
+import { NotionPublisher, PublicationError, classifyNotionError, sectionBlocks, validateDataSourceSchema } from "../src/notion.js";
 import { resolvePolicy } from "../src/policy.js";
 
 describe("Notion coordination policy", () => {
@@ -43,5 +43,12 @@ describe("Notion coordination policy", () => {
     expect(created[0].children.at(-1).heading_2.rich_text[0].text.content).toBe("Workpad");
     await expect(publisher.publish(config, plan)).rejects.toBeInstanceOf(PublicationError);
     expect(created).toHaveLength(1);
+  });
+
+  it("maps provider authentication, permission, not-found, and generic failures", () => {
+    expect(classifyNotionError({ status: 401 }).message).toMatch(/^authentication failure:/);
+    expect(classifyNotionError({ status: 403 }).message).toMatch(/^target inaccessible:/);
+    expect(classifyNotionError({ status: 404 }).message).toMatch(/^target inaccessible:/);
+    expect(classifyNotionError({ status: 500, message: "rate limited" }).message).toMatch(/^provider\/API failure: rate limited$/);
   });
 });

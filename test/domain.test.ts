@@ -19,6 +19,14 @@ describe("plan metadata", () => {
     expect(config.policy.initialState).toBe("In Progress");
     expect(config.policy.defaultLabels).toEqual(["build", "review"]);
   });
+  it("rejects misspelled keys and wrong types instead of applying defaults", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "plan-publisher-invalid-"));
+    const write = async (name: string, contents: string) => { const file = path.join(dir, name); await writeFile(file, contents); return file; };
+    const parent = "https://www.notion.so/acme/Example-12345678123456781234567812345678";
+    await expect(readConfig(await write("typo.yaml", `parent_url: ${parent}\ninitial_sate: In Progress\n`))).rejects.toThrow(/unsupported key 'initial_sate'/);
+    await expect(readConfig(await write("type.yaml", `parent_url: ${parent}\ninitial_state: 123\n`))).rejects.toThrow(/initial_state must be a string/);
+    await expect(readConfig(await write("labels.yaml", `parent_url: ${parent}\ndefault_labels: [2]\n`))).rejects.toThrow(/default_labels must be a list of strings/);
+  });
 });
 
 describe("policy", () => {

@@ -6,6 +6,9 @@ import { Policy, resolvePolicy, normalizeLabels } from "./policy.js";
 export type Config = { parentUrl: string; planSourceUrl: string | null; policy: Policy };
 export type PlanArtifact = { path: string; content: string; identifier: string; title: string };
 
+const CONFIG_KEYS = new Set(["parent_url", "surface_name", "initial_state", "default_priority", "default_labels", "plan_source_url", "property_names"]);
+const PROPERTY_NAME_KEYS = new Set(["title", "identifier", "state", "priority", "labels", "blockedBy", "planSource", "created", "updated"]);
+
 export function parseNotionPageId(value: string): string {
   let url: URL;
   try { url = new URL(value); } catch { throw new Error("configuration: parent_url must be a valid Notion URL"); }
@@ -43,17 +46,26 @@ export async function readConfig(filePath: string): Promise<Config> {
   try { value = YAML.parse(raw); } catch (error) { throw new Error(`configuration: invalid YAML (${error instanceof Error ? error.message : "parse failure"})`); }
   if (!value || typeof value !== "object") throw new Error("configuration: root must be a mapping");
   const data = value as Record<string, unknown>;
+  for (const key of Object.keys(data)) if (!CONFIG_KEYS.has(key)) throw new Error(`configuration: unsupported key '${key}'`);
   if (typeof data.parent_url !== "string") throw new Error("configuration: parent_url is required");
   parseNotionPageId(data.parent_url);
+  if (data.surface_name !== undefined && (typeof data.surface_name !== "string" || !data.surface_name.trim())) throw new Error("configuration: surface_name must be a non-empty string");
+  if (data.initial_state !== undefined && typeof data.initial_state !== "string") throw new Error("configuration: initial_state must be a string");
   const names = data.property_names;
   if (names !== undefined && (!names || typeof names !== "object" || Array.isArray(names))) throw new Error("configuration: property_names must be a mapping");
   const priority = data.default_priority === undefined ? null : data.default_priority;
   if (priority !== null && (!Number.isInteger(priority) || ![1, 2, 3, 4].includes(priority as number))) throw new Error("configuration: default_priority must be 1, 2, 3, 4, or null");
   const labels = data.default_labels === undefined ? [] : data.default_labels;
-  if (!Array.isArray(labels)) throw new Error("configuration: default_labels must be a list");
-  const overrideNames = (names ?? {}) as Record<string, string>;
-  const allowed = new Set(["title", "identifier", "state", "priority", "labels", "blockedBy", "planSource", "created", "updated"]);
-  for (const key of Object.keys(overrideNames)) if (!allowed.has(key) || typeof overrideNames[key] !== "string" || !overrideNames[key].trim()) throw new Error(`configuration: unsupported property_names key '${key}'`);
+  if (!Array.isArray(labels) || labels.some(label => typeof label !== "string")) throw new Error("configuration: default_labels must be a list of strings");
+  if (data.plan_source_url !== undefined && data.plan_source_url !== null) {
+    if (typeof data.plan_source_url !== "string") throw new Error("configuration: plan_source_url must be a URL or null");
+    try {
+      const sourceUrl = new URL(data.plan_source_url);
+      if (!/^https?:$/i.test(sourceUrl.protocol)) throw new Error("unsupported protocol");
+    } catch { throw new Error("configuration: plan_source_url must be an http(s) URL or null"); }
+  }
+  const overrideNames = (names ?? {}) as Record<string, unknown>;
+  for (const key of Object.keys(overrideNames)) if (!PROPERTY_NAME_KEYS.has(key) || typeof overrideNames[key] !== "string" || !(overrideNames[key] as string).trim()) throw new Error(`configuration: unsupported property_names key '${key}'`);
   const policy = resolvePolicy({
     surfaceName: typeof data.surface_name === "string" ? data.surface_name : undefined,
     initialState: typeof data.initial_state === "string" ? data.initial_state : undefined,
@@ -61,5 +73,5 @@ export async function readConfig(filePath: string): Promise<Config> {
     defaultLabels: normalizeLabels(labels),
     propertyNames: overrideNames as Partial<Policy["propertyNames"]>
   });
-  return { parentUrl: data.parent_url, planSourceUrl: typeof data.plan_source_url === "string" ? data.plan_source_url : null, policy };
+  return { parentUrl: data.parent_url, planSourceUrl: data.plan_source_url === null || data.plan_source_url === undefined ? null : data.plan_source_url, policy };
 }
