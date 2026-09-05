@@ -57,6 +57,7 @@ export function resolvePolicy(overrides: {
   if (!KNOWN_STATES.includes(policy.initialState as typeof KNOWN_STATES[number])) throw new Error(`configuration: unsupported initial_state '${policy.initialState}'`);
   if (policy.defaultPriority !== null && ![1, 2, 3, 4].includes(policy.defaultPriority)) throw new Error("configuration: default_priority must be 1, 2, 3, 4, or null");
   if (!policy.surfaceName.trim()) throw new Error("configuration: surface_name must not be blank");
+  if (new Set(Object.values(policy.propertyNames)).size !== Object.values(policy.propertyNames).length) throw new Error("configuration: property_names values must be unique");
   return { ...policy, defaultLabels: normalizeLabels(policy.defaultLabels) };
 }
 

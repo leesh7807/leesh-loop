@@ -3,6 +3,7 @@ import { canonicalProperties, Policy } from "./policy.js";
 import { Config, PlanArtifact, parseNotionPageId } from "./domain.js";
 
 type AnyClient = any;
+const MAX_CHILDREN_PER_REQUEST = 100;
 export type PublishedTask = { id: string; url: string; identifier: string; title: string };
 export type NotionPage = { id: string; url?: string; properties: Record<string, any> };
 
@@ -17,6 +18,12 @@ export function sectionBlocks(policy: Policy, plan: string, workpad = ""): any[]
   for (const part of chunks(plan)) result.push({ object: "block", type: "code", code: { language: "markdown", rich_text: richText(part) } });
   result.push({ object: "block", type: "heading_2", heading_2: { rich_text: richText(policy.sectionHeadings.workpad) } });
   for (const part of chunks(workpad)) result.push({ object: "block", type: "paragraph", paragraph: { rich_text: richText(part) } });
+  return result;
+}
+
+function batches<T>(values: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let i = 0; i < values.length; i += size) result.push(values.slice(i, i + size));
   return result;
 }
 
@@ -96,7 +103,10 @@ export class NotionPublisher {
         [n.blockedBy]: { relation: [] },
         [n.planSource]: { url: config.planSourceUrl }
       };
-      const page = await this.client.pages.create({ parent: { type: surface.parentKey, [surface.parentKey]: source.id }, properties, children: sectionBlocks(config.policy, plan.content) });
+      const blocks = sectionBlocks(config.policy, plan.content);
+      const [initialChildren, ...remainingChildren] = batches(blocks, MAX_CHILDREN_PER_REQUEST);
+      const page = await this.client.pages.create({ parent: { type: surface.parentKey, [surface.parentKey]: source.id }, properties, children: initialChildren });
+      for (const children of remainingChildren) await this.client.blocks.children.append({ block_id: page.id, children });
       return { id: page.id, url: page.url, identifier: plan.identifier, title: plan.title };
     } catch (error) { if (error instanceof PublicationError) throw error; throw classifyNotionError(error); }
   }

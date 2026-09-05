@@ -27,6 +27,9 @@ describe("plan metadata", () => {
     await expect(readConfig(await write("type.yaml", `parent_url: ${parent}\ninitial_state: 123\n`))).rejects.toThrow(/initial_state must be a string/);
     await expect(readConfig(await write("labels.yaml", `parent_url: ${parent}\ndefault_labels: [2]\n`))).rejects.toThrow(/default_labels must be a list of strings/);
   });
+  it("rejects canonical property-name collisions", () => {
+    expect(() => resolvePolicy({ propertyNames: { title: "Task", identifier: "Task" } })).toThrow(/property_names values must be unique/);
+  });
 });
 
 describe("policy", () => {

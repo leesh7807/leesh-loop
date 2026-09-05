@@ -51,4 +51,25 @@ describe("Notion coordination policy", () => {
     expect(classifyNotionError({ status: 404 }).message).toMatch(/^target inaccessible:/);
     expect(classifyNotionError({ status: 500, message: "rate limited" }).message).toMatch(/^provider\/API failure: rate limited$/);
   });
+
+  it("batches oversized page children after the initial page create", async () => {
+    const source = { id: "source", object: "data_source", title: [{ plain_text: "Tasks" }], parent: { page_id: "12345678-1234-5678-1234-567812345678" }, properties: {
+      Title: { type: "title" }, Identifier: { type: "rich_text" }, State: { type: "select" }, Priority: { type: "number" },
+      Labels: { type: "multi_select" }, "Blocked By": { type: "relation", relation: { data_source_id: "source" } },
+      "Plan Source": { type: "url" }, Created: { type: "created_time" }, Updated: { type: "last_edited_time" }
+    } };
+    const appends: any[] = [];
+    const fake: any = {
+      search: async () => ({ results: [source], has_more: false }),
+      dataSources: { retrieve: async () => source, query: async () => ({ results: [], has_more: false }) },
+      pages: { create: async (request: any) => { expect(request.children).toHaveLength(100); return { id: "page-id", url: "https://www.notion.so/page-id" }; } },
+      blocks: { children: { append: async (request: any) => { appends.push(request); } } }
+    };
+    const publisher = new NotionPublisher(fake, resolvePolicy());
+    const config: any = { parentUrl: "https://www.notion.so/acme/Example-12345678123456781234567812345678", planSourceUrl: null, policy: resolvePolicy() };
+    const plan: any = { identifier: "long-plan", title: "Long plan", content: "x".repeat(1900 * 101) };
+    await expect(publisher.publish(config, plan)).resolves.toMatchObject({ id: "page-id" });
+    expect(appends.length).toBeGreaterThan(0);
+    expect(appends.every(request => request.block_id === "page-id" && request.children.length <= 100)).toBe(true);
+  });
 });
