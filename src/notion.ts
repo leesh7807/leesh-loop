@@ -27,6 +27,10 @@ function batches<T>(values: T[], size: number): T[][] {
   return result;
 }
 
+async function deleteBlocks(client: AnyClient, blocks: any[]): Promise<void> {
+  for (const block of blocks.reverse()) if (block?.id) await client.blocks.delete({ block_id: block.id });
+}
+
 export function validateDataSourceSchema(source: any, policy: Policy): void {
   const properties = source?.properties ?? {};
   const expected: Record<string, string> = {
@@ -61,6 +65,28 @@ export class NotionPublisher {
     const dataSources = this.client.dataSources;
     return dataSources ? { api: dataSources, object: "data_source", idKey: "data_source_id", parentKey: "data_source_id" } :
       { api: this.client.databases, object: "database", idKey: "database_id", parentKey: "database_id" };
+  }
+
+  private async appendChildren(pageIdValue: string, children: any[]): Promise<any[]> {
+    const created: any[] = [];
+    try {
+      for (const batch of batches(children, MAX_CHILDREN_PER_REQUEST)) {
+        const response = await this.client.blocks.children.append({ block_id: pageIdValue, children: batch });
+        created.push(...(response?.results ?? []));
+      }
+      return created;
+    } catch (error) {
+      try { await deleteBlocks(this.client, created); } catch { /* preserve the original provider failure */ }
+      throw error;
+    }
+  }
+
+  private async rollbackPage(pageIdValue: string): Promise<void> {
+    try {
+      await this.client.pages.update({ page_id: pageIdValue, in_trash: true });
+    } catch (error) {
+      throw new PublicationError("provider/API failure", `publication failed and rollback failed: ${error instanceof Error ? error.message : "unknown rollback error"}`);
+    }
   }
 
   async findOrBootstrap(parentUrl: string): Promise<any> {
@@ -108,7 +134,12 @@ export class NotionPublisher {
       const blocks = sectionBlocks(config.policy, plan.content);
       const [initialChildren, ...remainingChildren] = batches(blocks, MAX_CHILDREN_PER_REQUEST);
       const page = await this.client.pages.create({ parent: { type: surface.parentKey, [surface.parentKey]: source.id }, properties, children: initialChildren });
-      for (const children of remainingChildren) await this.client.blocks.children.append({ block_id: page.id, children });
+      try {
+        await this.appendChildren(page.id, remainingChildren.flat());
+      } catch (error) {
+        await this.rollbackPage(page.id);
+        throw error;
+      }
       return { id: page.id, url: page.url, identifier: plan.identifier, title: plan.title };
     } catch (error) { if (error instanceof PublicationError) throw error; throw classifyNotionError(error); }
   }
@@ -135,9 +166,14 @@ export class NotionPublisher {
       if (start < 0) throw new PublicationError("schema compatibility", "page is missing 'Workpad' section");
       const end = blocks.slice(start + 1).findIndex(block => block.type === "heading_2");
       const old = blocks.slice(start + 1, end < 0 ? undefined : start + 1 + end);
-      for (const block of old) await this.client.blocks.delete({ block_id: block.id });
       const children = chunks(content).map(part => ({ object: "block", type: "paragraph", paragraph: { rich_text: richText(part) } }));
-      for (const batch of batches(children, MAX_CHILDREN_PER_REQUEST)) await this.client.blocks.children.append({ block_id: pageIdValue, children: batch });
+      const created = await this.appendChildren(pageIdValue, children);
+      try {
+        await deleteBlocks(this.client, old);
+      } catch (error) {
+        try { await deleteBlocks(this.client, created); } catch { /* preserve the original provider failure */ }
+        throw error;
+      }
     } catch (error) { if (error instanceof PublicationError) throw error; throw classifyNotionError(error); }
   }
 }

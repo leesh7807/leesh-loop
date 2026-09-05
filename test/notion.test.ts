@@ -96,4 +96,43 @@ describe("Notion coordination policy", () => {
     expect(appends.length).toBeGreaterThan(1);
     expect(appends.every(request => request.block_id === "page-id" && request.children.length <= 100)).toBe(true);
   });
+
+  it("rolls back a created page when a later Plan append fails", async () => {
+    const source = { id: "source", object: "data_source", title: [{ plain_text: "Tasks" }], parent: { page_id: "12345678-1234-5678-1234-567812345678" }, properties: {
+      Title: { type: "title" }, Identifier: { type: "rich_text" }, State: { type: "select" }, Priority: { type: "number" },
+      Labels: { type: "multi_select" }, "Blocked By": { type: "relation", relation: { data_source_id: "source" } },
+      "Plan Source": { type: "url" }, Created: { type: "created_time" }, Updated: { type: "last_edited_time" }
+    } };
+    const trashed: string[] = [];
+    const fake: any = {
+      search: async () => ({ results: [source], has_more: false }),
+      dataSources: { retrieve: async () => source, query: async () => ({ results: [], has_more: false }) },
+      pages: {
+        create: async () => ({ id: "partial-page", url: "https://www.notion.so/partial-page" }),
+        update: async (request: any) => { trashed.push(request.page_id); }
+      },
+      blocks: { children: { append: async () => { throw Object.assign(new Error("network down"), { status: 503 }); } }, delete: async () => undefined }
+    };
+    const publisher = new NotionPublisher(fake, resolvePolicy());
+    const config: any = { parentUrl: "https://www.notion.so/acme/Example-12345678123456781234567812345678", planSourceUrl: null, policy: resolvePolicy() };
+    const plan: any = { identifier: "long-plan", title: "Long plan", content: "x".repeat(1900 * 101) };
+    await expect(publisher.publish(config, plan)).rejects.toThrow(/provider\/API failure/);
+    expect(trashed).toEqual(["partial-page"]);
+  });
+
+  it("keeps the existing Workpad when appending replacement content fails", async () => {
+    const deleted: string[] = [];
+    const fake: any = {
+      blocks: {
+        children: { list: async () => ({ results: [
+          { id: "workpad", type: "heading_2", heading_2: { rich_text: [{ plain_text: "Workpad" }] } },
+          { id: "old-content", type: "paragraph", paragraph: { rich_text: [{ plain_text: "old" }] } }
+        ], has_more: false }), append: async () => { throw new Error("network down"); } },
+        delete: async ({ block_id }: any) => deleted.push(block_id)
+      }
+    };
+    const publisher = new NotionPublisher(fake, resolvePolicy());
+    await expect(publisher.updateWorkpad("page-id", "new content")).rejects.toThrow(/provider\/API failure/);
+    expect(deleted).not.toContain("old-content");
+  });
 });
