@@ -25,7 +25,7 @@ export async function publishPlan(planPath: string, configPath: string, client: 
   properties[policy.description] = { rich_text: [{ type: "text", text: { content: PENDING_PUBLICATION_MARKER } }] };
   const page = await client.createTask(dataSource, properties);
   try { await client.appendBlocks(page.id, [pendingPublicationBlock()]); await client.appendBlocks(page.id, blocks); await client.finalizePublication(page.id, policy); }
-  catch (error) { try { await client.archive(page.id); } catch { /* retry discovers the incomplete identifier */ } if (error instanceof PublicationError) throw error; throw new PublicationError("provider/API failure while publishing Plan; incomplete task remains retryable"); }
+  catch (error) { if (error instanceof PublicationError) throw error; throw new PublicationError("provider/API failure while publishing Plan; pending task remains retryable"); }
   return { identifier, page_id: page.id, url: page.url };
 }
 

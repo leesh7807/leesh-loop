@@ -6,9 +6,6 @@ const blockText = (block: any) => {
   return heading?.rich_text?.map((rich: any) => rich.plain_text ?? rich.text?.content ?? "").join("");
 };
 const propertyText = (property: any) => property?.rich_text?.map((rich: any) => rich.plain_text ?? rich.text?.content ?? "").join("") ?? "";
-export function isPublicationComplete(children: any[], policy: Policy): boolean {
-  return children.some((block) => block.type === "heading_1" && blockText(block) === policy.workpadHeading);
-}
 export function isPendingPublication(children: any[]): boolean {
   return children.some((block) => block.type === "heading_2" && blockText(block) === PENDING_PUBLICATION_MARKER);
 }
@@ -126,5 +123,4 @@ export class NotionClient {
     for (const block of children) if (isPendingPublicationBlock(block)) await this.request("PATCH", `/blocks/${block.id}`, { archived: true });
     await this.request("PATCH", `/pages/${pageId}`, { properties: { [policy.description]: { rich_text: [{ type: "text", text: { content: "Completed plan artifact; see Plan section." } }] } } });
   }
-  archive(pageId: string) { return this.request("PATCH", `/pages/${pageId}`, { archived: true }); }
 }

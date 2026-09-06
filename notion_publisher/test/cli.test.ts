@@ -8,17 +8,15 @@ import { NotionClient, PENDING_PUBLICATION_MARKER } from "../src/notion.js";
 import { publishPlan } from "../src/cli.js";
 
 class PublicationFake extends NotionClient {
-  archived: string[] = [];
   repaired: string[] = [];
   finalized: string[] = [];
   createdProperties: any;
   appendCalls = 0;
-  constructor(private existing: { pageId: string; complete: boolean } | null = null, private failOnAppend = 2, private failArchive = false) { super("token"); }
+  constructor(private existing: { pageId: string; complete: boolean } | null = null, private failOnAppend = 2) { super("token"); }
   override async ensureSurface() { return "ds"; }
   override async findPublication() { return this.existing ? { ...this.existing } : null; }
   override async createTask(_dataSource: string, properties: any) { this.createdProperties = properties; return { id: "page", url: "https://notion.so/page" }; }
   override async appendBlocks() { this.appendCalls += 1; if (this.appendCalls === this.failOnAppend) throw new PublicationError("authentication failure: NOTION_TOKEN was rejected"); }
-  override async archive(pageId: string) { this.archived.push(pageId); if (this.failArchive) throw new PublicationError("provider/API failure during cleanup"); }
   override async repairIncomplete(pageId: string) { this.repaired.push(pageId); }
   override async finalizePublication(pageId: string) { this.finalized.push(pageId); }
 }
@@ -32,19 +30,19 @@ async function inputs() {
   return { plan, config };
 }
 
-test("task creation followed by Plan append failure attempts cleanup and preserves error", async () => {
+test("task creation followed by Plan append failure preserves retryable state", async () => {
   const { plan, config } = await inputs();
   const client = new PublicationFake();
   await assert.rejects(publishPlan(plan, config, client), /authentication failure/);
-  assert.deepEqual(client.archived, ["page"]);
+  assert.deepEqual(client.finalized, []);
 });
 
-test("first marker failure leaves an owned task marker even when cleanup fails", async () => {
+test("first marker failure leaves an owned task marker", async () => {
   const { plan, config } = await inputs();
-  const client = new PublicationFake(null, 1, true);
+  const client = new PublicationFake(null, 1);
   await assert.rejects(publishPlan(plan, config, client), /authentication failure/);
   assert.equal(client.createdProperties.Description.rich_text[0].text.content, PENDING_PUBLICATION_MARKER);
-  assert.deepEqual(client.archived, ["page"]);
+  assert.deepEqual(client.finalized, []);
 });
 
 test("a later invocation repairs the incomplete publication", async () => {
@@ -63,10 +61,33 @@ test("successful first publication removes its pending transaction state", async
   assert.deepEqual(client.finalized, ["page"]);
 });
 
+class StatefulRetryFake extends NotionClient {
+  phase: "none" | "pending" | "complete" = "none";
+  planAppendAttempts = 0;
+  override async ensureSurface() { return "ds"; }
+  override async findPublication() {
+    if (this.phase === "none") return null;
+    return { pageId: "page", url: "https://notion.so/page", complete: this.phase === "complete" };
+  }
+  override async createTask() { this.phase = "pending"; return { id: "page", url: "https://notion.so/page" }; }
+  override async appendBlocks() { this.planAppendAttempts += 1; if (this.planAppendAttempts === 2) throw new PublicationError("provider/API failure during Plan append"); }
+  override async repairIncomplete() { this.phase = "complete"; }
+  override async finalizePublication() { this.phase = "complete"; }
+}
+
+test("failed publication is repaired by the next invocation and then becomes a duplicate", async () => {
+  const { plan, config } = await inputs();
+  const client = new StatefulRetryFake("token");
+  await assert.rejects(publishPlan(plan, config, client), /Plan append/);
+  const repaired = await publishPlan(plan, config, client);
+  assert.equal(repaired.page_id, "page");
+  await assert.rejects(publishPlan(plan, config, client), /duplicate publication/);
+});
+
 test("oversized plan title fails before Notion mutation", async () => {
   const { plan, config } = await inputs();
   await writeFile(plan, `# ${"x".repeat(1901)}\ncontent`);
   const client = new PublicationFake();
   await assert.rejects(publishPlan(plan, config, client), /title exceeds/);
-  assert.deepEqual(client.archived, []);
+  assert.deepEqual(client.finalized, []);
 });
