@@ -1,10 +1,10 @@
 # Notion plan publisher
 
-Run from any directory after installing the worktree package:
+Run from any directory after installing the publisher package:
 
 ```sh
-python -m pip install .
-notion-plan-publisher --plan /path/to/plan.md --config /path/to/publisher-config.json
+cd notion_publisher && npm install && npm run build
+node notion_publisher/dist/src/cli.js --plan /path/to/plan.md --config /path/to/publisher-config.json
 ```
 
 The configuration path and plan path are explicit and are never resolved relative to the source
