@@ -24,8 +24,16 @@ async function request(api: NotionApi, args: { path: string; method: string; bod
 export async function getParent(api: NotionApi, pageId: string) { return request(api, { path: `/pages/${pageId}`, method: 'get' }); }
 
 export async function findDataSource(api: NotionApi, parentId: string, policy: Policy): Promise<any | null> {
-  const result = await request(api, { path: `/blocks/${parentId}/children?page_size=100`, method: 'get' });
-  const child = (result.results ?? []).find((x: any) => x.type === 'child_database' && x.child_database?.title === policy.dataSourceName);
+  const children: any[] = [];
+  let cursor: string | undefined;
+  do {
+    const query = new URLSearchParams({ page_size: '100' });
+    if (cursor) query.set('start_cursor', cursor);
+    const result = await request(api, { path: `/blocks/${parentId}/children?${query}`, method: 'get' });
+    children.push(...(result.results ?? []));
+    cursor = result.has_more ? result.next_cursor : undefined;
+  } while (cursor);
+  const child = children.find((x: any) => x.type === 'child_database' && x.child_database?.title === policy.dataSourceName);
   if (!child) return null;
   const db = await request(api, { path: `/databases/${child.id}`, method: 'get' });
   const source = db.data_sources?.[0];
@@ -52,7 +60,7 @@ export function validateSchema(dataSource: any, policy: Policy): void {
   const expected: Record<string, string> = { [policy.properties.title]: 'title', [policy.properties.identifier]: 'rich_text', [policy.properties.state]: 'select', [policy.properties.priority]: 'number', [policy.properties.labels]: 'multi_select', [policy.properties.blockedBy]: 'relation', [policy.properties.planSource]: 'url', [policy.properties.created]: 'created_time', [policy.properties.updated]: 'last_edited_time' };
   for (const [name, type] of Object.entries(expected)) if (!p[name] || typeFor(p[name]) !== type) throw new NotionError('incompatible schema', `Property ${name} must have type ${type}`);
   const relation = p[policy.properties.blockedBy].relation;
-  if (!relation?.data_source_id && !relation?.database_id) throw new NotionError('incompatible schema', `${policy.properties.blockedBy} must relate to Tasks`);
+  if (!relation || relation.data_source_id !== dataSource.id) throw new NotionError('incompatible schema', `${policy.properties.blockedBy} must be a self-relation to Tasks`);
 }
 
 export async function queryByIdentifier(api: NotionApi, dataSourceId: string, property: string, identifier: string): Promise<any[]> {
