@@ -4,6 +4,7 @@ from .core import Policy, PublicationError
 
 class NotionClient:
     version = "2025-09-03"
+    ownership_marker = "Publisher-owned Symphony coordination surface v1"
     def __init__(self, token, opener=urllib.request.urlopen): self.token, self.opener = token, opener
     def request(self, method, path, body=None):
         req = urllib.request.Request("https://api.notion.com/v1" + path, method=method, headers={"Authorization": "Bearer " + self.token, "Notion-Version": self.version, "Content-Type": "application/json"}, data=json.dumps(body).encode() if body is not None else None)
@@ -15,26 +16,30 @@ class NotionClient:
             detail = exc.read().decode(errors="replace")
             raise PublicationError(f"provider/API failure ({exc.code}): {detail[:300]}")
     def ensure_surface(self, parent_id: str, policy: Policy):
-        children = self.request("GET", f"/blocks/{parent_id}/children?page_size=100").get("results", [])
-        for block in children:
-            if block.get("type") == "child_database" and block.get("child_database", {}).get("title") == policy.surface_name:
-                db = self.request("GET", f"/databases/{block['id']}"); dsid = db.get("data_sources", [{}])[0].get("id")
-                if not dsid: raise PublicationError("incompatible schema: coordination surface has no data source")
-                schema = self.request("GET", f"/data_sources/{dsid}")
-                try:
-                    self.check_schema(schema, policy)
-                except PublicationError:
-                    # Only a publisher-owned surface may be resumed. An unrelated
-                    # surface with the same name is reported as incompatible.
+        cursor = None
+        while True:
+            suffix = "&start_cursor=" + cursor if cursor else ""
+            page = self.request("GET", f"/blocks/{parent_id}/children?page_size=100{suffix}")
+            for block in page.get("results", []):
+                if block.get("type") == "child_database" and block.get("child_database", {}).get("title") == policy.surface_name:
+                    db = self.request("GET", f"/databases/{block['id']}")
                     description = " ".join(x.get("plain_text", "") for x in db.get("description", []))
-                    if "Publisher-owned Symphony coordination surface v1" not in description: raise
-                    self.complete_bootstrap(schema, dsid, policy)
-                return dsid
+                    if self.ownership_marker not in description:
+                        raise PublicationError("incompatible schema: a same-named database exists but is not publisher-owned")
+                    dsid = db.get("data_sources", [{}])[0].get("id")
+                    if not dsid: raise PublicationError("incompatible schema: coordination surface has no data source")
+                    schema = self.request("GET", f"/data_sources/{dsid}")
+                    try: self.check_schema(schema, policy)
+                    except PublicationError: self.complete_bootstrap(schema, dsid, policy)
+                    return dsid
+            if not page.get("has_more"): break
+            cursor = page.get("next_cursor")
+            if not cursor: raise PublicationError("provider/API failure: paginated children response omitted next_cursor")
         schema = {policy.identifier:{"rich_text":{}}, policy.title:{"title":{}}, policy.state:{"select":{"options":[{"name":x} for x in policy.bootstrap_states]}}, policy.priority:{"number":{}}, policy.labels:{"multi_select":{}}, policy.blocked_by:{"relation":{"data_source_id":"__SELF__"}}, policy.description:{"rich_text":{}}, policy.source:{"url":{}}}
         schema[policy.blocked_by] = {"relation":{"data_source_id":"__SELF__"}}
         # Relation is established in a second deterministic request because the data source id is not known yet.
         schema.pop(policy.blocked_by)
-        db = self.request("POST", "/databases", {"parent":{"type":"page_id","page_id":parent_id}, "title":[{"text":{"content":policy.surface_name}}], "description":[{"text":{"content":"Publisher-owned Symphony coordination surface v1"}}], "initial_data_source":{"properties":schema}})
+        db = self.request("POST", "/databases", {"parent":{"type":"page_id","page_id":parent_id}, "title":[{"text":{"content":policy.surface_name}}], "description":[{"text":{"content":self.ownership_marker}}], "initial_data_source":{"properties":schema}})
         dbid = db["id"]; dsid = self.request("GET", f"/databases/{dbid}").get("data_sources", [{}])[0].get("id")
         if not dsid: raise PublicationError("provider/API failure: created surface did not expose its data source")
         self.request("PATCH", f"/data_sources/{dsid}", {"properties":{policy.blocked_by:{"relation":{"data_source_id":dsid, "single_property":{}}}}})
