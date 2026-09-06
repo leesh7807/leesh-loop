@@ -4,20 +4,23 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { PublicationError } from "../src/core.js";
-import { NotionClient } from "../src/notion.js";
+import { NotionClient, PENDING_PUBLICATION_MARKER } from "../src/notion.js";
 import { publishPlan } from "../src/cli.js";
 
 class PublicationFake extends NotionClient {
   archived: string[] = [];
   repaired: string[] = [];
+  finalized: string[] = [];
+  createdProperties: any;
   appendCalls = 0;
-  constructor(private existing: { pageId: string; complete: boolean } | null = null) { super("token"); }
+  constructor(private existing: { pageId: string; complete: boolean } | null = null, private failOnAppend = 2, private failArchive = false) { super("token"); }
   override async ensureSurface() { return "ds"; }
   override async findPublication() { return this.existing ? { ...this.existing } : null; }
-  override async createTask() { return { id: "page", url: "https://notion.so/page" }; }
-  override async appendBlocks() { this.appendCalls += 1; if (this.appendCalls > 1) throw new PublicationError("authentication failure: NOTION_TOKEN was rejected"); }
-  override async archive(pageId: string) { this.archived.push(pageId); }
+  override async createTask(_dataSource: string, properties: any) { this.createdProperties = properties; return { id: "page", url: "https://notion.so/page" }; }
+  override async appendBlocks() { this.appendCalls += 1; if (this.appendCalls === this.failOnAppend) throw new PublicationError("authentication failure: NOTION_TOKEN was rejected"); }
+  override async archive(pageId: string) { this.archived.push(pageId); if (this.failArchive) throw new PublicationError("provider/API failure during cleanup"); }
   override async repairIncomplete(pageId: string) { this.repaired.push(pageId); }
+  override async finalizePublication(pageId: string) { this.finalized.push(pageId); }
 }
 
 async function inputs() {
@@ -36,12 +39,28 @@ test("task creation followed by Plan append failure attempts cleanup and preserv
   assert.deepEqual(client.archived, ["page"]);
 });
 
+test("first marker failure leaves an owned task marker even when cleanup fails", async () => {
+  const { plan, config } = await inputs();
+  const client = new PublicationFake(null, 1, true);
+  await assert.rejects(publishPlan(plan, config, client), /authentication failure/);
+  assert.equal(client.createdProperties.Description.rich_text[0].text.content, PENDING_PUBLICATION_MARKER);
+  assert.deepEqual(client.archived, ["page"]);
+});
+
 test("a later invocation repairs the incomplete publication", async () => {
   const { plan, config } = await inputs();
   const client = new PublicationFake({ pageId: "page", complete: false });
   const result = await publishPlan(plan, config, client);
   assert.equal(result.page_id, "page");
   assert.deepEqual(client.repaired, ["page"]);
+});
+
+test("successful first publication removes its pending transaction state", async () => {
+  const { plan, config } = await inputs();
+  const client = new PublicationFake(null, 0);
+  const result = await publishPlan(plan, config, client);
+  assert.equal(result.page_id, "page");
+  assert.deepEqual(client.finalized, ["page"]);
 });
 
 test("oversized plan title fails before Notion mutation", async () => {

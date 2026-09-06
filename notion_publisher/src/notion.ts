@@ -5,6 +5,7 @@ const blockText = (block: any) => {
   const heading = block?.heading_1 ?? block?.heading_2;
   return heading?.rich_text?.map((rich: any) => rich.plain_text ?? rich.text?.content ?? "").join("");
 };
+const propertyText = (property: any) => property?.rich_text?.map((rich: any) => rich.plain_text ?? rich.text?.content ?? "").join("") ?? "";
 export function isPublicationComplete(children: any[], policy: Policy): boolean {
   return children.some((block) => block.type === "heading_1" && blockText(block) === policy.workpadHeading);
 }
@@ -116,9 +117,14 @@ export class NotionClient {
   }
   async duplicate(dataSource: string, policy: Policy, identifier: string) { const result = await this.request("POST", `/data_sources/${dataSource}/query`, { filter: { property: policy.identifier, rich_text: { equals: identifier } } }); return (result.results ?? []).length > 0; }
   async listChildren(parentId: string): Promise<any[]> { const all: any[] = []; let cursor: string | undefined; do { const page = await this.request("GET", `/blocks/${parentId}/children?page_size=100${cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : ""}`); all.push(...(page.results ?? [])); cursor = page.has_more ? page.next_cursor : undefined; if (page.has_more && !cursor) throw new PublicationError("provider/API failure: paginated children response omitted next_cursor"); } while (cursor); return all; }
-  async findPublication(dataSource: string, policy: Policy, identifier: string): Promise<{ pageId: string; url?: string; complete: boolean } | null> { const result = await this.request("POST", `/data_sources/${dataSource}/query`, { filter: { property: policy.identifier, rich_text: { equals: identifier } } }); const row = result.results?.[0]; if (!row) return null; const children = await this.listChildren(row.id); return { pageId: row.id, url: row.url, complete: isPublicationComplete(children, policy) || !isPendingPublication(children) }; }
+  async findPublication(dataSource: string, policy: Policy, identifier: string): Promise<{ pageId: string; url?: string; complete: boolean } | null> { const result = await this.request("POST", `/data_sources/${dataSource}/query`, { filter: { property: policy.identifier, rich_text: { equals: identifier } } }); const row = result.results?.[0]; if (!row) return null; const children = await this.listChildren(row.id); const pending = isPendingPublication(children) || propertyText(row.properties?.[policy.description]) === PENDING_PUBLICATION_MARKER; return { pageId: row.id, url: row.url, complete: !pending }; }
   createTask(dataSource: string, properties: Record<string, unknown>) { return this.request("POST", "/pages", { parent: { type: "data_source_id", data_source_id: dataSource }, properties }); }
   async appendBlocks(pageId: string, blocks: Record<string, unknown>[]) { for (let i = 0; i < blocks.length; i += NOTION_APPEND_BATCH_SIZE) await this.request("PATCH", `/blocks/${pageId}/children`, { children: blocks.slice(i, i + NOTION_APPEND_BATCH_SIZE) }); }
-  async repairIncomplete(pageId: string, blocks: Record<string, unknown>[]) { const children = await this.listChildren(pageId); const pending = children.find(isPendingPublicationBlock); for (const block of children) if (block !== pending) await this.request("PATCH", `/blocks/${block.id}`, { archived: true }); await this.appendBlocks(pageId, blocks); if (pending) await this.request("PATCH", `/blocks/${pending.id}`, { archived: true }); }
+  async repairIncomplete(pageId: string, blocks: Record<string, unknown>[], policy?: Policy) { const children = await this.listChildren(pageId); const pending = children.find(isPendingPublicationBlock); for (const block of children) if (block !== pending) await this.request("PATCH", `/blocks/${block.id}`, { archived: true }); await this.appendBlocks(pageId, blocks); if (pending) await this.request("PATCH", `/blocks/${pending.id}`, { archived: true }); if (policy) await this.finalizePublication(pageId, policy); }
+  async finalizePublication(pageId: string, policy: Policy) {
+    const children = await this.listChildren(pageId);
+    for (const block of children) if (isPendingPublicationBlock(block)) await this.request("PATCH", `/blocks/${block.id}`, { archived: true });
+    await this.request("PATCH", `/pages/${pageId}`, { properties: { [policy.description]: { rich_text: [{ type: "text", text: { content: "Completed plan artifact; see Plan section." } }] } } });
+  }
   archive(pageId: string) { return this.request("PATCH", `/pages/${pageId}`, { archived: true }); }
 }

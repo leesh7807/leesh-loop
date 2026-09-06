@@ -2,7 +2,7 @@ import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFile } from "node:fs/promises";
 import { buildPageBlocks, buildTaskProperties, deriveIdentifier, extractPlanTitle, loadConfig, PublicationError, validatePlanTitle } from "./core.js";
-import { NotionClient, pendingPublicationBlock } from "./notion.js";
+import { NotionClient, pendingPublicationBlock, PENDING_PUBLICATION_MARKER } from "./notion.js";
 
 export async function publishPlan(planPath: string, configPath: string, client: NotionClient): Promise<{ identifier: string; page_id: string; url?: string }> {
   const plan = await readFile(planPath, "utf8");
@@ -16,13 +16,15 @@ export async function publishPlan(planPath: string, configPath: string, client: 
 
   if (existing) {
     if (existing.complete) throw new PublicationError(`duplicate publication: ${identifier} already exists`);
-    try { await client.repairIncomplete(existing.pageId, blocks); }
+    try { await client.repairIncomplete(existing.pageId, blocks, policy); }
     catch (error) { if (error instanceof PublicationError) throw error; throw new PublicationError("provider/API failure while repairing incomplete Plan publication; retry is safe"); }
     return { identifier, page_id: existing.pageId, url: existing.url };
   }
 
-  const page = await client.createTask(dataSource, buildTaskProperties(policy, identifier, title, config.planSource));
-  try { await client.appendBlocks(page.id, [pendingPublicationBlock()]); await client.appendBlocks(page.id, blocks); }
+  const properties = buildTaskProperties(policy, identifier, title, config.planSource);
+  properties[policy.description] = { rich_text: [{ type: "text", text: { content: PENDING_PUBLICATION_MARKER } }] };
+  const page = await client.createTask(dataSource, properties);
+  try { await client.appendBlocks(page.id, [pendingPublicationBlock()]); await client.appendBlocks(page.id, blocks); await client.finalizePublication(page.id, policy); }
   catch (error) { try { await client.archive(page.id); } catch { /* retry discovers the incomplete identifier */ } if (error instanceof PublicationError) throw error; throw new PublicationError("provider/API failure while publishing Plan; incomplete task remains retryable"); }
   return { identifier, page_id: page.id, url: page.url };
 }
