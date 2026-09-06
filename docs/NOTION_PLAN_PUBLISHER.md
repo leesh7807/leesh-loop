@@ -10,13 +10,16 @@ node dist/src/cli.js --plan /path/to/plan.md --config /path/to/publisher-config.
 The configuration path and plan path are explicit and are never resolved relative to the source
 checkout. `parent_url` is the only required setting. Optional settings are `state` (default
 `Ready`), `priority` (default `3`, or `null`), `labels` (default `[]`), `plan_source`,
-`surface_name`, and `property_names` for the supported canonical names only. Unknown keys and
+`surface_name`, and `property_names` for the supported canonical names only. `plan_source`, when
+provided, must be an HTTP(S) URL because the canonical Notion property is a URL property; local
+filesystem paths are rejected rather than silently discarded. Unknown keys and
 wrong structural types fail before any Notion mutation. State text is open-ended; it is not
 rejected merely because it is not one of the bootstrap options.
 
-v1 assumes a single writer for a given plan artifact and coordination target. Duplicate detection
-is deterministic within that operating model; cross-process concurrent publication locking is out
-of scope.
+v1 assumes a single writer for a given plan artifact and coordination target. Callers must not
+run concurrent publisher processes for the same target/artifact. Duplicate detection is
+deterministic within that operating model; Notion does not provide the transaction/unique
+constraint needed for cross-process concurrent publication locking, which is out of scope.
 
 The code-owned default policy maps directly to Symphony's `Tracker.Issue`: `Identifier`, `Title`,
 `Description`, `State`, `Priority`, `Labels`, and self-relation `Blocked By`. Symphony dispatches
