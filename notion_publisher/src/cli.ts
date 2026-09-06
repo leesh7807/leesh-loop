@@ -1,12 +1,14 @@
 import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFile } from "node:fs/promises";
-import { buildPageBlocks, buildTaskProperties, deriveIdentifier, loadConfig, PublicationError } from "./core.js";
+import { buildPageBlocks, buildTaskProperties, deriveIdentifier, extractPlanTitle, loadConfig, PublicationError, validatePlanTitle } from "./core.js";
 import { NotionClient } from "./notion.js";
 
 export async function publishPlan(planPath: string, configPath: string, client: NotionClient): Promise<{ identifier: string; page_id: string; url?: string }> {
   const plan = await readFile(planPath, "utf8");
   const { config, policy } = await loadConfig(configPath);
+  const title = extractPlanTitle(plan, planPath);
+  validatePlanTitle(title);
   const dataSource = await client.ensureSurface(config.parentId, policy);
   const identifier = deriveIdentifier(plan, planPath);
   const blocks = buildPageBlocks(policy, plan);
@@ -19,7 +21,6 @@ export async function publishPlan(planPath: string, configPath: string, client: 
     return { identifier, page_id: existing.pageId, url: existing.url };
   }
 
-  const title = plan.split(/\r?\n/).find((line) => line.startsWith("# "))?.slice(2).trim() ?? basename(planPath);
   const page = await client.createTask(dataSource, buildTaskProperties(policy, identifier, title, config.planSource));
   try { await client.appendBlocks(page.id, blocks); }
   catch (error) { try { await client.archive(page.id); } catch { /* retry discovers the incomplete identifier */ } if (error instanceof PublicationError) throw error; throw new PublicationError("provider/API failure while publishing Plan; incomplete task remains retryable"); }

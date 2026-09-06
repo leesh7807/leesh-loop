@@ -42,3 +42,11 @@ test("a later invocation repairs the incomplete publication", async () => {
   assert.equal(result.page_id, "page");
   assert.deepEqual(client.repaired, ["page"]);
 });
+
+test("oversized plan title fails before Notion mutation", async () => {
+  const { plan, config } = await inputs();
+  await writeFile(plan, `# ${"x".repeat(1901)}\ncontent`);
+  const client = new PublicationFake();
+  await assert.rejects(publishPlan(plan, config, client), /title exceeds/);
+  assert.deepEqual(client.archived, []);
+});
