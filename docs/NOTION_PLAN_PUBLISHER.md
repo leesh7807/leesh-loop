@@ -14,6 +14,10 @@ checkout. `parent_url` is the only required setting. Optional settings are `stat
 wrong structural types fail before any Notion mutation. State text is open-ended; it is not
 rejected merely because it is not one of the bootstrap options.
 
+v1 assumes a single writer for a given plan artifact and coordination target. Duplicate detection
+is deterministic within that operating model; cross-process concurrent publication locking is out
+of scope.
+
 The code-owned default policy maps directly to Symphony's `Tracker.Issue`: `Identifier`, `Title`,
 `Description`, `State`, `Priority`, `Labels`, and self-relation `Blocked By`. Symphony dispatches
 only issues with a non-terminal configured state, required labels, and no unresolved blockers;

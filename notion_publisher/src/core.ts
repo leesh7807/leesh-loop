@@ -26,7 +26,7 @@ export async function loadConfig(file:string, base?:string, policy=DEFAULT_POLIC
  return {config:{parentId,parentUrl:r.parent_url as string,planSource:r.plan_source as string|undefined},policy:p};
 }
 export const deriveIdentifier=(plan:string,_artifact:string)=>`PLAN-${createHash("sha256").update(plan,"utf8").digest("hex").slice(0,12).toUpperCase()}`;
-export const chunkText=(text:string,limit=1900)=>text.length?Array.from({length:Math.ceil(text.length/limit)},(_,i)=>text.slice(i*limit,(i+1)*limit)):[""];
+export function chunkText(text:string,limit=1900):string[] { if(limit<2) throw new PublicationError("rich-text chunk limit must be at least 2 UTF-16 code units"); const chunks:string[]=[];let chunk="";for(const point of text){if(chunk&&chunk.length+point.length>limit){chunks.push(chunk);chunk="";}chunk+=point;}if(chunk||!chunks.length)chunks.push(chunk);return chunks; }
 const text=(content:string)=>({type:"text",text:{content}});
 export function buildTaskProperties(p:Policy,id:string,title:string,source?:string):Record<string,unknown>{return {[p.identifier]:{rich_text:[text(id)]},[p.title]:{title:[text(title)]},[p.state]:{select:{name:p.defaultState}},[p.priority]:{number:p.defaultPriority},[p.labels]:{multi_select:p.defaultLabels.map(name=>({name}))},[p.description]:{rich_text:[text("Completed plan artifact; see Plan section.")]},[p.source]:{url:source?.startsWith("http")?source:null}};}
 export function buildPageBlocks(p:Policy,plan:string):Record<string,unknown>[] { return [{object:"block",type:"heading_1",heading_1:{rich_text:[text(p.planHeading)]}},...chunkText(plan).map(part=>({object:"block",type:"paragraph",paragraph:{rich_text:[text(part)]}})),{object:"block",type:"heading_1",heading_1:{rich_text:[text(p.workpadHeading)]}}]; }
