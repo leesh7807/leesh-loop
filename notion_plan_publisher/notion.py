@@ -29,7 +29,7 @@ class NotionClient:
                     dsid = db.get("data_sources", [{}])[0].get("id")
                     if not dsid: raise PublicationError("incompatible schema: coordination surface has no data source")
                     schema = self.request("GET", f"/data_sources/{dsid}")
-                    try: self.check_schema(schema, policy)
+                    try: self.check_schema(schema, policy, dsid)
                     except PublicationError: self.complete_bootstrap(schema, dsid, policy)
                     return dsid
             if not page.get("has_more"): break
@@ -45,11 +45,16 @@ class NotionClient:
         self.request("PATCH", f"/data_sources/{dsid}", {"properties":{policy.blocked_by:{"relation":{"data_source_id":dsid, "single_property":{}}}}})
         return dsid
     @staticmethod
-    def check_schema(data, policy):
+    def check_schema(data, policy, dsid=None):
         expected={policy.identifier:"rich_text",policy.title:"title",policy.state:"select",policy.priority:"number",policy.labels:"multi_select",policy.blocked_by:"relation",policy.description:"rich_text",policy.source:"url"}
         props=data.get("properties", {})
         for name, kind in expected.items():
             if name not in props or props[name].get("type") != kind: raise PublicationError(f"incompatible schema: property {name!r} must be {kind}")
+        relation = props[policy.blocked_by].get("relation", {})
+        if dsid is not None and relation.get("data_source_id") != dsid:
+            raise PublicationError(f"incompatible schema: property {policy.blocked_by!r} must be a self-relation")
+        if dsid is not None and not ("single_property" in relation or "dual_property" in relation):
+            raise PublicationError(f"incompatible schema: property {policy.blocked_by!r} has an invalid relation shape")
     def complete_bootstrap(self, data, dsid, policy):
         props = data.get("properties", {})
         missing = {}
@@ -58,6 +63,8 @@ class NotionClient:
             if name not in props: missing[name] = definition
             elif props[name].get("type") != ("relation" if name == policy.blocked_by else next(iter(definition))):
                 raise PublicationError(f"incompatible schema: property {name!r} has the wrong type")
+            elif name == policy.blocked_by and (props[name].get("relation", {}).get("data_source_id") != dsid or not ("single_property" in props[name].get("relation", {}) or "dual_property" in props[name].get("relation", {}))):
+                raise PublicationError(f"incompatible schema: property {name!r} must be a self-relation")
         if missing: self.request("PATCH", f"/data_sources/{dsid}", {"properties": missing})
     def duplicate(self, ds, policy, identifier):
         data=self.request("POST",f"/data_sources/{ds}/query",{"filter":{"property":policy.identifier,"rich_text":{"equals":identifier}}})
