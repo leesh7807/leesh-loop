@@ -1,6 +1,42 @@
-import { readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { readFile } from "node:fs/promises";
 import { buildPageBlocks, buildTaskProperties, deriveIdentifier, loadConfig, PublicationError } from "./core.js";
 import { NotionClient } from "./notion.js";
-async function main(){const args=process.argv.slice(2);const get=(name:string)=>{const i=args.indexOf(name);return i>=0?args[i+1]:undefined};const planArg=get("--plan"),configArg=get("--config");if(!planArg||!configArg)throw new PublicationError("usage: notion-plan-publisher --plan PATH --config PATH");let token=process.env.NOTION_TOKEN;if(!token){try{const env=await readFile(resolve(process.cwd(),".env"),"utf8");token=env.split(/\r?\n/).find(x=>x.startsWith("NOTION_TOKEN="))?.split("=").slice(1).join("=").trim().replace(/^['"]|['"]$/g,"");}catch{}}if(!token)throw new PublicationError("missing NOTION_TOKEN");const planPath=resolve(planArg),plan=await readFile(planPath,"utf8"),{config,policy}=await loadConfig(configArg),client=new NotionClient(token),ds=await client.ensureSurface(config.parentId,policy),id=deriveIdentifier(plan,planPath),blocks=buildPageBlocks(policy,plan),existing=await client.findPublication(ds,policy,id);if(existing){if(existing.complete)throw new PublicationError(`duplicate publication: ${id} already exists`);try{await client.repairIncomplete(existing.pageId,blocks);}catch(error){if(error instanceof PublicationError)throw error;throw new PublicationError("provider/API failure while repairing incomplete Plan publication; retry is safe");}console.log(JSON.stringify({identifier:id,page_id:existing.pageId,url:existing.url}));return;}const title=plan.split(/\r?\n/).find(x=>x.startsWith("# "))?.slice(2).trim()??basename(planPath);const page=await client.createTask(ds,buildTaskProperties(policy,id,title,config.planSource));try{await client.appendBlocks(page.id,blocks);}catch(error){try{await client.archive(page.id);}catch{}if(error instanceof PublicationError)throw error;throw new PublicationError("provider/API failure while publishing Plan; incomplete task remains retryable");}console.log(JSON.stringify({identifier:id,page_id:page.id,url:page.url}));}
-main().catch(e=>{console.error(`publisher error: ${e instanceof Error?e.message:e}`);process.exitCode=2;});
+
+export async function publishPlan(planPath: string, configPath: string, client: NotionClient): Promise<{ identifier: string; page_id: string; url?: string }> {
+  const plan = await readFile(planPath, "utf8");
+  const { config, policy } = await loadConfig(configPath);
+  const dataSource = await client.ensureSurface(config.parentId, policy);
+  const identifier = deriveIdentifier(plan, planPath);
+  const blocks = buildPageBlocks(policy, plan);
+  const existing = await client.findPublication(dataSource, policy, identifier);
+
+  if (existing) {
+    if (existing.complete) throw new PublicationError(`duplicate publication: ${identifier} already exists`);
+    try { await client.repairIncomplete(existing.pageId, blocks); }
+    catch (error) { if (error instanceof PublicationError) throw error; throw new PublicationError("provider/API failure while repairing incomplete Plan publication; retry is safe"); }
+    return { identifier, page_id: existing.pageId, url: existing.url };
+  }
+
+  const title = plan.split(/\r?\n/).find((line) => line.startsWith("# "))?.slice(2).trim() ?? basename(planPath);
+  const page = await client.createTask(dataSource, buildTaskProperties(policy, identifier, title, config.planSource));
+  try { await client.appendBlocks(page.id, blocks); }
+  catch (error) { try { await client.archive(page.id); } catch { /* retry discovers the incomplete identifier */ } if (error instanceof PublicationError) throw error; throw new PublicationError("provider/API failure while publishing Plan; incomplete task remains retryable"); }
+  return { identifier, page_id: page.id, url: page.url };
+}
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  const get = (name: string) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined; };
+  const planArg = get("--plan"), configArg = get("--config");
+  if (!planArg || !configArg) throw new PublicationError("usage: notion-plan-publisher --plan PATH --config PATH");
+  let token = process.env.NOTION_TOKEN;
+  if (!token) { try { const env = await readFile(resolve(process.cwd(), ".env"), "utf8"); token = env.split(/\r?\n/).find((line) => line.startsWith("NOTION_TOKEN="))?.split("=").slice(1).join("=").trim().replace(/^['"]|['"]$/g, ""); } catch { /* environment variable is primary */ } }
+  if (!token) throw new PublicationError("missing NOTION_TOKEN");
+  console.log(JSON.stringify(await publishPlan(resolve(planArg), resolve(configArg), new NotionClient(token))));
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch((error) => { console.error(`publisher error: ${error instanceof Error ? error.message : error}`); process.exitCode = 2; });
+}
