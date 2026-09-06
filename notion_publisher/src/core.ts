@@ -1,0 +1,38 @@
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
+import { URL } from "node:url";
+
+export class PublicationError extends Error {}
+export type Policy = { surfaceName:string; identifier:string; title:string; state:string; priority:string; labels:string; blockedBy:string; description:string; source:string; planHeading:string; workpadHeading:string; defaultState:string; defaultPriority:number|null; defaultLabels:string[]; bootstrapStates:string[] };
+export const DEFAULT_POLICY: Policy = {surfaceName:"Symphony Tasks",identifier:"Identifier",title:"Title",state:"State",priority:"Priority",labels:"Labels",blockedBy:"Blocked By",description:"Description",source:"Plan Source",planHeading:"Plan",workpadHeading:"Workpad",defaultState:"Ready",defaultPriority:3,defaultLabels:[],bootstrapStates:["Backlog","Ready","In Progress","Blocked","Done"]};
+export const NOTION_RICH_TEXT_SAFE_LIMIT=1900;
+export const NOTION_TITLE_SAFE_LIMIT=1900;
+export const NOTION_APPEND_BATCH_SIZE=50;
+export const PUBLISHER_PENDING_STATE="Publisher Pending";
+const keys = new Set(["parent_url","state","priority","labels","plan_source","surface_name","property_names"]);
+const propKeys = new Set(["identifier","title","state","priority","labels","blocked_by","description","source"]);
+export const resolvePath = (value:string, base:string=process.cwd()) => isAbsolute(value) ? resolve(value) : resolve(base, value);
+export function notionId(value:string):string { let raw:string; try { const u=new URL(value); const host=u.hostname.toLowerCase().replace(/\.$/,""); const notionHost=host==="notion.so"||host.endsWith(".notion.so")||host==="app.notion.com"||host.endsWith(".notion.site"); if (!["http:","https:"].includes(u.protocol)||!notionHost) throw new Error(); raw=u.pathname.split("/").pop()??""; } catch { throw new PublicationError("invalid target URL: expected an HTTP(S) Notion page URL"); } const match=raw.match(/([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}|[\da-f]{32})$/i); if(!match) throw new PublicationError("invalid target URL: expected a Notion page URL ending in a 32-character page id"); const compact=match[1].replace(/-/g,""); return `${compact.slice(0,8)}-${compact.slice(8,12)}-${compact.slice(12,16)}-${compact.slice(16,20)}-${compact.slice(20)}`; }
+export async function loadConfig(file:string, base?:string, policy=DEFAULT_POLICY):Promise<{config:{parentId:string;parentUrl:string;planSource?:string};policy:Policy}> {
+ const path=resolvePath(file,base); let raw:unknown; try { raw=JSON.parse(await readFile(path,"utf8")); } catch { throw new PublicationError(`missing or invalid configuration: ${path}`); }
+ if(!raw || typeof raw!=="object" || Array.isArray(raw)) throw new PublicationError("configuration must be an object"); const r=raw as Record<string,unknown>;
+ const unknown=Object.keys(r).filter(k=>!keys.has(k)); if(unknown.length) throw new PublicationError(`unknown configuration key(s): ${unknown.join(", ")}`);
+ if(typeof r.parent_url!=="string") throw new PublicationError("missing configuration: parent_url"); const parentId=notionId(r.parent_url);
+ if("state" in r && (typeof r.state!=="string" || !r.state.trim())) throw new PublicationError("state must be a non-empty string");
+ if("priority" in r && r.priority!==null && (typeof r.priority!=="number" || !Number.isInteger(r.priority) || ![1,2,3,4,5].includes(r.priority))) throw new PublicationError("priority must be null or an integer from 1 to 5");
+ if("labels" in r && (!Array.isArray(r.labels) || !r.labels.every(x=>typeof x==="string"))) throw new PublicationError("labels must be a list of strings");
+ if("plan_source" in r){if(typeof r.plan_source!=="string")throw new PublicationError("plan_source must be an HTTP(S) URL");try{const source=new URL(r.plan_source);if(!["http:","https:"].includes(source.protocol)||!source.hostname)throw new Error();}catch{throw new PublicationError("plan_source must be an HTTP(S) URL");}}
+ if("surface_name" in r && (typeof r.surface_name!=="string" || !r.surface_name.trim())) throw new PublicationError("surface_name must be a non-empty string");
+ const overrides=r.property_names??{}; if(!overrides || typeof overrides!=="object" || Array.isArray(overrides) || Object.keys(overrides as object).some(k=>!propKeys.has(k)||typeof (overrides as Record<string,unknown>)[k]!=="string" || !(overrides as Record<string,string>)[k].trim())) throw new PublicationError("property_names must map supported names to non-empty strings");
+ const o=overrides as Record<string,string>; const p={...policy,defaultState:("state" in r?r.state:policy.defaultState) as string,defaultPriority:("priority" in r?r.priority:policy.defaultPriority) as number|null,defaultLabels:[...new Set(((r.labels as string[]|undefined)??policy.defaultLabels).map(x=>x.trim()).filter(Boolean))],surfaceName:(r.surface_name as string|undefined)??policy.surfaceName,identifier:o.identifier??policy.identifier,title:o.title??policy.title,state:o.state??policy.state,priority:o.priority??policy.priority,labels:o.labels??policy.labels,blockedBy:o.blocked_by??policy.blockedBy,description:o.description??policy.description,source:o.source??policy.source};
+ const names=[p.identifier,p.title,p.state,p.priority,p.labels,p.blockedBy,p.description,p.source].map(x=>x.trim()); if(names.some(x=>!x)) throw new PublicationError("property names must be non-empty"); if(new Set(names).size!==names.length) throw new PublicationError("property_names must resolve to unique property names");
+ return {config:{parentId,parentUrl:r.parent_url as string,planSource:r.plan_source as string|undefined},policy:p};
+}
+export const deriveIdentifier=(plan:string,_artifact:string)=>`PLAN-${createHash("sha256").update(plan,"utf8").digest("hex").slice(0,12).toUpperCase()}`;
+export function chunkText(text:string,limit=NOTION_RICH_TEXT_SAFE_LIMIT):string[] { if(limit<2) throw new PublicationError("rich-text chunk limit must be at least 2 UTF-16 code units"); const chunks:string[]=[];let chunk="";for(const point of text){if(chunk&&chunk.length+point.length>limit){chunks.push(chunk);chunk="";}chunk+=point;}if(chunk||!chunks.length)chunks.push(chunk);return chunks; }
+export function extractPlanTitle(plan:string,planPath:string):string { return plan.split(/\r?\n/).find((line)=>line.startsWith("# "))?.slice(2).trim()??resolve(planPath).split(/[\\/]/).pop()??"plan"; }
+export function validatePlanTitle(title:string):void { if(title.length>NOTION_TITLE_SAFE_LIMIT) throw new PublicationError(`plan title exceeds the ${NOTION_TITLE_SAFE_LIMIT}-character Notion title limit`); }
+const text=(content:string)=>({type:"text",text:{content}});
+export function buildTaskProperties(p:Policy,id:string,title:string,source?:string,state=p.defaultState):Record<string,unknown>{return {[p.identifier]:{rich_text:[text(id)]},[p.title]:{title:[text(title)]},[p.state]:{select:{name:state}},[p.priority]:{number:p.defaultPriority},[p.labels]:{multi_select:p.defaultLabels.map(name=>({name}))},[p.description]:{rich_text:[text("Completed plan artifact; see Plan section.")]},[p.source]:{url:source??null}};}
+export function buildPageBlocks(p:Policy,plan:string):Record<string,unknown>[] { return [{object:"block",type:"heading_1",heading_1:{rich_text:[text(p.planHeading)]}},...chunkText(plan).map(part=>({object:"block",type:"paragraph",paragraph:{rich_text:[text(part)]}})),{object:"block",type:"heading_1",heading_1:{rich_text:[text(p.workpadHeading)]}}]; }
