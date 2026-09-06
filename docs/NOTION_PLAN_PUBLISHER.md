@@ -23,5 +23,6 @@ outside the upstream issue body contract.
 
 The publisher uses `NOTION_TOKEN`. A local `.env` is read only from the process current directory
 as a convenience; artifact and configuration resolution never depends on that location. The
-supported target input is an HTTP(S) Notion page URL whose path contains the page id; callers are
-responsible for supplying a URL in that supported form.
+supported target input is an HTTP(S) Notion page URL whose host is `notion.so`, a subdomain of
+`notion.so`, `app.notion.com`, or a subdomain of `notion.site`, and whose path contains the page id.
+Callers are responsible for supplying a URL in that supported form.
