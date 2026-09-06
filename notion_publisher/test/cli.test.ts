@@ -10,11 +10,12 @@ import { publishPlan } from "../src/cli.js";
 class PublicationFake extends NotionClient {
   archived: string[] = [];
   repaired: string[] = [];
+  appendCalls = 0;
   constructor(private existing: { pageId: string; complete: boolean } | null = null) { super("token"); }
   override async ensureSurface() { return "ds"; }
   override async findPublication() { return this.existing ? { ...this.existing } : null; }
   override async createTask() { return { id: "page", url: "https://notion.so/page" }; }
-  override async appendBlocks() { throw new PublicationError("authentication failure: NOTION_TOKEN was rejected"); }
+  override async appendBlocks() { this.appendCalls += 1; if (this.appendCalls > 1) throw new PublicationError("authentication failure: NOTION_TOKEN was rejected"); }
   override async archive(pageId: string) { this.archived.push(pageId); }
   override async repairIncomplete(pageId: string) { this.repaired.push(pageId); }
 }
