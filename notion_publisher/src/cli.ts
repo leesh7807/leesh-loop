@@ -1,7 +1,7 @@
 import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFile } from "node:fs/promises";
-import { buildPageBlocks, buildTaskProperties, deriveIdentifier, extractPlanTitle, loadConfig, PublicationError, validatePlanTitle } from "./core.js";
+import { buildPageBlocks, buildTaskProperties, deriveIdentifier, extractPlanTitle, loadConfig, PublicationError, PUBLISHER_PENDING_STATE, validatePlanTitle } from "./core.js";
 import { NotionClient, pendingPublicationBlock, PENDING_PUBLICATION_MARKER } from "./notion.js";
 
 export async function publishPlan(planPath: string, configPath: string, client: NotionClient): Promise<{ identifier: string; page_id: string; url?: string }> {
@@ -21,7 +21,7 @@ export async function publishPlan(planPath: string, configPath: string, client: 
     return { identifier, page_id: existing.pageId, url: existing.url };
   }
 
-  const properties = buildTaskProperties(policy, identifier, title, config.planSource);
+  const properties = buildTaskProperties(policy, identifier, title, config.planSource, PUBLISHER_PENDING_STATE);
   properties[policy.description] = { rich_text: [{ type: "text", text: { content: PENDING_PUBLICATION_MARKER } }] };
   const page = await client.createTask(dataSource, properties);
   try { await client.appendBlocks(page.id, [pendingPublicationBlock()]); await client.appendBlocks(page.id, blocks); await client.finalizePublication(page.id, policy); }

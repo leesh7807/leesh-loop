@@ -1,4 +1,4 @@
-import { NOTION_APPEND_BATCH_SIZE, Policy, PublicationError } from "./core.js";
+import { NOTION_APPEND_BATCH_SIZE, Policy, PublicationError, PUBLISHER_PENDING_STATE } from "./core.js";
 
 export const PENDING_PUBLICATION_MARKER = "Publisher: publication pending";
 const blockText = (block: any) => {
@@ -83,7 +83,7 @@ export class NotionClient {
   }
 
   private baseSchema(policy: Policy): Record<string, unknown> {
-    return { [policy.identifier]: { rich_text: {} }, [policy.title]: { title: {} }, [policy.state]: { select: { options: policy.bootstrapStates.map((name) => ({ name })) } }, [policy.priority]: { number: {} }, [policy.labels]: { multi_select: {} }, [policy.description]: { rich_text: {} }, [policy.source]: { url: {} } };
+    return { [policy.identifier]: { rich_text: {} }, [policy.title]: { title: {} }, [policy.state]: { select: { options: [...new Set([...policy.bootstrapStates, PUBLISHER_PENDING_STATE])].map((name) => ({ name })) } }, [policy.priority]: { number: {} }, [policy.labels]: { multi_select: {} }, [policy.description]: { rich_text: {} }, [policy.source]: { url: {} } };
   }
   private async recoverPendingDataSource(databaseId: string, policy: Policy): Promise<string> {
     const created = await this.request("POST", "/data_sources", { parent: { database_id: databaseId }, title: [{ text: { content: policy.surfaceName } }], properties: this.baseSchema(policy) });
@@ -114,13 +114,33 @@ export class NotionClient {
   }
   async duplicate(dataSource: string, policy: Policy, identifier: string) { const result = await this.request("POST", `/data_sources/${dataSource}/query`, { filter: { property: policy.identifier, rich_text: { equals: identifier } } }); return (result.results ?? []).length > 0; }
   async listChildren(parentId: string): Promise<any[]> { const all: any[] = []; let cursor: string | undefined; do { const page = await this.request("GET", `/blocks/${parentId}/children?page_size=100${cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : ""}`); all.push(...(page.results ?? [])); cursor = page.has_more ? page.next_cursor : undefined; if (page.has_more && !cursor) throw new PublicationError("provider/API failure: paginated children response omitted next_cursor"); } while (cursor); return all; }
-  async findPublication(dataSource: string, policy: Policy, identifier: string): Promise<{ pageId: string; url?: string; complete: boolean } | null> { const result = await this.request("POST", `/data_sources/${dataSource}/query`, { filter: { property: policy.identifier, rich_text: { equals: identifier } } }); const row = result.results?.[0]; if (!row) return null; const children = await this.listChildren(row.id); const pending = isPendingPublication(children) || propertyText(row.properties?.[policy.description]) === PENDING_PUBLICATION_MARKER; return { pageId: row.id, url: row.url, complete: !pending }; }
+  async findPublication(dataSource: string, policy: Policy, identifier: string): Promise<{ pageId: string; url?: string; complete: boolean } | null> {
+    const rows: any[] = [];
+    let cursor: string | undefined;
+    do {
+      const result = await this.request("POST", `/data_sources/${dataSource}/query`, { page_size: 100, start_cursor: cursor, filter: { property: policy.identifier, rich_text: { equals: identifier } } });
+      rows.push(...(result.results ?? []));
+      if (result.has_more && !result.next_cursor) throw new PublicationError("provider/API failure: publication query response omitted next_cursor");
+      cursor = result.has_more ? result.next_cursor : undefined;
+    } while (cursor);
+    if (!rows.length) return null;
+    const matches = [];
+    for (const row of rows) {
+      const children = await this.listChildren(row.id);
+      const pending = isPendingPublication(children) || propertyText(row.properties?.[policy.description]) === PENDING_PUBLICATION_MARKER;
+      matches.push({ row, pending });
+    }
+    const completed = matches.find((match) => !match.pending);
+    if (completed) return { pageId: completed.row.id, url: completed.row.url, complete: true };
+    if (matches.length > 1) throw new PublicationError(`duplicate publication: multiple pending records exist for ${identifier}`);
+    return { pageId: matches[0].row.id, url: matches[0].row.url, complete: false };
+  }
   createTask(dataSource: string, properties: Record<string, unknown>) { return this.request("POST", "/pages", { parent: { type: "data_source_id", data_source_id: dataSource }, properties }); }
   async appendBlocks(pageId: string, blocks: Record<string, unknown>[]) { for (let i = 0; i < blocks.length; i += NOTION_APPEND_BATCH_SIZE) await this.request("PATCH", `/blocks/${pageId}/children`, { children: blocks.slice(i, i + NOTION_APPEND_BATCH_SIZE) }); }
   async repairIncomplete(pageId: string, blocks: Record<string, unknown>[], policy?: Policy) { const children = await this.listChildren(pageId); const pending = children.find(isPendingPublicationBlock); for (const block of children) if (block !== pending) await this.request("PATCH", `/blocks/${block.id}`, { archived: true }); await this.appendBlocks(pageId, blocks); if (pending) await this.request("PATCH", `/blocks/${pending.id}`, { archived: true }); if (policy) await this.finalizePublication(pageId, policy); }
   async finalizePublication(pageId: string, policy: Policy) {
     const children = await this.listChildren(pageId);
     for (const block of children) if (isPendingPublicationBlock(block)) await this.request("PATCH", `/blocks/${block.id}`, { archived: true });
-    await this.request("PATCH", `/pages/${pageId}`, { properties: { [policy.description]: { rich_text: [{ type: "text", text: { content: "Completed plan artifact; see Plan section." } }] } } });
+    await this.request("PATCH", `/pages/${pageId}`, { properties: { [policy.state]: { select: { name: policy.defaultState } }, [policy.description]: { rich_text: [{ type: "text", text: { content: "Completed plan artifact; see Plan section." } }] } } });
   }
 }

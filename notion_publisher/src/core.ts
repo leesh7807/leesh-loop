@@ -9,6 +9,7 @@ export const DEFAULT_POLICY: Policy = {surfaceName:"Symphony Tasks",identifier:"
 export const NOTION_RICH_TEXT_SAFE_LIMIT=1900;
 export const NOTION_TITLE_SAFE_LIMIT=1900;
 export const NOTION_APPEND_BATCH_SIZE=50;
+export const PUBLISHER_PENDING_STATE="Publisher Pending";
 const keys = new Set(["parent_url","state","priority","labels","plan_source","surface_name","property_names"]);
 const propKeys = new Set(["identifier","title","state","priority","labels","blocked_by","description","source"]);
 export const resolvePath = (value:string, base:string=process.cwd()) => isAbsolute(value) ? resolve(value) : resolve(base, value);
@@ -33,5 +34,5 @@ export function chunkText(text:string,limit=NOTION_RICH_TEXT_SAFE_LIMIT):string[
 export function extractPlanTitle(plan:string,planPath:string):string { return plan.split(/\r?\n/).find((line)=>line.startsWith("# "))?.slice(2).trim()??resolve(planPath).split(/[\\/]/).pop()??"plan"; }
 export function validatePlanTitle(title:string):void { if(title.length>NOTION_TITLE_SAFE_LIMIT) throw new PublicationError(`plan title exceeds the ${NOTION_TITLE_SAFE_LIMIT}-character Notion title limit`); }
 const text=(content:string)=>({type:"text",text:{content}});
-export function buildTaskProperties(p:Policy,id:string,title:string,source?:string):Record<string,unknown>{return {[p.identifier]:{rich_text:[text(id)]},[p.title]:{title:[text(title)]},[p.state]:{select:{name:p.defaultState}},[p.priority]:{number:p.defaultPriority},[p.labels]:{multi_select:p.defaultLabels.map(name=>({name}))},[p.description]:{rich_text:[text("Completed plan artifact; see Plan section.")]},[p.source]:{url:source??null}};}
+export function buildTaskProperties(p:Policy,id:string,title:string,source?:string,state=p.defaultState):Record<string,unknown>{return {[p.identifier]:{rich_text:[text(id)]},[p.title]:{title:[text(title)]},[p.state]:{select:{name:state}},[p.priority]:{number:p.defaultPriority},[p.labels]:{multi_select:p.defaultLabels.map(name=>({name}))},[p.description]:{rich_text:[text("Completed plan artifact; see Plan section.")]},[p.source]:{url:source??null}};}
 export function buildPageBlocks(p:Policy,plan:string):Record<string,unknown>[] { return [{object:"block",type:"heading_1",heading_1:{rich_text:[text(p.planHeading)]}},...chunkText(plan).map(part=>({object:"block",type:"paragraph",paragraph:{rich_text:[text(part)]}})),{object:"block",type:"heading_1",heading_1:{rich_text:[text(p.workpadHeading)]}}]; }

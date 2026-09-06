@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { PublicationError } from "../src/core.js";
 import { NotionClient, PENDING_PUBLICATION_MARKER } from "../src/notion.js";
+import { PUBLISHER_PENDING_STATE } from "../src/core.js";
 import { publishPlan } from "../src/cli.js";
 
 class PublicationFake extends NotionClient {
@@ -58,6 +59,7 @@ test("successful first publication removes its pending transaction state", async
   const client = new PublicationFake(null, 0);
   const result = await publishPlan(plan, config, client);
   assert.equal(result.page_id, "page");
+  assert.equal(client.createdProperties.State.select.name, PUBLISHER_PENDING_STATE);
   assert.deepEqual(client.finalized, ["page"]);
 });
 
