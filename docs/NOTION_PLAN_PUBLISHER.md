@@ -4,7 +4,7 @@ Run from any directory after installing the publisher package:
 
 ```sh
 cd notion_publisher && npm install && npm run build
-node notion_publisher/dist/src/cli.js --plan /path/to/plan.md --config /path/to/publisher-config.json
+node dist/src/cli.js --plan /path/to/plan.md --config /path/to/publisher-config.json
 ```
 
 The configuration path and plan path are explicit and are never resolved relative to the source
@@ -22,4 +22,6 @@ immutable completed artifact and `Workpad` is an empty local coordination surfac
 outside the upstream issue body contract.
 
 The publisher uses `NOTION_TOKEN`. A local `.env` is read only from the process current directory
-as a convenience; artifact and configuration resolution never depends on that location.
+as a convenience; artifact and configuration resolution never depends on that location. The
+supported target input is an HTTP(S) Notion page URL whose path contains the page id; callers are
+responsible for supplying a URL in that supported form.
