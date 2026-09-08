@@ -10,7 +10,7 @@ from a Notion-backed invocation record. Its public contract is `submit(prompt) -
 
 An **Invocation** is one independent execution with a generated UUID, one Notion page, a
 canonical `State`, optional `Error`, and a page-body Result. The **Invocation database** is the
-dedicated Notion mailbox created below the supplied parent page. **Acknowledgment** is an
+dedicated Notion mailbox identified by the user-supplied direct database URL. **Acknowledgment** is an
 observed Notion state of `in_progress`, `completed`, or `failed`; browser activity alone is not
 acknowledgment. The **Result** is the complete invocation page body, projected deterministically
 to Markdown only after `State = completed`.
@@ -21,15 +21,16 @@ to Markdown only after `State = completed`.
   `.env`. Configuration is always resolved from the repository root, never from `process.cwd()`.
 - The implementation is TypeScript/Node with Playwright behind a browser transport boundary.
   A dedicated persistent local browser profile is reused by `login`, `doctor`, and `submit`.
-- The CLI surface is exactly `init --notion-page`, `login`, `doctor`, and `submit`.
+- The CLI surface is exactly `init --notion-database`, `login`, `doctor`, and `submit`.
 - `NOTION_TOKEN` is the sole Notion credential name. Initialization writes only
   `NOTION_INVOCATION_DATABASE_ID`, preserving unrelated `.env` entries and never printing the
   token.
-- `init` creates the database only when no configured ID exists; a configured database is read
-  and schema-validated, never replaced or repaired. Required schema: title `ID`, select `State`
-  (`pending`, `in_progress`, `completed`, `failed`), rich-text `Error`, `Created At` created time,
-  and `Updated At` last-edited time. A successful first initialization returns the direct URL of
-  the newly created Invocation database, rather than the parent-page URL.
+- The user creates and supplies a new Invocation database through its direct Notion database URL.
+  `init` resolves that database, verifies integration access and the required schema, then persists
+  its ID only after successful verification. A configured database is read and schema-validated,
+  never replaced or repaired. `init` never creates a database or needs a parent page. Required
+  schema: title `ID`, select `State` (`pending`, `in_progress`, `completed`, `failed`), rich-text
+  `Error`, `Created At` created time, and `Updated At` last-edited time.
 - ChatGPT authentication is always manual. `submit` is non-interactive and preflights browser
   availability and authentication before it creates a pending invocation.
 - Each invocation has a fresh ChatGPT context. The wrapped caller prompt directs ChatGPT to mark
@@ -44,8 +45,8 @@ to Markdown only after `State = completed`.
 
 ## Verification
 
-Verify root `.env` resolution from supported directories; init creation, direct newly-created
-database-link output, readback, idempotency, and schema rejection; persistent manual
+Verify root `.env` resolution from supported directories; init direct-database resolution,
+readback, idempotency, and schema rejection; persistent manual
 authentication and doctor checks; and the complete
 `submit` flow from a pending invocation through Notion acknowledgment, terminal state, body read,
 and Markdown return. Unit tests use Notion, browser, and time boundaries to cover state handling,
@@ -56,7 +57,7 @@ then move this plan to `docs/plans/completed/`.
 ## Verification Tools
 
 - Automated TypeScript tests: deterministic state, timeout, serialization, and retry evidence.
-- Notion API: parent/database/page creation, schema and Result readback.
+- Notion API: supplied database/page read access, schema and Result readback.
 - Playwright: persistent profile, authentication detection, fresh context, user-turn inspection,
   and deterministic submission without assistant extraction.
 - CLI commands: intended public setup, diagnostics, and one-shot execution paths.
