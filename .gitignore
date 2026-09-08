@@ -10,6 +10,7 @@
 .chatgpt-shot-profile/
 .chatgpt-shot-runtime.json
 .chatgpt-shot-submit.lock/
+.chatgpt-shot-runtime.lock/
 
 # Temporary files
 tmp/

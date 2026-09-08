@@ -43,8 +43,13 @@ to Markdown only after `State = completed`.
 - A repository-runtime-scoped inter-process lock serializes only fresh-context navigation, prompt
   filling, and submission. Invocation creation and Notion polling remain concurrent; a stale lock
   is recovered only when its recorded owner process is no longer alive.
+- Runtime discovery and cold Chrome creation use a separate inter-process lock, preventing two
+  commands from attempting to own the same persistent profile during a cold start.
 - Each invocation owns a distinct browser tab in the retained runtime, so later commands cannot
   navigate or overwrite an earlier invocation's inspection surface.
+- Once Notion reports `in_progress`, `completed`, or `failed`, acknowledgment is proven and the
+  browser inspection path is disabled. A `not_submitted` retry starts one new bounded acknowledgment
+  window; the second failure is reported without a third submission.
 - The CLI surface is exactly `init`, `login`, `doctor`, and `submit`.
 - Root `.env` is the only Notion configuration surface: it requires `NOTION_TOKEN` and
   `NOTION_INVOCATION_DATABASE_URL`. The tool derives the database ID internally, never prints the
