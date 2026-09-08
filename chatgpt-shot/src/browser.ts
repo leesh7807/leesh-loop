@@ -1,14 +1,24 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright';
 import { fail } from './errors.js';
 
 export type Inspection = 'submitted' | 'not_submitted' | 'uncertain';
 export interface BrowserTransport { ensureAvailable(): Promise<void>; ensureAuthenticated(): Promise<void>; openFreshContext(): Promise<void>; fillPrompt(prompt: string): Promise<void>; submitPrompt(): Promise<void>; inspectSubmission(invocationId: string): Promise<Inspection>; close(): Promise<void>; }
+const profilePath = (root: string) => join(root, '.chatgpt-shot-profile');
+const systemChrome = () => [process.env.CHATGPT_SHOT_BROWSER, '/usr/bin/google-chrome-stable', '/usr/bin/google-chrome'].find((path): path is string => Boolean(path && existsSync(path)));
+
+/** Opens a user-controlled Chrome process; Playwright is deliberately not involved in credential entry. */
+export async function manualLogin(root: string): Promise<void> {
+  const executable = systemChrome(); if (!executable) return fail('BROWSER_UNAVAILABLE', 'A supported system Chrome executable is required for manual login.');
+  const profile = profilePath(root); mkdirSync(profile, { recursive: true, mode: 0o700 });
+  await new Promise<void>((resolve, reject) => { const child = spawn(executable, [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-background-mode', 'https://chatgpt.com/'], { stdio: 'ignore' }); child.once('error', error => reject(new Error(`Could not launch system Chrome: ${error.message}`))); child.once('close', () => resolve()); });
+}
 export class ChatGPTBrowser implements BrowserTransport {
   private context?: BrowserContext; private page?: Page; private submittedPrompt = '';
   constructor(private readonly root: string, private readonly headed = false) {}
-  private async start(): Promise<Page> { if (this.page) return this.page; try { const profile = join(this.root, '.chatgpt-shot-profile'); mkdirSync(profile, { recursive: true, mode: 0o700 }); this.context = await chromium.launchPersistentContext(profile, { headless: !this.headed }); this.page = this.context.pages()[0] ?? await this.context.newPage(); await this.page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 30_000 }); return this.page; } catch (e) { return fail('BROWSER_UNAVAILABLE', 'Could not open the persistent ChatGPT browser profile.', e); } }
+  private async start(): Promise<Page> { if (this.page) return this.page; try { const profile = profilePath(this.root); mkdirSync(profile, { recursive: true, mode: 0o700 }); this.context = await chromium.launchPersistentContext(profile, { headless: !this.headed, channel: systemChrome() ? 'chrome' : undefined }); this.page = this.context.pages()[0] ?? await this.context.newPage(); await this.page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 30_000 }); return this.page; } catch (e) { return fail('BROWSER_UNAVAILABLE', 'Could not open the persistent ChatGPT browser profile.', e); } }
   async ensureAvailable() { await this.start(); }
   async ensureAuthenticated() { const page = await this.start(); const composer = page.locator('textarea, [contenteditable="true"]').filter({ visible: true }).first(); if (!await composer.isVisible({ timeout: 8_000 }).catch(() => false)) fail('CHATGPT_AUTH_REQUIRED', 'ChatGPT authentication is required. Run `chatgpt-shot login`.'); }
   async openFreshContext() { const page = await this.start(); await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 30_000 }); await this.ensureAuthenticated(); }

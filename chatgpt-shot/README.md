@@ -21,7 +21,8 @@ node dist/cli.js submit 'your task'
 
 Create an empty Invocation database, share it with the configured Notion integration, then pass
 its direct link to `init`; the command configures and verifies the required schema. It never
-creates a database or modifies an already configured database. `login`
-intentionally waits for manual ChatGPT authentication. `submit` never automates login and
+creates a database or modifies an already configured database. `login` launches regular system
+Chrome with the dedicated profile and waits for the user to close it after manual ChatGPT
+authentication; credential entry is never Playwright-controlled. `submit` never automates login and
 returns `CHATGPT_AUTH_REQUIRED` before creating an invocation when the session is absent. Results
 come only from the completed Notion page body, never the ChatGPT assistant UI.
