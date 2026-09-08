@@ -8,6 +8,7 @@
 .env.*
 !.env.example
 .chatgpt-shot-profile/
+.chatgpt-shot-runtime.json
 
 # Temporary files
 tmp/

@@ -38,6 +38,8 @@ to Markdown only after `State = completed`.
   Later commands attach to the same runtime and persistent profile. Implementation must preserve a
   local-only attachment boundary, profile locking, serialized fill/submit interaction where needed,
   and clear recovery when the retained browser is closed.
+- The managed runtime publishes only a loopback CDP endpoint and local runtime-state file; CLI
+  process exit disconnects from that endpoint but does not close the retained Chrome process.
 - The CLI surface is exactly `init --notion-database`, `login`, `doctor`, and `submit`.
 - `NOTION_TOKEN` is the sole Notion credential name. Initialization writes only
   `NOTION_INVOCATION_DATABASE_ID`, preserving unrelated `.env` entries and never printing the
