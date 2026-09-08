@@ -45,8 +45,13 @@ to Markdown only after `State = completed`.
   is recovered only when its recorded owner process is no longer alive.
 - Runtime discovery and cold Chrome creation use a separate inter-process lock, preventing two
   commands from attempting to own the same persistent profile during a cold start.
+- A newly created lock is not stale merely because its owner file has not yet been written; only a
+  recorded dead owner, or an ownerless lock past a bounded initialization grace period, is eligible
+  for recovery.
 - Each invocation owns a distinct browser tab in the retained runtime, so later commands cannot
   navigate or overwrite an earlier invocation's inspection surface.
+- The invocation-owned tab is closed when local invocation handling reaches any terminal, timeout,
+  or cancellation exit; closing the CDP client connection still does not close retained Chrome.
 - Once Notion reports `in_progress`, `completed`, or `failed`, acknowledgment is proven and the
   browser inspection path is disabled. A `not_submitted` retry starts one new bounded acknowledgment
   window; the second failure is reported without a third submission.

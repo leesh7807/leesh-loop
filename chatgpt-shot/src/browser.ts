@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import net from 'node:net';
@@ -19,7 +19,11 @@ const writeRuntime = (root: string, value: Runtime) => writeFileSync(statePath(r
 class RuntimeLock {
   private readonly path: string; private readonly owner: string;
   constructor(root: string, name: 'runtime' | 'submit') { this.path = join(root, `.chatgpt-shot-${name}.lock`); this.owner = join(this.path, 'owner.json'); }
-  private stale() { try { const pid = JSON.parse(readFileSync(this.owner, 'utf8')).pid; process.kill(pid, 0); return false; } catch { try { unlinkSync(this.owner); rmdirSync(this.path); } catch {} return true; } }
+  private stale() {
+    try { const pid = JSON.parse(readFileSync(this.owner, 'utf8')).pid; try { process.kill(pid, 0); return false; } catch (error: any) { if (error.code !== 'ESRCH') return false; } }
+    catch { try { if (Date.now() - statSync(this.path).mtimeMs < 5_000) return false; } catch { return false; } }
+    try { unlinkSync(this.owner); rmdirSync(this.path); } catch {} return true;
+  }
   async run<T>(operation: () => Promise<T>): Promise<T> { for (let attempt = 0; attempt < 600; attempt++) { try { mkdirSync(this.path, { mode: 0o700 }); writeFileSync(this.owner, JSON.stringify({ pid: process.pid }), { mode: 0o600 }); try { return await operation(); } finally { try { unlinkSync(this.owner); rmdirSync(this.path); } catch {} } } catch (error: any) { if (error.code !== 'EEXIST') throw error; this.stale(); await wait(100); } } return fail('BROWSER_UNAVAILABLE', 'Timed out waiting for the shared browser submission lock.'); }
 }
 
@@ -41,7 +45,7 @@ async function connectRuntime(root: string): Promise<Browser> {
 }
 
 export class ChatGPTBrowser implements BrowserTransport {
-  private browser?: Browser; private context?: BrowserContext; private page?: Page; private submitted = false;
+  private browser?: Browser; private context?: BrowserContext; private page?: Page;
   constructor(private readonly root: string) {}
   private async start(): Promise<Page> { if (this.page) return this.page; try { this.browser = await connectRuntime(this.root); this.context = this.browser.contexts()[0] ?? await this.browser.newContext(); this.page = await this.context.newPage(); await this.page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 30_000 }); return this.page; } catch (e) { return fail('BROWSER_UNAVAILABLE', 'Could not attach to the managed local ChatGPT browser runtime.', e); } }
   async ensureAvailable() { await this.start(); }
@@ -50,8 +54,8 @@ export class ChatGPTBrowser implements BrowserTransport {
   async openFreshContext() { const page = await this.start(); await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 30_000 }); await this.ensureAuthenticated(); }
   private async composer(): Promise<any> { const page = await this.start(); const locator = page.locator('textarea, [contenteditable="true"]').filter({ visible: true }).first(); if (!await locator.isVisible({ timeout: 8_000 }).catch(() => false)) fail('USER_INTERVENTION_REQUIRED', 'ChatGPT composer is unavailable.'); return locator; }
   async fillPrompt(prompt: string) { await (await this.composer()).fill(prompt); }
-  async submitPrompt() { const page = await this.start(); const button = page.getByRole('button', { name: /send prompt|send message/i }).first(); if (await button.isVisible().catch(() => false)) await button.click(); else await (await this.composer()).press('Enter'); this.submitted = true; }
+  async submitPrompt() { const page = await this.start(); const button = page.getByRole('button', { name: /send prompt|send message/i }).first(); if (await button.isVisible().catch(() => false)) await button.click(); else await (await this.composer()).press('Enter'); }
   async inspectSubmission(invocationId: string): Promise<Inspection> { const page = await this.start(); const turns = page.getByText(invocationId, { exact: false }); const seen = await turns.count().catch(() => 0); const composer = await this.composer(); const value = await composer.inputValue().catch(async () => await composer.textContent() ?? ''); if (seen > 0 && !value?.includes(invocationId)) return 'submitted'; if (seen === 0 && value?.includes(invocationId)) return 'not_submitted'; return 'uncertain'; }
   // connectOverCDP marks Browser.close() as a connection close, leaving Chrome itself running.
-  async close() { if (!this.submitted) await this.page?.close().catch(() => {}); await this.browser?.close(); this.page = undefined; this.context = undefined; this.browser = undefined; }
+  async close() { await this.page?.close().catch(() => {}); await this.browser?.close(); this.page = undefined; this.context = undefined; this.browser = undefined; }
 }
