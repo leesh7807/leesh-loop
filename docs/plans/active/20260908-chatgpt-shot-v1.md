@@ -24,6 +24,8 @@ to Markdown only after `State = completed`.
   Manual authentication is performed in user-controlled system Chrome; deterministic Playwright
   use of that profile remains headed because the provider challenges headless Chrome before the
   authenticated composer is available.
+- Authentication preflight requires both an available composer and absence of visible ChatGPT
+  login controls; a guest composer is not an authenticated execution environment.
 - The CLI surface is exactly `init --notion-database`, `login`, `doctor`, and `submit`.
 - `NOTION_TOKEN` is the sole Notion credential name. Initialization writes only
   `NOTION_INVOCATION_DATABASE_ID`, preserving unrelated `.env` entries and never printing the

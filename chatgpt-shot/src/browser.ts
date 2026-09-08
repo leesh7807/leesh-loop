@@ -21,7 +21,14 @@ export class ChatGPTBrowser implements BrowserTransport {
   constructor(private readonly root: string, private readonly headed = true) {}
   private async start(): Promise<Page> { if (this.page) return this.page; try { const profile = profilePath(this.root); mkdirSync(profile, { recursive: true, mode: 0o700 }); this.context = await chromium.launchPersistentContext(profile, { headless: !this.headed, channel: systemChrome() ? 'chrome' : undefined }); this.page = this.context.pages()[0] ?? await this.context.newPage(); await this.page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 30_000 }); return this.page; } catch (e) { return fail('BROWSER_UNAVAILABLE', 'Could not open the persistent ChatGPT browser profile.', e); } }
   async ensureAvailable() { await this.start(); }
-  async ensureAuthenticated() { const page = await this.start(); const composer = page.locator('textarea, [contenteditable="true"]').filter({ visible: true }).first(); if (!await composer.isVisible({ timeout: 8_000 }).catch(() => false)) fail('CHATGPT_AUTH_REQUIRED', 'ChatGPT authentication is required. Run `chatgpt-shot login`.'); }
+  async ensureAuthenticated() {
+    const page = await this.start();
+    const loginLink = page.locator('a[href*="auth"], a[href*="login"]').filter({ visible: true }).first();
+    const loginButton = page.getByRole('button', { name: /log in|sign up/i }).filter({ visible: true }).first();
+    if (await loginLink.isVisible({ timeout: 1_000 }).catch(() => false) || await loginButton.isVisible({ timeout: 1_000 }).catch(() => false)) fail('CHATGPT_AUTH_REQUIRED', 'ChatGPT authentication is required. Run `chatgpt-shot login`.');
+    const composer = page.locator('textarea, [contenteditable="true"]').filter({ visible: true }).first();
+    if (!await composer.isVisible({ timeout: 8_000 }).catch(() => false)) fail('CHATGPT_AUTH_REQUIRED', 'ChatGPT authentication is required. Run `chatgpt-shot login`.');
+  }
   async openFreshContext() { const page = await this.start(); await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 30_000 }); await this.ensureAuthenticated(); }
   private async composer(): Promise<any> { const page = await this.start(); const locator = page.locator('textarea, [contenteditable="true"]').filter({ visible: true }).first(); if (!await locator.isVisible({ timeout: 8_000 }).catch(() => false)) fail('USER_INTERVENTION_REQUIRED', 'ChatGPT composer is unavailable.'); return locator; }
   async fillPrompt(prompt: string) { const input = await this.composer(); this.submittedPrompt = prompt; await input.fill(prompt); }
