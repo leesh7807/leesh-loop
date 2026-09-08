@@ -13,12 +13,15 @@ The CLI always finds the repository-root `.env`; it requires `NOTION_TOKEN`. Set
 and browser session with:
 
 ```sh
-node dist/cli.js init --notion-page 'https://www.notion.so/...'
+node dist/cli.js init --notion-database 'https://www.notion.so/...'
 node dist/cli.js login
 node dist/cli.js doctor
 node dist/cli.js submit 'your task'
 ```
 
-`login` intentionally waits for manual ChatGPT authentication. `submit` never automates login and
+Create an empty Invocation database, share it with the configured Notion integration, then pass
+its direct link to `init`; the command configures and verifies the required schema. It never
+creates a database or modifies an already configured database. `login`
+intentionally waits for manual ChatGPT authentication. `submit` never automates login and
 returns `CHATGPT_AUTH_REQUIRED` before creating an invocation when the session is absent. Results
 come only from the completed Notion page body, never the ChatGPT assistant UI.

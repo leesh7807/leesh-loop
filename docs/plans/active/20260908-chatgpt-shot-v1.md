@@ -25,12 +25,13 @@ to Markdown only after `State = completed`.
 - `NOTION_TOKEN` is the sole Notion credential name. Initialization writes only
   `NOTION_INVOCATION_DATABASE_ID`, preserving unrelated `.env` entries and never printing the
   token.
-- The user creates and supplies a new Invocation database through its direct Notion database URL.
-  `init` resolves that database, verifies integration access and the required schema, then persists
-  its ID only after successful verification. A configured database is read and schema-validated,
-  never replaced or repaired. `init` never creates a database or needs a parent page. Required
-  schema: title `ID`, select `State` (`pending`, `in_progress`, `completed`, `failed`), rich-text
-  `Error`, `Created At` created time, and `Updated At` last-edited time.
+- The user creates and supplies an empty Invocation database through its direct Notion database
+  URL. On first initialization, `init` confirms it has no invocation pages, configures the required
+  schema, reads it back, and persists its ID only after successful verification. A configured
+  database is read and schema-validated, never replaced or repaired. `init` never creates a
+  database or needs a parent page. Required schema: title `ID`, select `State` (`pending`,
+  `in_progress`, `completed`, `failed`), rich-text `Error`, `Created At` created time, and
+  `Updated At` last-edited time.
 - ChatGPT authentication is always manual. `submit` is non-interactive and preflights browser
   availability and authentication before it creates a pending invocation.
 - Each invocation has a fresh ChatGPT context. The wrapped caller prompt directs ChatGPT to mark
@@ -46,7 +47,7 @@ to Markdown only after `State = completed`.
 ## Verification
 
 Verify root `.env` resolution from supported directories; init direct-database resolution,
-readback, idempotency, and schema rejection; persistent manual
+empty-database schema setup, readback, idempotency, and configured-schema rejection; persistent manual
 authentication and doctor checks; and the complete
 `submit` flow from a pending invocation through Notion acknowledgment, terminal state, body read,
 and Markdown return. Unit tests use Notion, browser, and time boundaries to cover state handling,
