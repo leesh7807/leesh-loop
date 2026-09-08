@@ -59,7 +59,9 @@ to Markdown only after `State = completed`.
   when Notion has none, while preserving column headers and cell text.
 - Once Notion reports `in_progress`, `completed`, or `failed`, acknowledgment is proven and the
   browser inspection path is disabled. A `not_submitted` retry starts one new bounded acknowledgment
-  window; the second failure is reported without a third submission.
+  window; the second failure is reported without a third submission. A `submitted` inspection
+  likewise ends its expired acknowledgment window as `ACKNOWLEDGMENT_TIMEOUT`, never as a later
+  execution timeout.
 - The CLI surface is exactly `init`, `login`, `doctor`, and `submit`.
 - Root `.env` is the only Notion configuration surface: it requires `NOTION_TOKEN` and
   `CHATGPT_SHOT_NOTION_DATABASE_URL`. The tool derives the database ID internally, never prints the
