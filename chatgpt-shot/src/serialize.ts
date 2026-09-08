@@ -17,6 +17,16 @@ const tableRow = (block: any) => `| ${(block.table_row?.cells ?? [])
   .map((cell: any[]) => richText(cell).replace(/\|/g, '\\|'))
   .join(' | ')} |`;
 
+const fenceFor = (text: string) => {
+  const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  return '`'.repeat(Math.max(3, longest + 1));
+};
+
+const indent = (text: string, depth: number) => {
+  const prefix = '    '.repeat(depth);
+  return prefix ? text.split('\n').map((line) => `${prefix}${line}`).join('\n') : text;
+};
+
 const fallback = (block: any) => {
   const value = block[block.type] ?? {};
   const url = value.url ?? value.external?.url ?? value.file?.url;
@@ -44,7 +54,7 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
         // Markdown tables require a delimiter row even when Notion has no header.
         // The first Notion row becomes a synthetic Markdown header in that case.
         output.splice(1, 0, `| ${Array(columns).fill('---').join(' | ')} |`);
-        lines.push(...output);
+        lines.push(...output.map((line) => indent(line, depth)));
         continue;
       }
 
@@ -56,11 +66,11 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
         case 'heading_1': line = `# ${text}`; break;
         case 'heading_2': line = `## ${text}`; break;
         case 'heading_3': line = `### ${text}`; break;
-        case 'bulleted_list_item': line = `${'    '.repeat(depth)}- ${text}`; break;
-        case 'numbered_list_item': line = `${'    '.repeat(depth)}1. ${text}`; break;
-        case 'to_do': line = `${'    '.repeat(depth)}- [${block.to_do?.checked ? 'x' : ' '}] ${text}`; break;
+        case 'bulleted_list_item': line = `- ${text}`; break;
+        case 'numbered_list_item': line = `1. ${text}`; break;
+        case 'to_do': line = `- [${block.to_do?.checked ? 'x' : ' '}] ${text}`; break;
         case 'quote': line = `> ${text}`; break;
-        case 'code': line = `\`\`\`${block.code?.language ?? ''}\n${text}\n\`\`\``; break;
+        case 'code': { const fence = fenceFor(text); line = `${fence}${block.code?.language ?? ''}\n${text}\n${fence}`; break; }
         case 'divider': line = '---'; break;
         case 'table_row': line = tableRow(block); break;
         default:
@@ -70,7 +80,7 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
           }
       }
 
-      if (line !== undefined) lines.push(line);
+      if (line !== undefined) lines.push(indent(line, depth));
       if (block.has_children) {
         lines.push(...await render(await store.children(block.id), depth + 1));
       }
@@ -81,5 +91,5 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
   return (await render(await store.children(pageId)))
     .join('\n\n')
     .replace(/((?:^|\n)[ \t]*(?:[-*+] |\d+\. )[^\n]*)\n\n(?=[ \t]*(?:[-*+] |\d+\. ))/g, '$1\n')
-    .replace(/\n\n(?=\|)/g, '\n');
+    .replace(/\n\n(?=[ \t]*\|)/g, '\n');
 }

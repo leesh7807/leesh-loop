@@ -7,7 +7,7 @@ import { fail } from './errors.js';
 
 export type Inspection = 'submitted' | 'not_submitted' | 'uncertain';
 export interface BrowserTransport { ensureAvailable(): Promise<void>; ensureAuthenticated(): Promise<void>; runSubmission<T>(operation: () => Promise<T>): Promise<T>; openFreshContext(): Promise<void>; fillPrompt(prompt: string): Promise<void>; submitPrompt(): Promise<void>; inspectSubmission(invocationId: string): Promise<Inspection>; close(): Promise<void>; }
-type Runtime = { port: number; pid: number };
+export type Runtime = { port: number; pid: number };
 const profilePath = (root: string) => join(root, '.chatgpt-shot-profile');
 const statePath = (root: string) => join(root, '.chatgpt-shot-runtime.json');
 const systemChrome = () => [process.env.CHATGPT_SHOT_BROWSER, '/usr/bin/google-chrome-stable', '/usr/bin/google-chrome'].find((path): path is string => Boolean(path && existsSync(path)));
@@ -16,6 +16,14 @@ const port = async () => await new Promise<number>((resolve, reject) => { const 
 const endpoint = async (value: Runtime): Promise<string | undefined> => { try { const response = await fetch(`http://127.0.0.1:${value.port}/json/version`, { signal: AbortSignal.timeout(500) }); const body: any = await response.json(); return typeof body.webSocketDebuggerUrl === 'string' ? body.webSocketDebuggerUrl : undefined; } catch { return undefined; } };
 const readRuntime = (root: string): Runtime | undefined => { try { const value = JSON.parse(readFileSync(statePath(root), 'utf8')); return Number.isInteger(value.port) && Number.isInteger(value.pid) ? value : undefined; } catch { return undefined; } };
 const writeRuntime = (root: string, value: Runtime) => writeFileSync(statePath(root), JSON.stringify(value), { mode: 0o600 });
+export const matchesManagedRuntime = (root: string, runtime: Runtime, readCommandLine = (pid: number) => readFileSync(`/proc/${pid}/cmdline`, 'utf8')) => {
+  try {
+    process.kill(runtime.pid, 0);
+    const commandLine = readCommandLine(runtime.pid);
+    return commandLine.includes(`--user-data-dir=${profilePath(root)}`)
+      && commandLine.includes(`--remote-debugging-port=${runtime.port}`);
+  } catch { return false; }
+};
 export class RuntimeLock {
   private readonly path: string; private readonly owner: string;
   constructor(root: string, name: 'runtime' | 'submit') { this.path = join(root, `.chatgpt-shot-${name}.lock`); this.owner = join(this.path, 'owner.json'); }
@@ -40,8 +48,9 @@ export async function manualLogin(root: string): Promise<void> {
 }
 
 async function connectRuntime(root: string): Promise<Browser> {
-  return new RuntimeLock(root, 'runtime').run(async () => { const remembered = readRuntime(root); const active = remembered && await endpoint(remembered);
+  return new RuntimeLock(root, 'runtime').run(async () => { const remembered = readRuntime(root); const active = remembered && matchesManagedRuntime(root, remembered) && await endpoint(remembered);
   if (active) return chromium.connectOverCDP(active);
+  if (remembered) try { unlinkSync(statePath(root)); } catch {}
   const executable = systemChrome(); if (!executable) return fail('BROWSER_UNAVAILABLE', 'A supported system Chrome executable is unavailable.');
   const profile = profilePath(root); mkdirSync(profile, { recursive: true, mode: 0o700 }); const allocated = await port();
   const child = spawn(executable, [`--user-data-dir=${profile}`, `--remote-debugging-port=${allocated}`, '--remote-debugging-address=127.0.0.1', '--no-first-run', '--no-default-browser-check', '--disable-background-mode', '--start-minimized', 'https://chatgpt.com/'], { detached: true, stdio: 'ignore' }); child.unref();

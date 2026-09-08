@@ -58,7 +58,10 @@ to Markdown only after `State = completed`.
 - Result serialization preserves nested Markdown list hierarchy with four-space levels and
   deterministically projects Notion tables as valid Markdown, using a synthetic first-row header
   when Notion has none, while preserving column headers and cell text; Notion `to_do` state is
-  preserved as a Markdown task list.
+  preserved as a Markdown task list. Any child block of a list item is indented with that list
+  context, and code fences are longer than every backtick run in their Notion code content.
+- Persisted CDP runtime reuse requires the recorded live PID to own both the dedicated profile and
+  recorded debugging port; a stale or unrelated endpoint is discarded before Chrome is attached.
 - Once Notion reports `in_progress`, `completed`, or `failed`, acknowledgment is proven and the
   browser inspection path is disabled. A `not_submitted` retry starts one new bounded acknowledgment
   window; the second failure is reported without a third submission. A `submitted` inspection

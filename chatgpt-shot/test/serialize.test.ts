@@ -41,3 +41,15 @@ test('preserves Notion to-do completion state', async () => {
   ] } as any, 'page');
   assert.equal(result, '- [ ] deploy\n- [x] verify');
 });
+test('keeps non-list children within their list item', async () => {
+  const blocks = new Map<string, any[]>([
+    ['page', [{ id:'item',type:'bulleted_list_item',bulleted_list_item:{rich_text:[{plain_text:'Deploy'}]},has_children:true }]],
+    ['item', [{ id:'detail',type:'paragraph',paragraph:{rich_text:[{plain_text:'Only after tests pass'}]},has_children:false }]],
+  ]);
+  const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
+  assert.equal(result, '- Deploy\n\n    Only after tests pass');
+});
+test('uses a fence longer than backticks in Notion code', async () => {
+  const result = await markdownResult({ children: async () => [{ id:'code',type:'code',code:{language:'markdown',rich_text:[{plain_text:'before\n```\nafter'}]},has_children:false }] } as any, 'page');
+  assert.equal(result, '````markdown\nbefore\n```\nafter\n````');
+});
