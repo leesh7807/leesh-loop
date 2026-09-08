@@ -59,7 +59,8 @@ to Markdown only after `State = completed`.
   deterministically projects Notion tables as valid Markdown, using a synthetic first-row header
   when Notion has none, while preserving column headers and cell text; Notion `to_do` state is
   preserved as a Markdown task list. Any child block of a list item is indented with that list
-  context, and code fences are longer than every backtick run in their Notion code content.
+  context, code fences are longer than every backtick run in their Notion code content, and
+  equation expressions are projected as displayed LaTex Markdown.
 - Persisted CDP runtime reuse requires the recorded live PID to own both the dedicated profile and
   recorded debugging port; a stale or unrelated endpoint is discarded before Chrome is attached.
 - Once Notion reports `in_progress`, `completed`, or `failed`, acknowledgment is proven and the

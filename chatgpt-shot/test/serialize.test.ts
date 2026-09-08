@@ -53,3 +53,7 @@ test('uses a fence longer than backticks in Notion code', async () => {
   const result = await markdownResult({ children: async () => [{ id:'code',type:'code',code:{language:'markdown',rich_text:[{plain_text:'before\n```\nafter'}]},has_children:false }] } as any, 'page');
   assert.equal(result, '````markdown\nbefore\n```\nafter\n````');
 });
+test('preserves Notion equation expressions', async () => {
+  const result = await markdownResult({ children: async () => [{ id:'equation',type:'equation',equation:{expression:'e=mc^2'},has_children:false }] } as any, 'page');
+  assert.equal(result, '$$\ne=mc^2\n$$');
+});
