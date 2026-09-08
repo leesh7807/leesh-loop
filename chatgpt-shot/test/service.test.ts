@@ -11,10 +11,10 @@ class Store {
   async children() { return [{ type: 'paragraph', paragraph: { rich_text: [{ plain_text: 'Result' }] }, has_children: false }]; }
 }
 class Browser {
-  attempts = 0; inspections = 0; inspected: 'submitted'|'not_submitted'|'uncertain' = 'submitted'; authenticated = true;
+  attempts = 0; inspections = 0; closes = 0; inspected: 'submitted'|'not_submitted'|'uncertain' = 'submitted'; authenticated = true;
   async ensureAvailable() {} async ensureAuthenticated() { if (!this.authenticated) throw new ShotError('CHATGPT_AUTH_REQUIRED', 'required'); }
   async runSubmission<T>(operation: () => Promise<T>) { return operation(); }
-  async openFreshContext() {} async fillPrompt() {} async submitPrompt() { this.attempts++; } async inspectSubmission() { this.inspections++; return this.inspected; } async close() {}
+  async openFreshContext() {} async fillPrompt() {} async submitPrompt() { this.attempts++; } async inspectSubmission() { this.inspections++; return this.inspected; } async close() { this.closes++; }
 }
 const options = { acknowledgementMs: 0, executionMs: 25, pollMs: 1 };
 test('completed invocation reads only completed page body', async () => { const result = await submit(new Store([{ state: 'completed', error: '' }]) as any, 'db', new Browser() as any, 'task', options); assert.equal(result, 'Result'); });
@@ -23,5 +23,5 @@ test('failed invocation reports Error and blank Error violates protocol', async 
 test('submitted and uncertain inspections never retry', async () => { for (const result of ['submitted', 'uncertain'] as const) { const browser = new Browser(); browser.inspected = result; await assert.rejects(() => submit(new Store([{ state: 'pending', error: '' }]) as any, 'db', browser as any, 'task', options)); assert.equal(browser.attempts, 1); } });
 test('not submitted is retried once and the second attempt gets its own acknowledgment check', async () => { const browser = new Browser(); browser.inspected = 'not_submitted'; await assert.rejects(() => submit(new Store([{ state: 'pending', error: '' }]) as any, 'db', browser as any, 'task', options), (e: any) => e.code === 'ACKNOWLEDGMENT_TIMEOUT'); assert.equal(browser.attempts, 2); assert.equal(browser.inspections, 2); });
 test('acknowledged in-progress invocation never enters browser inspection', async () => { const browser = new Browser(); await assert.rejects(() => submit(new Store([{ state: 'in_progress', error: '' }]) as any, 'db', browser as any, 'task', options), (e: any) => e.code === 'EXECUTION_TIMEOUT'); assert.equal(browser.inspections, 0); });
-test('authentication fails before pending invocation creation', async () => { const browser = new Browser(); browser.authenticated = false; const store = new Store([]); await assert.rejects(() => submit(store as any, 'db', browser as any, 'task', options), (e: any) => e.code === 'CHATGPT_AUTH_REQUIRED'); assert.equal(store.created, 0); });
+test('authentication fails before pending invocation creation and releases its browser tab', async () => { const browser = new Browser(); browser.authenticated = false; const store = new Store([]); await assert.rejects(() => submit(store as any, 'db', browser as any, 'task', options), (e: any) => e.code === 'CHATGPT_AUTH_REQUIRED'); assert.equal(store.created, 0); assert.equal(browser.closes, 1); });
 test('wrapped prompt fixes Notion delivery protocol around caller task', () => { const prompt = wrapPrompt('caller task', 'inv-1', 'page-1'); assert.match(prompt, /caller task/); assert.match(prompt, /State/); assert.match(prompt, /Error/); assert.match(prompt, /inv-1/); });

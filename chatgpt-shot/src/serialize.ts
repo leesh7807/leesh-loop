@@ -8,5 +8,5 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
     case 'code': line = `\`\`\`${b.code?.language ?? ''}\n${t}\n\`\`\``; break; case 'divider': line = '---'; break;
     default: if (t) line = t; else if (!b.has_children) fail('RESULT_SERIALIZATION_FAILED', `Cannot serialize meaningful ${b.type} block.`);
   } if (line !== undefined) lines.push(line); if (b.has_children) lines.push(...await render(await store.children(b.id), depth + 1)); } return lines; }
-  return (await render(await store.children(pageId))).join('\n\n');
+  return (await render(await store.children(pageId))).join('\n\n').replace(/((?:^|\n)[ \t]*(?:[-*+] |\d+\. )[^\n]*)\n\n(?=[ \t]*(?:[-*+] |\d+\. ))/g, '$1\n');
 }
