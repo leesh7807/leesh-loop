@@ -27,8 +27,7 @@ authentication; credential entry is never automation-controlled. `submit` never 
 returns `CHATGPT_AUTH_REQUIRED` before creating an invocation when the session is absent. Results
 come only from the completed Notion page body, never the ChatGPT assistant UI.
 
-To reuse a manually authenticated ChatGPT session across commands in this runtime, first sign in
-to the same dedicated Chrome browser profile, then sign in to ChatGPT in that profile. The observed
-working hypothesis is that a guest browser profile does not reliably retain the ChatGPT session
-across separate launches. This does not mean that a Chrome or Google browser-profile sign-in
-authenticates ChatGPT itself.
+To reuse a manually authenticated ChatGPT session across commands in this runtime, the dedicated
+Chrome browser profile and ChatGPT must both be signed in. The observed working hypothesis is that
+a guest browser profile does not reliably retain the ChatGPT session across separate launches.
+This does not mean that a Chrome or Google browser-profile sign-in authenticates ChatGPT itself.

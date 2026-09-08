@@ -25,11 +25,10 @@ to Markdown only after `State = completed`.
   is never automated. Deterministic Playwright execution reuses its persistent profile and system
   credential store, remains headed, and does not use a headless runtime because the provider
   challenges it before the authenticated composer is available.
-- To reuse a manually authenticated ChatGPT session across commands, the user must first sign in
-  to the same dedicated Chrome browser profile, then sign in to ChatGPT in that profile. The
-  observed working hypothesis is that a guest browser profile does not reliably retain the
-  ChatGPT session across separate launches; browser-profile sign-in does not authenticate
-  ChatGPT itself.
+- To reuse a manually authenticated ChatGPT session across commands, the dedicated Chrome browser
+  profile and ChatGPT must both be signed in. The observed working hypothesis is that a guest
+  browser profile does not reliably retain the ChatGPT session across separate launches;
+  browser-profile sign-in does not authenticate ChatGPT itself.
 - Authentication preflight requires both an available composer and absence of visible ChatGPT
   login controls; a guest composer is not an authenticated execution environment.
 - The CLI surface is exactly `init --notion-database`, `login`, `doctor`, and `submit`.
