@@ -67,6 +67,8 @@ to Markdown only after `State = completed`.
   window; the second failure is reported without a third submission. A `submitted` inspection
   likewise ends its expired acknowledgment window as `ACKNOWLEDGMENT_TIMEOUT`, never as a later
   execution timeout.
+- The execution timeout begins only when Notion first acknowledges an invocation; time spent in
+  the independent pending/acknowledgment window never consumes the task execution budget.
 - The CLI surface is exactly `init`, `login`, `doctor`, and `submit`.
 - Root `.env` is the only Notion configuration surface: it requires `NOTION_TOKEN` and
   `CHATGPT_SHOT_NOTION_DATABASE_URL`. The tool derives the database ID internally, never prints the

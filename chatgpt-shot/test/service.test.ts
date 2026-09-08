@@ -10,6 +10,9 @@ class Store {
   async readInvocation(pageId: string, id: string) { return this.states[Math.min(this.reads++, this.states.length - 1)] ?? { pageId, id, state: 'pending', error: '' }; }
   async children() { return [{ type: 'paragraph', paragraph: { rich_text: [{ plain_text: 'Result' }] }, has_children: false }]; }
 }
+class DelayedStore extends Store {
+  async readInvocation(pageId: string, id: string) { await new Promise(resolve => setTimeout(resolve, 15)); return super.readInvocation(pageId, id); }
+}
 class Browser {
   attempts = 0; inspections = 0; closes = 0; inspected: 'submitted'|'not_submitted'|'uncertain' = 'submitted'; authenticated = true;
   async ensureAvailable() {} async ensureAuthenticated() { if (!this.authenticated) throw new ShotError('CHATGPT_AUTH_REQUIRED', 'required'); }
@@ -19,6 +22,7 @@ class Browser {
 const options = { acknowledgementMs: 0, executionMs: 25, pollMs: 1 };
 test('completed invocation reads only completed page body', async () => { const result = await submit(new Store([{ state: 'completed', error: '' }]) as any, 'db', new Browser() as any, 'task', options); assert.equal(result, 'Result'); });
 test('pending then in_progress never consumes Result before completed', async () => { const store = new Store([{ state: 'pending', error: '' }, { state: 'in_progress', error: '' }, { state: 'completed', error: '' }]); const result = await submit(store as any, 'db', new Browser() as any, 'task', { ...options, acknowledgementMs: 20 }); assert.equal(result, 'Result'); assert.equal(store.reads, 3); });
+test('acknowledgment starts a full execution timeout window', async () => { const store = new DelayedStore([{ state: 'pending', error: '' }, { state: 'in_progress', error: '' }, { state: 'completed', error: '' }]); const result = await submit(store as any, 'db', new Browser() as any, 'task', { acknowledgementMs: 100, executionMs: 20, pollMs: 1 }); assert.equal(result, 'Result'); });
 test('failed invocation reports Error and blank Error violates protocol', async () => { await assert.rejects(() => submit(new Store([{ state: 'failed', error: 'work failed' }]) as any, 'db', new Browser() as any, 'task', options), (e: any) => e.code === 'INVOCATION_FAILED'); await assert.rejects(() => submit(new Store([{ state: 'failed', error: '' }]) as any, 'db', new Browser() as any, 'task', options), (e: any) => e.code === 'INVALID_INVOCATION_STATE'); });
 test('submitted inspection ends the expired acknowledgment window without a retry', async () => { const browser = new Browser(); browser.inspected = 'submitted'; await assert.rejects(() => submit(new Store([{ state: 'pending', error: '' }]) as any, 'db', browser as any, 'task', options), (e: any) => e.code === 'ACKNOWLEDGMENT_TIMEOUT'); assert.equal(browser.attempts, 1); assert.equal(browser.inspections, 1); });
 test('uncertain inspection never retries', async () => { const browser = new Browser(); browser.inspected = 'uncertain'; await assert.rejects(() => submit(new Store([{ state: 'pending', error: '' }]) as any, 'db', browser as any, 'task', options), (e: any) => e.code === 'SUBMISSION_UNCERTAIN'); assert.equal(browser.attempts, 1); });
