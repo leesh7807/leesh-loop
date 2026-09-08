@@ -45,15 +45,15 @@ to Markdown only after `State = completed`.
   is recovered only when its recorded owner process is no longer alive.
 - Each invocation owns a distinct browser tab in the retained runtime, so later commands cannot
   navigate or overwrite an earlier invocation's inspection surface.
-- The CLI surface is exactly `init --notion-database`, `login`, `doctor`, and `submit`.
-- `NOTION_TOKEN` is the sole Notion credential name. Initialization writes only
-  `NOTION_INVOCATION_DATABASE_ID`, preserving unrelated `.env` entries and never printing the
-  token.
-- The user creates and supplies an empty Invocation database through its direct Notion database
-  URL. On first initialization, `init` confirms it has no invocation pages, configures the required
-  schema, reads it back, and persists its ID only after successful verification. A configured
-  database is read and schema-validated, never replaced or repaired. `init` never creates a
-  database or needs a parent page. Required schema: title `ID`, select `State` (`pending`,
+- The CLI surface is exactly `init`, `login`, `doctor`, and `submit`.
+- Root `.env` is the only Notion configuration surface: it requires `NOTION_TOKEN` and
+  `NOTION_INVOCATION_DATABASE_URL`. The tool derives the database ID internally, never prints the
+  token, and does not mutate `.env`.
+- The user creates and supplies an empty Invocation database through
+  `NOTION_INVOCATION_DATABASE_URL`. On first initialization, `init` confirms it has no invocation
+  pages, configures the required schema, and reads it back. A configured database is read and
+  schema-validated, never replaced or repaired. `init` never creates a database or needs a parent
+  page. Required schema: title `ID`, select `State` (`pending`,
   `in_progress`, `completed`, `failed`), rich-text `Error`, `Created At` created time, and
   `Updated At` last-edited time.
 - ChatGPT authentication is always manual. `submit` is non-interactive and preflights browser

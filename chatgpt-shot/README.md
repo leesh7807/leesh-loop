@@ -9,18 +9,19 @@ npm install
 npm run build
 ```
 
-The CLI always finds the repository-root `.env`; it requires `NOTION_TOKEN`. Set up the mailbox
+The CLI always finds the repository-root `.env`; it requires `NOTION_TOKEN` and
+`NOTION_INVOCATION_DATABASE_URL`. Set up the mailbox
 and browser session with:
 
 ```sh
-node dist/cli.js init --notion-database 'https://www.notion.so/...'
+node dist/cli.js init
 node dist/cli.js login
 node dist/cli.js doctor
 node dist/cli.js submit 'your task'
 ```
 
-Create an empty Invocation database, share it with the configured Notion integration, then pass
-its direct link to `init`; the command configures and verifies the required schema. It never
+Create an empty Invocation database, share it with the configured Notion integration, and put its
+direct link in `NOTION_INVOCATION_DATABASE_URL`; `init` configures and verifies the required schema. It never
 creates a database or modifies an already configured database. `login` launches normal system
 Chrome with the dedicated profile and waits for the user to close it after manual ChatGPT
 authentication; credential entry is never automation-controlled. `submit` never automates login and
