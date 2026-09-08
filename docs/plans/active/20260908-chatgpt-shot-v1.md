@@ -21,6 +21,9 @@ to Markdown only after `State = completed`.
   `.env`. Configuration is always resolved from the repository root, never from `process.cwd()`.
 - The implementation is TypeScript/Node with Playwright behind a browser transport boundary.
   A dedicated persistent local browser profile is reused by `login`, `doctor`, and `submit`.
+  Manual authentication is performed in user-controlled system Chrome; deterministic Playwright
+  use of that profile remains headed because the provider challenges headless Chrome before the
+  authenticated composer is available.
 - The CLI surface is exactly `init --notion-database`, `login`, `doctor`, and `submit`.
 - `NOTION_TOKEN` is the sole Notion credential name. Initialization writes only
   `NOTION_INVOCATION_DATABASE_ID`, preserving unrelated `.env` entries and never printing the

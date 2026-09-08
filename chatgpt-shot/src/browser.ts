@@ -17,7 +17,8 @@ export async function manualLogin(root: string): Promise<void> {
 }
 export class ChatGPTBrowser implements BrowserTransport {
   private context?: BrowserContext; private page?: Page; private submittedPrompt = '';
-  constructor(private readonly root: string, private readonly headed = false) {}
+  // Headful Chrome preserves the user-validated session and avoids the provider's headless challenge.
+  constructor(private readonly root: string, private readonly headed = true) {}
   private async start(): Promise<Page> { if (this.page) return this.page; try { const profile = profilePath(this.root); mkdirSync(profile, { recursive: true, mode: 0o700 }); this.context = await chromium.launchPersistentContext(profile, { headless: !this.headed, channel: systemChrome() ? 'chrome' : undefined }); this.page = this.context.pages()[0] ?? await this.context.newPage(); await this.page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 30_000 }); return this.page; } catch (e) { return fail('BROWSER_UNAVAILABLE', 'Could not open the persistent ChatGPT browser profile.', e); } }
   async ensureAvailable() { await this.start(); }
   async ensureAuthenticated() { const page = await this.start(); const composer = page.locator('textarea, [contenteditable="true"]').filter({ visible: true }).first(); if (!await composer.isVisible({ timeout: 8_000 }).catch(() => false)) fail('CHATGPT_AUTH_REQUIRED', 'ChatGPT authentication is required. Run `chatgpt-shot login`.'); }
