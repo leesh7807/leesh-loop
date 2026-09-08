@@ -1,16 +1,16 @@
 import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFile } from "node:fs/promises";
-import { buildPageBlocks, buildTaskProperties, deriveIdentifier, extractPlanTitle, loadConfig, PublicationError, PUBLISHER_PENDING_STATE, resolvePublishTarget, validatePlanTitle } from "./core.js";
+import { buildPageBlocks, buildTaskProperties, deriveIdentifier, extractPlanTitle, loadConfig, PublicationError, PUBLISHER_PENDING_STATE, resolvePublishDatabase, validatePlanTitle } from "./core.js";
 import { NotionClient, pendingPublicationBlock, PENDING_PUBLICATION_MARKER } from "./notion.js";
 
-export async function publishPlan(planPath: string, configPath: string, targetUrl: string | undefined, client: NotionClient): Promise<{ identifier: string; page_id: string; url?: string }> {
+export async function publishPlan(planPath: string, configPath: string, databaseUrl: string | undefined, client: NotionClient, legacyTargetUrl?: string): Promise<{ identifier: string; page_id: string; url?: string }> {
   const plan = await readFile(planPath, "utf8");
   const { config, policy } = await loadConfig(configPath);
-  const target = resolvePublishTarget(targetUrl);
+  const database = resolvePublishDatabase(databaseUrl, legacyTargetUrl);
   const title = extractPlanTitle(plan, planPath);
   validatePlanTitle(title);
-  const dataSource = await client.ensureSurface(target.parentId, policy);
+  const dataSource = await client.ensureDatabase(database.databaseId, policy);
   const identifier = deriveIdentifier(plan, planPath);
   const blocks = buildPageBlocks(policy, plan);
   const existing = await client.findPublication(dataSource, policy, identifier);
@@ -51,9 +51,10 @@ async function main(): Promise<void> {
   if (!planArg || !configArg) throw new PublicationError("usage: notion-plan-publisher --plan PATH --config PATH");
   const local = await localEnvironment();
   const token = environmentValue("NOTION_TOKEN", local);
-  const targetUrl = environmentValue("NOTION_PUBLISH_TARGET_URL", local);
+  const databaseUrl = environmentValue("NOTION_PUBLISH_DATABASE_URL", local);
+  const legacyTargetUrl = environmentValue("NOTION_PUBLISH_TARGET_URL", local);
   if (!token) throw new PublicationError("missing NOTION_TOKEN");
-  console.log(JSON.stringify(await publishPlan(resolve(planArg), resolve(configArg), targetUrl, new NotionClient(token))));
+  console.log(JSON.stringify(await publishPlan(resolve(planArg), resolve(configArg), databaseUrl, new NotionClient(token), legacyTargetUrl)));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

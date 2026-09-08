@@ -1,6 +1,5 @@
 {
   "state": "Ready",
   "priority": 3,
-  "labels": ["symphony"],
-  "surface_name": "Symphony Tasks"
+  "labels": ["symphony"]
 }

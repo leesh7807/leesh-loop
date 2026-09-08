@@ -4,19 +4,22 @@ import { isAbsolute, resolve } from "node:path";
 import { URL } from "node:url";
 
 export class PublicationError extends Error {}
-export type Policy = { surfaceName:string; identifier:string; title:string; state:string; priority:string; labels:string; blockedBy:string; description:string; source:string; planHeading:string; workpadHeading:string; defaultState:string; defaultPriority:number|null; defaultLabels:string[]; bootstrapStates:string[] };
-export const DEFAULT_POLICY: Policy = {surfaceName:"Symphony Tasks",identifier:"Identifier",title:"Title",state:"State",priority:"Priority",labels:"Labels",blockedBy:"Blocked By",description:"Description",source:"Plan Source",planHeading:"Plan",workpadHeading:"Workpad",defaultState:"Ready",defaultPriority:3,defaultLabels:[],bootstrapStates:["Backlog","Ready","In Progress","Blocked","Done"]};
+export type Policy = { identifier:string; title:string; state:string; priority:string; labels:string; blockedBy:string; description:string; source:string; planHeading:string; workpadHeading:string; defaultState:string; defaultPriority:number|null; defaultLabels:string[]; bootstrapStates:string[] };
+export const DEFAULT_POLICY: Policy = {identifier:"Identifier",title:"Title",state:"State",priority:"Priority",labels:"Labels",blockedBy:"Blocked By",description:"Description",source:"Plan Source",planHeading:"Plan",workpadHeading:"Workpad",defaultState:"Ready",defaultPriority:3,defaultLabels:[],bootstrapStates:["Backlog","Ready","In Progress","Blocked","Done"]};
 export const NOTION_RICH_TEXT_SAFE_LIMIT=1900;
 export const NOTION_TITLE_SAFE_LIMIT=1900;
 export const NOTION_APPEND_BATCH_SIZE=50;
 export const PUBLISHER_PENDING_STATE="Publisher Pending";
-const keys = new Set(["state","priority","labels","plan_source","surface_name","property_names"]);
+const keys = new Set(["state","priority","labels","plan_source","property_names"]);
 const propKeys = new Set(["identifier","title","state","priority","labels","blocked_by","description","source"]);
 export const resolvePath = (value:string, base:string=process.cwd()) => isAbsolute(value) ? resolve(value) : resolve(base, value);
-export function notionId(value:string):string { let raw:string; try { const u=new URL(value); const host=u.hostname.toLowerCase().replace(/\.$/,""); const notionHost=host==="notion.so"||host.endsWith(".notion.so")||host==="app.notion.com"||host.endsWith(".notion.site"); if (!["http:","https:"].includes(u.protocol)||!notionHost) throw new Error(); raw=u.pathname.split("/").pop()??""; } catch { throw new PublicationError("invalid target URL: expected an HTTP(S) Notion page URL"); } const match=raw.match(/([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}|[\da-f]{32})$/i); if(!match) throw new PublicationError("invalid target URL: expected a Notion page URL ending in a 32-character page id"); const compact=match[1].replace(/-/g,""); return `${compact.slice(0,8)}-${compact.slice(8,12)}-${compact.slice(12,16)}-${compact.slice(16,20)}-${compact.slice(20)}`; }
-export function resolvePublishTarget(targetUrl:string|undefined):{parentId:string;parentUrl:string} {
- if(!targetUrl?.trim()) throw new PublicationError("missing NOTION_PUBLISH_TARGET_URL");
- return {parentId:notionId(targetUrl),parentUrl:targetUrl};
+export function notionId(value:string):string { let raw:string; try { const u=new URL(value); const host=u.hostname.toLowerCase().replace(/\.$/,""); const notionHost=host==="notion.so"||host.endsWith(".notion.so")||host==="app.notion.com"||host.endsWith(".notion.site"); if (!["http:","https:"].includes(u.protocol)||!notionHost) throw new Error(); raw=u.pathname.split("/").pop()??""; } catch { throw new PublicationError("invalid database URL: expected an HTTP(S) Notion database URL"); } const match=raw.match(/([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}|[\da-f]{32})$/i); if(!match) throw new PublicationError("invalid database URL: expected a Notion database URL ending in a 32-character database id"); const compact=match[1].replace(/-/g,""); return `${compact.slice(0,8)}-${compact.slice(8,12)}-${compact.slice(12,16)}-${compact.slice(16,20)}-${compact.slice(20)}`; }
+export function resolvePublishDatabase(databaseUrl:string|undefined, legacyTargetUrl?:string):{databaseId:string;databaseUrl:string} {
+ if(!databaseUrl?.trim()) {
+  if(legacyTargetUrl?.trim()) throw new PublicationError("NOTION_PUBLISH_TARGET_URL is no longer supported; migrate to NOTION_PUBLISH_DATABASE_URL");
+  throw new PublicationError("missing NOTION_PUBLISH_DATABASE_URL");
+ }
+ return {databaseId:notionId(databaseUrl),databaseUrl};
 }
 export async function loadConfig(file:string, base?:string, policy=DEFAULT_POLICY):Promise<{config:{planSource?:string};policy:Policy}> {
  const path=resolvePath(file,base); let raw:unknown; try { raw=JSON.parse(await readFile(path,"utf8")); } catch { throw new PublicationError(`missing or invalid configuration: ${path}`); }
@@ -26,9 +29,8 @@ export async function loadConfig(file:string, base?:string, policy=DEFAULT_POLIC
  if("priority" in r && r.priority!==null && (typeof r.priority!=="number" || !Number.isInteger(r.priority) || ![1,2,3,4,5].includes(r.priority))) throw new PublicationError("priority must be null or an integer from 1 to 5");
  if("labels" in r && (!Array.isArray(r.labels) || !r.labels.every(x=>typeof x==="string"))) throw new PublicationError("labels must be a list of strings");
  if("plan_source" in r){if(typeof r.plan_source!=="string")throw new PublicationError("plan_source must be an HTTP(S) URL");try{const source=new URL(r.plan_source);if(!["http:","https:"].includes(source.protocol)||!source.hostname)throw new Error();}catch{throw new PublicationError("plan_source must be an HTTP(S) URL");}}
- if("surface_name" in r && (typeof r.surface_name!=="string" || !r.surface_name.trim())) throw new PublicationError("surface_name must be a non-empty string");
  const overrides=r.property_names??{}; if(!overrides || typeof overrides!=="object" || Array.isArray(overrides) || Object.keys(overrides as object).some(k=>!propKeys.has(k)||typeof (overrides as Record<string,unknown>)[k]!=="string" || !(overrides as Record<string,string>)[k].trim())) throw new PublicationError("property_names must map supported names to non-empty strings");
- const o=overrides as Record<string,string>; const p={...policy,defaultState:("state" in r?r.state:policy.defaultState) as string,defaultPriority:("priority" in r?r.priority:policy.defaultPriority) as number|null,defaultLabels:[...new Set(((r.labels as string[]|undefined)??policy.defaultLabels).map(x=>x.trim()).filter(Boolean))],surfaceName:(r.surface_name as string|undefined)??policy.surfaceName,identifier:o.identifier??policy.identifier,title:o.title??policy.title,state:o.state??policy.state,priority:o.priority??policy.priority,labels:o.labels??policy.labels,blockedBy:o.blocked_by??policy.blockedBy,description:o.description??policy.description,source:o.source??policy.source};
+ const o=overrides as Record<string,string>; const p={...policy,defaultState:("state" in r?r.state:policy.defaultState) as string,defaultPriority:("priority" in r?r.priority:policy.defaultPriority) as number|null,defaultLabels:[...new Set(((r.labels as string[]|undefined)??policy.defaultLabels).map(x=>x.trim()).filter(Boolean))],identifier:o.identifier??policy.identifier,title:o.title??policy.title,state:o.state??policy.state,priority:o.priority??policy.priority,labels:o.labels??policy.labels,blockedBy:o.blocked_by??policy.blockedBy,description:o.description??policy.description,source:o.source??policy.source};
  const names=[p.identifier,p.title,p.state,p.priority,p.labels,p.blockedBy,p.description,p.source].map(x=>x.trim()); if(names.some(x=>!x)) throw new PublicationError("property names must be non-empty"); if(new Set(names).size!==names.length) throw new PublicationError("property_names must resolve to unique property names");
  return {config:{planSource:r.plan_source as string|undefined},policy:p};
 }
