@@ -9,6 +9,7 @@
 !.env.example
 .chatgpt-shot-profile/
 .chatgpt-shot-runtime.json
+.chatgpt-shot-submit.lock/
 
 # Temporary files
 tmp/

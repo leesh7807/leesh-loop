@@ -13,6 +13,7 @@ class Store {
 class Browser {
   attempts = 0; inspected: 'submitted'|'not_submitted'|'uncertain' = 'submitted'; authenticated = true;
   async ensureAvailable() {} async ensureAuthenticated() { if (!this.authenticated) throw new ShotError('CHATGPT_AUTH_REQUIRED', 'required'); }
+  async runSubmission<T>(operation: () => Promise<T>) { return operation(); }
   async openFreshContext() {} async fillPrompt() {} async submitPrompt() { this.attempts++; } async inspectSubmission() { return this.inspected; } async close() {}
 }
 const options = { acknowledgementMs: 0, executionMs: 25, pollMs: 1 };

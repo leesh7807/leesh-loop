@@ -1,6 +1,6 @@
 import { fail } from './errors.js';
 import type { NotionStore } from './notion.js';
-const rich = (block: any) => (block[block.type]?.rich_text ?? block[block.type]?.text ?? []).map((x: any) => x.plain_text ?? x.text?.content ?? '').join('');
+const rich = (block: any) => (block[block.type]?.rich_text ?? block[block.type]?.text ?? []).map((x: any) => { const value = x.plain_text ?? x.text?.content ?? ''; const href = x.href ?? x.text?.link?.url; return href ? `[${value.replace(/[\\\[\]]/g, '\\$&')}](${href.replace(/\)/g, '\\)')})` : value; }).join('');
 export async function markdownResult(store: NotionStore, pageId: string): Promise<string> {
   async function render(blocks: any[], depth = 0): Promise<string[]> { const lines: string[] = []; for (const b of blocks) { const t = rich(b); let line: string | undefined; switch (b.type) {
     case 'paragraph': line = t; break; case 'heading_1': line = `# ${t}`; break; case 'heading_2': line = `## ${t}`; break; case 'heading_3': line = `### ${t}`; break;

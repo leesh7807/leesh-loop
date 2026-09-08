@@ -6,3 +6,7 @@ test('serializes headings, lists, code, and nested blocks', async () => {
   const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
   assert.equal(result, '# Title\n\n- one\n\n  1. nested\n\n```ts\nlet x = 1;\n```');
 });
+test('preserves rich-text hyperlink targets', async () => {
+  const result = await markdownResult({ children: async () => [{ id:'p', type:'paragraph', paragraph:{rich_text:[{plain_text:'OpenAI',href:'https://openai.com'}]},has_children:false }] } as any, 'page');
+  assert.equal(result, '[OpenAI](https://openai.com)');
+});

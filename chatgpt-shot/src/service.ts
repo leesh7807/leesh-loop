@@ -11,7 +11,7 @@ export async function submit(store: NotionStore, databaseId: string, browser: Br
   const ackMs = options.acknowledgementMs ?? 45_000, executionMs = options.executionMs ?? 15 * 60_000, pollMs = options.pollMs ?? 2_000, log = options.log ?? (() => {});
   await browser.ensureAvailable(); await browser.ensureAuthenticated();
   const id = randomUUID(); const invocation = await store.createInvocation(databaseId, id); log('invocation_created', id);
-  let attempts = 0; const attempt = async () => { await browser.openFreshContext(); log('browser_context_ready', id); await browser.fillPrompt(wrapPrompt(prompt, id, invocation.pageId)); log('prompt_filled', id); await browser.submitPrompt(); attempts++; log('submission_attempted', id); };
+  let attempts = 0; const attempt = async () => browser.runSubmission(async () => { await browser.openFreshContext(); log('browser_context_ready', id); await browser.fillPrompt(wrapPrompt(prompt, id, invocation.pageId)); log('prompt_filled', id); await browser.submitPrompt(); attempts++; log('submission_attempted', id); });
   try { await attempt(); const started = Date.now(); let inspection = false;
     while (true) { const current = await store.readInvocation(invocation.pageId, id); if (current.state !== 'pending') { log('acknowledged', id); if (current.state === 'completed') { log('terminal_completed', id); return markdownResult(store, invocation.pageId); } if (current.state === 'failed') { if (!current.error.trim()) fail('INVALID_INVOCATION_STATE', `Invocation ${id} failed without Error.`); log('terminal_failed', id); fail('INVOCATION_FAILED', current.error); } }
       const elapsed = Date.now() - started;

@@ -40,6 +40,11 @@ to Markdown only after `State = completed`.
   and clear recovery when the retained browser is closed.
 - The managed runtime publishes only a loopback CDP endpoint and local runtime-state file; CLI
   process exit disconnects from that endpoint but does not close the retained Chrome process.
+- A repository-runtime-scoped inter-process lock serializes only fresh-context navigation, prompt
+  filling, and submission. Invocation creation and Notion polling remain concurrent; a stale lock
+  is recovered only when its recorded owner process is no longer alive.
+- Each invocation owns a distinct browser tab in the retained runtime, so later commands cannot
+  navigate or overwrite an earlier invocation's inspection surface.
 - The CLI surface is exactly `init --notion-database`, `login`, `doctor`, and `submit`.
 - `NOTION_TOKEN` is the sole Notion credential name. Initialization writes only
   `NOTION_INVOCATION_DATABASE_ID`, preserving unrelated `.env` entries and never printing the
