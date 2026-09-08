@@ -15,6 +15,18 @@ test('serializes Notion tables with headers and cells', async () => {
   const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
   assert.equal(result, '| Name | URL |\n| --- | --- |\n| OpenAI | https://openai.com |');
 });
+test('uses a synthetic Markdown header for a headerless Notion table', async () => {
+  const blocks = new Map<string, any[]>([
+    ['page', [{ id: 't', type: 'table', table: { has_column_header: false }, has_children: true }]],
+    ['t', [
+      { id: 'r1', type: 'table_row', table_row: { cells: [[{ plain_text: 'Alice' }], [{ plain_text: '10' }]] }, has_children: false },
+      { id: 'r2', type: 'table_row', table_row: { cells: [[{ plain_text: 'Bob' }], [{ plain_text: '20' }]] }, has_children: false },
+    ]],
+  ]);
+
+  const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
+  assert.equal(result, '| Alice | 10 |\n| --- | --- |\n| Bob | 20 |');
+});
 test('serializes media URLs instead of failing completed Results', async () => {
   const result = await markdownResult({ children: async () => [
     { id:'image',type:'image',image:{external:{url:'https://example.com/image.png'},caption:[{plain_text:'Diagram'}]},has_children:false },

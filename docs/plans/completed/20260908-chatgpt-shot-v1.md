@@ -55,7 +55,8 @@ to Markdown only after `State = completed`.
 - Browser tab cleanup begins before authentication and Notion invocation creation, so every command
   path that opens a tab releases it even when preflight or invocation creation fails.
 - Result serialization preserves nested Markdown list hierarchy with four-space levels and
-  deterministically projects Notion tables, including column headers and cell text.
+  deterministically projects Notion tables as valid Markdown, using a synthetic first-row header
+  when Notion has none, while preserving column headers and cell text.
 - Once Notion reports `in_progress`, `completed`, or `failed`, acknowledgment is proven and the
   browser inspection path is disabled. A `not_submitted` retry starts one new bounded acknowledgment
   window; the second failure is reported without a third submission.

@@ -40,10 +40,10 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
         if (!output.length) {
           fail('RESULT_SERIALIZATION_FAILED', 'Cannot serialize an empty Notion table.');
         }
-        if (block.table?.has_column_header) {
-          const columns = tableRows[0].table_row?.cells?.length ?? 0;
-          output.splice(1, 0, `| ${Array(columns).fill('---').join(' | ')} |`);
-        }
+        const columns = tableRows[0].table_row?.cells?.length ?? 0;
+        // Markdown tables require a delimiter row even when Notion has no header.
+        // The first Notion row becomes a synthetic Markdown header in that case.
+        output.splice(1, 0, `| ${Array(columns).fill('---').join(' | ')} |`);
         lines.push(...output);
         continue;
       }
