@@ -1,12 +1,84 @@
 import { fail } from './errors.js';
 import type { NotionStore } from './notion.js';
-const rich = (block: any) => (block[block.type]?.rich_text ?? block[block.type]?.text ?? []).map((x: any) => { const value = x.plain_text ?? x.text?.content ?? ''; const href = x.href ?? x.text?.link?.url; return href ? `[${value.replace(/[\\\[\]]/g, '\\$&')}](${href.replace(/\)/g, '\\)')})` : value; }).join('');
+
+const richText = (items: any[] = []) => items.map((item) => {
+  const value = item.plain_text ?? item.text?.content ?? '';
+  const href = item.href ?? item.text?.link?.url;
+  return href
+    ? `[${value.replace(/[\\\[\]]/g, '\\$&')}](${href.replace(/\)/g, '\\)')})`
+    : value;
+}).join('');
+
+const rich = (block: any) => richText(
+  block[block.type]?.rich_text ?? block[block.type]?.text ?? [],
+);
+
+const tableRow = (block: any) => `| ${(block.table_row?.cells ?? [])
+  .map((cell: any[]) => richText(cell).replace(/\|/g, '\\|'))
+  .join(' | ')} |`;
+
+const fallback = (block: any) => {
+  const value = block[block.type] ?? {};
+  const url = value.url ?? value.external?.url ?? value.file?.url;
+  const caption = richText(value.caption);
+
+  if (block.type === 'image' && url) return `![${caption || 'image'}](${url})`;
+  if (url) return caption ? `[${caption}](${url})` : url;
+  return caption || rich(block);
+};
+
 export async function markdownResult(store: NotionStore, pageId: string): Promise<string> {
-  async function render(blocks: any[], depth = 0): Promise<string[]> { const lines: string[] = []; for (const b of blocks) { const t = rich(b); let line: string | undefined; switch (b.type) {
-    case 'paragraph': line = t; break; case 'heading_1': line = `# ${t}`; break; case 'heading_2': line = `## ${t}`; break; case 'heading_3': line = `### ${t}`; break;
-    case 'bulleted_list_item': line = `${'  '.repeat(depth)}- ${t}`; break; case 'numbered_list_item': line = `${'  '.repeat(depth)}1. ${t}`; break; case 'quote': line = `> ${t}`; break;
-    case 'code': line = `\`\`\`${b.code?.language ?? ''}\n${t}\n\`\`\``; break; case 'divider': line = '---'; break;
-    default: if (t) line = t; else if (!b.has_children) fail('RESULT_SERIALIZATION_FAILED', `Cannot serialize meaningful ${b.type} block.`);
-  } if (line !== undefined) lines.push(line); if (b.has_children) lines.push(...await render(await store.children(b.id), depth + 1)); } return lines; }
-  return (await render(await store.children(pageId))).join('\n\n').replace(/((?:^|\n)[ \t]*(?:[-*+] |\d+\. )[^\n]*)\n\n(?=[ \t]*(?:[-*+] |\d+\. ))/g, '$1\n');
+  async function render(blocks: any[], depth = 0): Promise<string[]> {
+    const lines: string[] = [];
+
+    for (const block of blocks) {
+      if (block.type === 'table') {
+        const tableRows = (await store.children(block.id))
+          .filter((row) => row.type === 'table_row');
+        const output = tableRows.map(tableRow);
+
+        if (!output.length) {
+          fail('RESULT_SERIALIZATION_FAILED', 'Cannot serialize an empty Notion table.');
+        }
+        if (block.table?.has_column_header) {
+          const columns = tableRows[0].table_row?.cells?.length ?? 0;
+          output.splice(1, 0, `| ${Array(columns).fill('---').join(' | ')} |`);
+        }
+        lines.push(...output);
+        continue;
+      }
+
+      const text = rich(block);
+      let line: string | undefined;
+
+      switch (block.type) {
+        case 'paragraph': line = text; break;
+        case 'heading_1': line = `# ${text}`; break;
+        case 'heading_2': line = `## ${text}`; break;
+        case 'heading_3': line = `### ${text}`; break;
+        case 'bulleted_list_item': line = `${'    '.repeat(depth)}- ${text}`; break;
+        case 'numbered_list_item': line = `${'    '.repeat(depth)}1. ${text}`; break;
+        case 'quote': line = `> ${text}`; break;
+        case 'code': line = `\`\`\`${block.code?.language ?? ''}\n${text}\n\`\`\``; break;
+        case 'divider': line = '---'; break;
+        case 'table_row': line = tableRow(block); break;
+        default:
+          line = fallback(block);
+          if (!line && !block.has_children) {
+            fail('RESULT_SERIALIZATION_FAILED', `Cannot serialize meaningful ${block.type} block.`);
+          }
+      }
+
+      if (line !== undefined) lines.push(line);
+      if (block.has_children) {
+        lines.push(...await render(await store.children(block.id), depth + 1));
+      }
+    }
+    return lines;
+  }
+
+  return (await render(await store.children(pageId)))
+    .join('\n\n')
+    .replace(/((?:^|\n)[ \t]*(?:[-*+] |\d+\. )[^\n]*)\n\n(?=[ \t]*(?:[-*+] |\d+\. ))/g, '$1\n')
+    .replace(/\n\n(?=\|)/g, '\n');
 }
