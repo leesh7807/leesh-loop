@@ -15,8 +15,8 @@ class DelayedStore extends Store {
 }
 class Browser {
   attempts = 0; inspections = 0; closes = 0; inspected: 'submitted'|'not_submitted'|'uncertain' = 'submitted'; authenticated = true;
+  async withBrowser<T>(operation: () => Promise<T>) { return operation(); }
   async ensureAvailable() {} async ensureAuthenticated() { if (!this.authenticated) throw new ShotError('CHATGPT_AUTH_REQUIRED', 'required'); }
-  async runSubmission<T>(operation: () => Promise<T>) { return operation(); }
   async openFreshContext() {} async fillPrompt() {} async submitPrompt() { this.attempts++; } async inspectSubmission() { this.inspections++; return this.inspected; } async close() { this.closes++; }
 }
 const options = { acknowledgementMs: 0, executionMs: 25, pollMs: 1 };

@@ -18,17 +18,23 @@ node dist/cli.js init
 node dist/cli.js login
 node dist/cli.js doctor
 node dist/cli.js submit 'your task'
+node dist/cli.js shutdown
 ```
 
 Create an empty Invocation database, share it with the configured Notion integration, and put its
 direct link in `CHATGPT_SHOT_NOTION_DATABASE_URL`; `init` configures and verifies the required schema. It never
 creates a database or modifies an already configured database. `login` launches normal system
-Chrome with the dedicated profile and waits for the user to close it after manual ChatGPT
-authentication; credential entry is never automation-controlled. `submit` never automates login and
-returns `CHATGPT_AUTH_REQUIRED` before creating an invocation when the session is absent. Results
+headed Chrome with the dedicated profile and waits for the user to close it after manual ChatGPT
+authentication; credential entry is never automation-controlled. Afterwards, `submit` and `doctor`
+use a background, headed system-Chrome runtime owned by a local owner-only broker. Its Chrome
+control path is a private inherited pipe, not a TCP remote-debugging port; no browser window is
+intentionally foregrounded during normal automation. `shutdown` explicitly closes that runtime.
+`submit` never automates login and returns `CHATGPT_AUTH_REQUIRED` before creating an invocation
+when the session is absent. Results
 come only from the completed Notion page body, never the ChatGPT assistant UI.
 
-To reuse a manually authenticated ChatGPT session across commands in this runtime, the dedicated
-Chrome browser profile and ChatGPT must both be signed in. The observed working hypothesis is that
-a guest browser profile does not reliably retain the ChatGPT session across separate launches.
-This does not mean that a Chrome or Google browser-profile sign-in authenticates ChatGPT itself.
+To reuse a manually authenticated ChatGPT session, close the login browser before invoking a
+normal command so the broker can exclusively own the same dedicated profile. ChatGPT login and
+Chrome-profile sign-in are separate: neither substitutes for the other. Authentication preflight
+uses visible ChatGPT login/account UI; a composer alone only establishes page readiness because it
+can also be present for an anonymous visitor.

@@ -1,75 +1,41 @@
-import { existsSync, mkdirSync, readFileSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { join } from 'node:path';
-import net from 'node:net';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { brokerRequest, brokerSocket } from './broker.js';
 import { fail } from './errors.js';
 
 export type Inspection = 'submitted' | 'not_submitted' | 'uncertain';
-export interface BrowserTransport { ensureAvailable(): Promise<void>; ensureAuthenticated(): Promise<void>; runSubmission<T>(operation: () => Promise<T>): Promise<T>; openFreshContext(): Promise<void>; fillPrompt(prompt: string): Promise<void>; submitPrompt(): Promise<void>; inspectSubmission(invocationId: string): Promise<Inspection>; close(): Promise<void>; }
-export type Runtime = { port: number; pid: number };
-const profilePath = (root: string) => join(root, '.chatgpt-shot-profile');
-const statePath = (root: string) => join(root, '.chatgpt-shot-runtime.json');
-const systemChrome = () => [process.env.CHATGPT_SHOT_BROWSER, '/usr/bin/google-chrome-stable', '/usr/bin/google-chrome'].find((path): path is string => Boolean(path && existsSync(path)));
+export interface BrowserTransport { withBrowser<T>(operation: () => Promise<T>): Promise<T>; ensureAvailable(): Promise<void>; ensureAuthenticated(): Promise<void>; openFreshContext(): Promise<void>; fillPrompt(prompt: string): Promise<void>; submitPrompt(): Promise<void>; inspectSubmission(invocationId: string): Promise<Inspection>; close(): Promise<void>; }
+
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const port = async () => await new Promise<number>((resolve, reject) => { const server = net.createServer(); server.once('error', reject); server.listen(0, '127.0.0.1', () => { const address = server.address(); server.close(error => error ? reject(error) : resolve((address as net.AddressInfo).port)); }); });
-const endpoint = async (value: Runtime): Promise<string | undefined> => { try { const response = await fetch(`http://127.0.0.1:${value.port}/json/version`, { signal: AbortSignal.timeout(500) }); const body: any = await response.json(); return typeof body.webSocketDebuggerUrl === 'string' ? body.webSocketDebuggerUrl : undefined; } catch { return undefined; } };
-const readRuntime = (root: string): Runtime | undefined => { try { const value = JSON.parse(readFileSync(statePath(root), 'utf8')); return Number.isInteger(value.port) && Number.isInteger(value.pid) ? value : undefined; } catch { return undefined; } };
-const writeRuntime = (root: string, value: Runtime) => writeFileSync(statePath(root), JSON.stringify(value), { mode: 0o600 });
-export const matchesManagedRuntime = (root: string, runtime: Runtime, readCommandLine = (pid: number) => readFileSync(`/proc/${pid}/cmdline`, 'utf8')) => {
-  try {
-    process.kill(runtime.pid, 0);
-    const commandLine = readCommandLine(runtime.pid);
-    return commandLine.includes(`--user-data-dir=${profilePath(root)}`)
-      && commandLine.includes(`--remote-debugging-port=${runtime.port}`);
-  } catch { return false; }
-};
-export class RuntimeLock {
-  private readonly path: string; private readonly owner: string;
-  constructor(root: string, name: 'runtime' | 'submit') { this.path = join(root, `.chatgpt-shot-${name}.lock`); this.owner = join(this.path, 'owner.json'); }
-  private release() {
-    try { unlinkSync(this.owner); } catch {}
-    try { rmdirSync(this.path); } catch {}
-  }
-  private stale() {
-    try { const pid = JSON.parse(readFileSync(this.owner, 'utf8')).pid; try { process.kill(pid, 0); return false; } catch (error: any) { if (error.code !== 'ESRCH') return false; } }
-    catch { try { if (Date.now() - statSync(this.path).mtimeMs < 5_000) return false; } catch { return false; } }
-    this.release();
-    return !existsSync(this.path);
-  }
-  async run<T>(operation: () => Promise<T>): Promise<T> { for (let attempt = 0; attempt < 600; attempt++) { try { mkdirSync(this.path, { mode: 0o700 }); writeFileSync(this.owner, JSON.stringify({ pid: process.pid }), { mode: 0o600 }); try { return await operation(); } finally { this.release(); } } catch (error: any) { if (error.code !== 'EEXIST') throw error; this.stale(); await wait(100); } } return fail('BROWSER_UNAVAILABLE', 'Timed out waiting for the shared browser submission lock.'); }
+const profilePath = (root: string) => `${root}/.chatgpt-shot-profile`;
+const systemChrome = () => [process.env.CHATGPT_SHOT_BROWSER, '/usr/bin/google-chrome-stable', '/usr/bin/google-chrome'].find((path): path is string => Boolean(path && existsSync(path)));
+async function request(root: string, operation: string, sessionId?: string, prompt?: string, invocationId?: string) { try { return await brokerRequest(root, { operation, sessionId, prompt, invocationId }); } catch (error: any) { if (error.code) return fail(error.code, error.message); throw error; } }
+export async function ensureBroker(root: string) {
+  try { await request(root, 'ensure'); return; } catch (error: any) { if (error?.code === 'ECONNREFUSED') try { unlinkSync(brokerSocket(root)); } catch {} }
+  if (!existsSync(process.argv[1])) fail('BROWSER_UNAVAILABLE', 'Cannot locate the chatgpt-shot broker entry point.');
+  const child = spawn(process.execPath, [process.argv[1], '__broker'], { detached: true, stdio: 'ignore' }); child.unref();
+  for (let attempt = 0; attempt < 50; attempt++) { try { await request(root, 'ensure'); return; } catch { await wait(100); } }
+  fail('BROWSER_UNAVAILABLE', 'Could not start the local ChatGPT browser broker.');
 }
-
-/** Opens a user-controlled Chrome process; Playwright is deliberately not involved in credential entry. */
 export async function manualLogin(root: string): Promise<void> {
-  const executable = systemChrome(); if (!executable) return fail('BROWSER_UNAVAILABLE', 'A supported system Chrome executable is required for manual login.');
+  await shutdownBroker(root);
+  const executable = systemChrome(); if (!executable) fail('BROWSER_UNAVAILABLE', 'A supported system Chrome executable is required for manual login.');
   const profile = profilePath(root); mkdirSync(profile, { recursive: true, mode: 0o700 });
-  await new Promise<void>((resolve, reject) => { const child = spawn(executable, [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-background-mode', 'https://chatgpt.com/'], { stdio: 'ignore' }); child.once('error', error => reject(new Error(`Could not launch system Chrome: ${error.message}`))); child.once('close', () => resolve()); });
+  await new Promise<void>((resolve, reject) => { const child: import('node:child_process').ChildProcess = spawn(executable!, [`--user-data-dir=${profile}`, '--profile-directory=Default', '--no-first-run', '--no-default-browser-check', 'https://chatgpt.com/'], { stdio: 'ignore' }); child.once('error', reject); child.once('close', () => resolve()); });
 }
-
-async function connectRuntime(root: string): Promise<Browser> {
-  return new RuntimeLock(root, 'runtime').run(async () => { const remembered = readRuntime(root); const active = remembered && matchesManagedRuntime(root, remembered) && await endpoint(remembered);
-  if (active) return chromium.connectOverCDP(active);
-  if (remembered) try { unlinkSync(statePath(root)); } catch {}
-  const executable = systemChrome(); if (!executable) return fail('BROWSER_UNAVAILABLE', 'A supported system Chrome executable is unavailable.');
-  const profile = profilePath(root); mkdirSync(profile, { recursive: true, mode: 0o700 }); const allocated = await port();
-  const child = spawn(executable, [`--user-data-dir=${profile}`, `--remote-debugging-port=${allocated}`, '--remote-debugging-address=127.0.0.1', '--no-first-run', '--no-default-browser-check', '--disable-background-mode', '--start-minimized', 'https://chatgpt.com/'], { detached: true, stdio: 'ignore' }); child.unref();
-  const runtime = { port: allocated, pid: child.pid! }; for (let attempt = 0; attempt < 30; attempt++) { const connected = await endpoint(runtime); if (connected) { writeRuntime(root, runtime); return chromium.connectOverCDP(connected); } await wait(200); }
-  return fail('BROWSER_UNAVAILABLE', 'Could not start the managed local Chrome runtime.'); });
-}
+export async function shutdownBroker(root: string): Promise<void> { try { await request(root, 'shutdown'); } catch { try { await brokerRequest(root, { operation: 'shutdown' }); } catch {} } }
 
 export class ChatGPTBrowser implements BrowserTransport {
-  private browser?: Browser; private context?: BrowserContext; private page?: Page;
+  private sessionId?: string;
   constructor(private readonly root: string) {}
-  private async start(): Promise<Page> { if (this.page) return this.page; try { this.browser = await connectRuntime(this.root); this.context = this.browser.contexts()[0] ?? await this.browser.newContext(); this.page = await this.context.newPage(); await this.page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 30_000 }); return this.page; } catch (e) { return fail('BROWSER_UNAVAILABLE', 'Could not attach to the managed local ChatGPT browser runtime.', e); } }
-  async ensureAvailable() { await this.start(); }
-  async runSubmission<T>(operation: () => Promise<T>): Promise<T> { return new RuntimeLock(this.root, 'submit').run(operation); }
-  async ensureAuthenticated() { const page = await this.start(); await page.waitForTimeout(1_500); const loginLink = page.locator('a[href*="auth"], a[href*="login"]').filter({ visible: true }).first(); const loginButton = page.getByRole('button', { name: /log in|sign up/i }).filter({ visible: true }).first(); if (await loginLink.isVisible({ timeout: 1_000 }).catch(() => false) || await loginButton.isVisible({ timeout: 1_000 }).catch(() => false)) fail('CHATGPT_AUTH_REQUIRED', 'ChatGPT authentication is required. Run `chatgpt-shot login`.'); const composer = page.locator('textarea, [contenteditable="true"]').filter({ visible: true }).first(); if (!await composer.isVisible({ timeout: 8_000 }).catch(() => false)) fail('CHATGPT_AUTH_REQUIRED', 'ChatGPT authentication is required. Run `chatgpt-shot login`.'); }
-  async openFreshContext() { const page = await this.start(); await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 30_000 }); await this.ensureAuthenticated(); }
-  private async composer(): Promise<any> { const page = await this.start(); const locator = page.locator('textarea, [contenteditable="true"]').filter({ visible: true }).first(); if (!await locator.isVisible({ timeout: 8_000 }).catch(() => false)) fail('USER_INTERVENTION_REQUIRED', 'ChatGPT composer is unavailable.'); return locator; }
-  async fillPrompt(prompt: string) { await (await this.composer()).fill(prompt); }
-  async submitPrompt() { const page = await this.start(); const button = page.getByRole('button', { name: /send prompt|send message/i }).first(); if (await button.isVisible().catch(() => false)) await button.click(); else await (await this.composer()).press('Enter'); }
-  async inspectSubmission(invocationId: string): Promise<Inspection> { const page = await this.start(); const turns = page.getByText(invocationId, { exact: false }); const seen = await turns.count().catch(() => 0); const composer = await this.composer(); const value = await composer.inputValue().catch(async () => await composer.textContent() ?? ''); if (seen > 0 && !value?.includes(invocationId)) return 'submitted'; if (seen === 0 && value?.includes(invocationId)) return 'not_submitted'; return 'uncertain'; }
-  // connectOverCDP marks Browser.close() as a connection close, leaving Chrome itself running.
-  async close() { await this.page?.close().catch(() => {}); await this.browser?.close(); this.page = undefined; this.context = undefined; this.browser = undefined; }
+  async withBrowser<T>(operation: () => Promise<T>) { try { return await operation(); } finally { await this.close(); } }
+  async ensureAvailable() { await ensureBroker(this.root); }
+  async ensureAuthenticated() { const status = await request(this.root, 'auth') as { authenticated?: boolean }; if (!status?.authenticated) fail('CHATGPT_AUTH_REQUIRED', 'ChatGPT authentication is required. Run `chatgpt-shot login`.'); }
+  async openFreshContext() { await this.close(); this.sessionId = await request(this.root, 'open'); }
+  async fillPrompt(prompt: string) { if (!this.sessionId) fail('BROWSER_UNAVAILABLE', 'Browser invocation page is unavailable.'); await request(this.root, 'fill', this.sessionId, prompt); }
+  async submitPrompt() { if (!this.sessionId) fail('BROWSER_UNAVAILABLE', 'Browser invocation page is unavailable.'); await request(this.root, 'submit', this.sessionId); }
+  async inspectSubmission(invocationId: string): Promise<Inspection> { if (!this.sessionId) return 'uncertain'; return request(this.root, 'inspect', this.sessionId, undefined, invocationId); }
+  async close() { if (this.sessionId) await request(this.root, 'close', this.sessionId).catch(() => {}); this.sessionId = undefined; }
 }
+
+export { brokerSocket };

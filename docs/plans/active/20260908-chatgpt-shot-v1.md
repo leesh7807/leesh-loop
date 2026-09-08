@@ -19,43 +19,35 @@ to Markdown only after `State = completed`.
 
 - All implementation is under `chatgpt-shot/`; root integration is limited to the existing root
   `.env`. Configuration is always resolved from the repository root, never from `process.cwd()`.
-- The implementation is TypeScript/Node with Playwright behind a browser transport boundary.
+- The implementation is TypeScript/Node with browser details behind a focused transport boundary.
   A dedicated persistent local browser profile is reused by `login`, `doctor`, and `submit`.
   Manual authentication is performed in a user-controlled system Chrome process; credential entry
-  is never automated. Deterministic Playwright execution reuses its persistent profile and system
-  credential store, remains headed, and does not use a headless runtime because the provider
-  challenges it before the authenticated composer is available.
+  is never automated. `login` is headed and explicitly user-interactive. Normal automation uses a
+  broker-owned persistent headed system Chrome without intentional foreground activation.
 - To reuse a manually authenticated ChatGPT session across commands, the dedicated Chrome browser
   profile and ChatGPT must both be signed in. The observed working hypothesis is that a guest
   browser profile does not reliably retain the ChatGPT session across separate launches;
   browser-profile sign-in does not authenticate ChatGPT itself.
-- Authentication preflight requires both an available composer and absence of visible ChatGPT
-  login controls; a guest composer is not an authenticated execution environment.
-- Browser lifecycle must not repeatedly launch a foreground window that steals the user's focus
-  during normal commands. Prefer one locally managed, long-lived runtime that commands reuse in
-  the background. If the authentication or browser runtime cannot operate in the background, keep
-  one foreground browser window alive and reuse it rather than repeatedly opening and closing it.
-  Later commands attach to the same runtime and persistent profile. Implementation must preserve a
-  local-only attachment boundary, profile locking, serialized fill/submit interaction where needed,
-  and clear recovery when the retained browser is closed.
-- **Open P1 security boundary:** a retained authenticated runtime must not expose an unauthenticated
-  raw TCP CDP endpoint between commands. The replacement must enforce an owner-only local IPC
-  attachment boundary (or change runtime lifecycle so no raw endpoint is retained). This transport
-  decision is required before v1 can return to `completed`; loopback binding and runtime-state file
-  permissions alone are insufficient.
-- A repository-runtime-scoped inter-process lock serializes only fresh-context navigation, prompt
-  filling, and submission. Invocation creation and Notion polling remain concurrent; a stale lock
-  is recovered only when its recorded owner process is no longer alive.
-- Runtime discovery and cold Chrome creation use a separate inter-process lock, preventing two
-  commands from attempting to own the same persistent profile during a cold start.
-- A newly created lock is not stale merely because its owner file has not yet been written; only a
-  recorded dead owner, or an ownerless lock past a bounded initialization grace period, is eligible
-  for recovery.
-- Each invocation owns a distinct browser tab in the retained runtime, so later commands cannot
-  navigate or overwrite an earlier invocation's inspection surface.
-- The invocation-owned tab is closed when local invocation handling reaches any terminal, timeout,
-  or cancellation exit; the CLI handles `SIGINT` and `SIGTERM` by closing that tab before exiting,
-  while closing the CDP client connection still does not close retained Chrome.
+- Composer presence establishes only page readiness: anonymous ChatGPT pages can expose a composer.
+  Authentication preflight instead requires visible logged-in account/profile UI and no visible
+  ChatGPT login/sign-up control.
+- Google/ChatGPT authentication is performed only in a plain headed system Chrome with the
+  dedicated profile, without Playwright, CDP, or debugging transport. `login` first shuts down any
+  broker-owned Chrome, waits for the user to close plain Chrome, then may start automation solely
+  to verify the saved profile state.
+- A broker owns one persistent headed system-Chrome runtime for automation after manual
+  authentication. It directly spawns Chrome with the same dedicated `Default` profile and
+  `--remote-debugging-pipe`, owns the inherited private CDP file descriptors, and exposes only an
+  owner-only Unix-domain socket API. It never opens a raw TCP CDP listener, returns a CDP endpoint,
+  or proxies arbitrary CDP commands. A focused direct CDP adapter owns only the inherited pipe and
+  the deterministic ChatGPT operations; no automation framework launches Chrome. `submit` reuses
+  that background runtime without foreground activation.
+- The Unix socket resides in a `0700` runtime directory, is mode `0600`, and rejects a peer whose
+  available OS UID does not match the broker owner. The broker is the sole process that opens the
+  dedicated profile; invocation tabs are separate and are closed after acknowledgment, terminal
+  error, timeout, or cancellation while Chrome itself remains available until explicit `shutdown`.
+- Each invocation owns a distinct fresh browser page. Browser-sensitive work is broker-owned while
+  Notion polling after acknowledgment remains concurrent.
 - Browser tab cleanup begins before authentication and Notion invocation creation, so every command
   path that opens a tab releases it even when preflight or invocation creation fails.
 - Result serialization preserves nested Markdown list hierarchy with four-space levels and
@@ -64,8 +56,6 @@ to Markdown only after `State = completed`.
   preserved as a Markdown task list. Any child block of a list item is indented with that list
   context, code fences are longer than every backtick run in their Notion code content, and
   equation expressions are projected as displayed LaTex Markdown.
-- Persisted CDP runtime reuse requires the recorded live PID to own both the dedicated profile and
-  recorded debugging port; a stale or unrelated endpoint is discarded before Chrome is attached.
 - Once Notion reports `in_progress`, `completed`, or `failed`, acknowledgment is proven and the
   browser inspection path is disabled. A `not_submitted` retry starts one new bounded acknowledgment
   window; the second failure is reported without a third submission. A `submitted` inspection
@@ -96,6 +86,20 @@ to Markdown only after `State = completed`.
   canonical state.
 - Semantic browser fallback recovery is deferred and is not scaffolded in v1.
 
+## Browser transport decision evidence
+
+- D1 PASS: plain system Chrome with explicit `--user-data-dir=<root>/.chatgpt-shot-profile` and
+  `--profile-directory=Default` retained an actual ChatGPT login across a complete Chrome restart.
+- D2 PASS: the same actual Profile Path (`.../.chatgpt-shot-profile/Default`) used by direct system
+  Chrome with `--remote-debugging-pipe`, no Playwright launch, and no TCP CDP listener had no
+  challenge, no visible Login control, an authenticated composer, and successful minimal CDP
+  composer interaction.
+- Broker E2E PASS: direct system Chrome plus the focused private-pipe adapter passed `doctor` and
+  a real `submit` invocation `6ebd27b8-0ed5-441c-8453-45bab0ce7983`. Notion observed
+  `pending -> in_progress -> completed`; its canonical page body projected to
+  `PRIVATE_PIPE_DIRECT_CDP_FINAL_SMOKE_OK`. No assistant-response extraction or TCP CDP endpoint
+  participated in that path.
+
 ## Verification
 
 Verify root `.env` resolution from supported directories; init direct-database resolution,
@@ -111,7 +115,8 @@ then move this plan to `docs/plans/completed/`.
 
 - Automated TypeScript tests: deterministic state, timeout, serialization, and retry evidence.
 - Notion API: supplied database/page read access, schema and Result readback.
-- Playwright: persistent profile, authentication detection, fresh context, user-turn inspection,
-  and deterministic submission without assistant extraction.
+- System Chrome plus a private inherited CDP pipe: plain headed manual login, broker-owned headed
+  automation, authentication detection, fresh context, user-turn inspection, tab cleanup, and
+  deterministic submission without assistant extraction.
 - CLI commands: intended public setup, diagnostics, and one-shot execution paths.
 - Notion UI and diagnostic lifecycle logs: independent visibility of database records and state.
