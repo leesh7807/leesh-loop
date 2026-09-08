@@ -28,7 +28,8 @@ to Markdown only after `State = completed`.
 - `init` creates the database only when no configured ID exists; a configured database is read
   and schema-validated, never replaced or repaired. Required schema: title `ID`, select `State`
   (`pending`, `in_progress`, `completed`, `failed`), rich-text `Error`, `Created At` created time,
-  and `Updated At` last-edited time.
+  and `Updated At` last-edited time. A successful first initialization returns the direct URL of
+  the newly created Invocation database, rather than the parent-page URL.
 - ChatGPT authentication is always manual. `submit` is non-interactive and preflights browser
   availability and authentication before it creates a pending invocation.
 - Each invocation has a fresh ChatGPT context. The wrapped caller prompt directs ChatGPT to mark
@@ -43,8 +44,9 @@ to Markdown only after `State = completed`.
 
 ## Verification
 
-Verify root `.env` resolution from supported directories; init creation, readback, idempotency,
-and schema rejection; persistent manual authentication and doctor checks; and the complete
+Verify root `.env` resolution from supported directories; init creation, direct newly-created
+database-link output, readback, idempotency, and schema rejection; persistent manual
+authentication and doctor checks; and the complete
 `submit` flow from a pending invocation through Notion acknowledgment, terminal state, body read,
 and Markdown return. Unit tests use Notion, browser, and time boundaries to cover state handling,
 timeouts, serialization, failure validation, and duplicate prevention. Before PR creation, a real
