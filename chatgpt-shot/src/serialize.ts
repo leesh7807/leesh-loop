@@ -58,6 +58,7 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
         case 'heading_3': line = `### ${text}`; break;
         case 'bulleted_list_item': line = `${'    '.repeat(depth)}- ${text}`; break;
         case 'numbered_list_item': line = `${'    '.repeat(depth)}1. ${text}`; break;
+        case 'to_do': line = `${'    '.repeat(depth)}- [${block.to_do?.checked ? 'x' : ' '}] ${text}`; break;
         case 'quote': line = `> ${text}`; break;
         case 'code': line = `\`\`\`${block.code?.language ?? ''}\n${text}\n\`\`\``; break;
         case 'divider': line = '---'; break;

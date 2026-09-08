@@ -51,12 +51,14 @@ to Markdown only after `State = completed`.
 - Each invocation owns a distinct browser tab in the retained runtime, so later commands cannot
   navigate or overwrite an earlier invocation's inspection surface.
 - The invocation-owned tab is closed when local invocation handling reaches any terminal, timeout,
-  or cancellation exit; closing the CDP client connection still does not close retained Chrome.
+  or cancellation exit; the CLI handles `SIGINT` and `SIGTERM` by closing that tab before exiting,
+  while closing the CDP client connection still does not close retained Chrome.
 - Browser tab cleanup begins before authentication and Notion invocation creation, so every command
   path that opens a tab releases it even when preflight or invocation creation fails.
 - Result serialization preserves nested Markdown list hierarchy with four-space levels and
   deterministically projects Notion tables as valid Markdown, using a synthetic first-row header
-  when Notion has none, while preserving column headers and cell text.
+  when Notion has none, while preserving column headers and cell text; Notion `to_do` state is
+  preserved as a Markdown task list.
 - Once Notion reports `in_progress`, `completed`, or `failed`, acknowledgment is proven and the
   browser inspection path is disabled. A `not_submitted` retry starts one new bounded acknowledgment
   window; the second failure is reported without a third submission. A `submitted` inspection

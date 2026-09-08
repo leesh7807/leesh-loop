@@ -34,3 +34,10 @@ test('serializes media URLs instead of failing completed Results', async () => {
   ] } as any, 'page');
   assert.equal(result, '![Diagram](https://example.com/image.png)\n\nhttps://example.com');
 });
+test('preserves Notion to-do completion state', async () => {
+  const result = await markdownResult({ children: async () => [
+    { id:'unchecked',type:'to_do',to_do:{rich_text:[{plain_text:'deploy'}],checked:false},has_children:false },
+    { id:'checked',type:'to_do',to_do:{rich_text:[{plain_text:'verify'}],checked:true},has_children:false },
+  ] } as any, 'page');
+  assert.equal(result, '- [ ] deploy\n- [x] verify');
+});
