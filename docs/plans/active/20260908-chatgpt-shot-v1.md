@@ -38,8 +38,11 @@ to Markdown only after `State = completed`.
   Later commands attach to the same runtime and persistent profile. Implementation must preserve a
   local-only attachment boundary, profile locking, serialized fill/submit interaction where needed,
   and clear recovery when the retained browser is closed.
-- The managed runtime publishes only a loopback CDP endpoint and local runtime-state file; CLI
-  process exit disconnects from that endpoint but does not close the retained Chrome process.
+- **Open P1 security boundary:** a retained authenticated runtime must not expose an unauthenticated
+  raw TCP CDP endpoint between commands. The replacement must enforce an owner-only local IPC
+  attachment boundary (or change runtime lifecycle so no raw endpoint is retained). This transport
+  decision is required before v1 can return to `completed`; loopback binding and runtime-state file
+  permissions alone are insufficient.
 - A repository-runtime-scoped inter-process lock serializes only fresh-context navigation, prompt
   filling, and submission. Invocation creation and Notion polling remain concurrent; a stale lock
   is recovered only when its recorded owner process is no longer alive.
