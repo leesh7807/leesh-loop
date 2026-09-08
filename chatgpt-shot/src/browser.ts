@@ -24,6 +24,8 @@ export class ChatGPTBrowser implements BrowserTransport {
   async ensureAvailable() { await this.start(); }
   async ensureAuthenticated() {
     const page = await this.start();
+    // The guest composer renders before its login controls on the current ChatGPT page.
+    await page.waitForTimeout(1_500);
     const loginLink = page.locator('a[href*="auth"], a[href*="login"]').filter({ visible: true }).first();
     const loginButton = page.getByRole('button', { name: /log in|sign up/i }).filter({ visible: true }).first();
     if (await loginLink.isVisible({ timeout: 1_000 }).catch(() => false) || await loginButton.isVisible({ timeout: 1_000 }).catch(() => false)) fail('CHATGPT_AUTH_REQUIRED', 'ChatGPT authentication is required. Run `chatgpt-shot login`.');
