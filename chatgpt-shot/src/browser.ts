@@ -16,15 +16,20 @@ const port = async () => await new Promise<number>((resolve, reject) => { const 
 const endpoint = async (value: Runtime): Promise<string | undefined> => { try { const response = await fetch(`http://127.0.0.1:${value.port}/json/version`, { signal: AbortSignal.timeout(500) }); const body: any = await response.json(); return typeof body.webSocketDebuggerUrl === 'string' ? body.webSocketDebuggerUrl : undefined; } catch { return undefined; } };
 const readRuntime = (root: string): Runtime | undefined => { try { const value = JSON.parse(readFileSync(statePath(root), 'utf8')); return Number.isInteger(value.port) && Number.isInteger(value.pid) ? value : undefined; } catch { return undefined; } };
 const writeRuntime = (root: string, value: Runtime) => writeFileSync(statePath(root), JSON.stringify(value), { mode: 0o600 });
-class RuntimeLock {
+export class RuntimeLock {
   private readonly path: string; private readonly owner: string;
   constructor(root: string, name: 'runtime' | 'submit') { this.path = join(root, `.chatgpt-shot-${name}.lock`); this.owner = join(this.path, 'owner.json'); }
+  private release() {
+    try { unlinkSync(this.owner); } catch {}
+    try { rmdirSync(this.path); } catch {}
+  }
   private stale() {
     try { const pid = JSON.parse(readFileSync(this.owner, 'utf8')).pid; try { process.kill(pid, 0); return false; } catch (error: any) { if (error.code !== 'ESRCH') return false; } }
     catch { try { if (Date.now() - statSync(this.path).mtimeMs < 5_000) return false; } catch { return false; } }
-    try { unlinkSync(this.owner); rmdirSync(this.path); } catch {} return true;
+    this.release();
+    return !existsSync(this.path);
   }
-  async run<T>(operation: () => Promise<T>): Promise<T> { for (let attempt = 0; attempt < 600; attempt++) { try { mkdirSync(this.path, { mode: 0o700 }); writeFileSync(this.owner, JSON.stringify({ pid: process.pid }), { mode: 0o600 }); try { return await operation(); } finally { try { unlinkSync(this.owner); rmdirSync(this.path); } catch {} } } catch (error: any) { if (error.code !== 'EEXIST') throw error; this.stale(); await wait(100); } } return fail('BROWSER_UNAVAILABLE', 'Timed out waiting for the shared browser submission lock.'); }
+  async run<T>(operation: () => Promise<T>): Promise<T> { for (let attempt = 0; attempt < 600; attempt++) { try { mkdirSync(this.path, { mode: 0o700 }); writeFileSync(this.owner, JSON.stringify({ pid: process.pid }), { mode: 0o600 }); try { return await operation(); } finally { this.release(); } } catch (error: any) { if (error.code !== 'EEXIST') throw error; this.stale(); await wait(100); } } return fail('BROWSER_UNAVAILABLE', 'Timed out waiting for the shared browser submission lock.'); }
 }
 
 /** Opens a user-controlled Chrome process; Playwright is deliberately not involved in credential entry. */

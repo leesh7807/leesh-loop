@@ -17,7 +17,7 @@ export function loadConfig(start?: string): Config {
   if (!existsSync(envPath)) fail('CONFIG_INVALID', `Missing root .env at ${envPath}.`);
   const env = dotenv.parse(readFileSync(envPath));
   if (!env.NOTION_TOKEN?.trim()) fail('CONFIG_INVALID', 'NOTION_TOKEN is required in the repository-root .env.');
-  if (!env.NOTION_INVOCATION_DATABASE_URL?.trim()) fail('CONFIG_INVALID', 'NOTION_INVOCATION_DATABASE_URL is required in the repository-root .env.');
-  return { root, envPath, notionToken: env.NOTION_TOKEN, databaseUrl: env.NOTION_INVOCATION_DATABASE_URL };
+  if (!env.CHATGPT_SHOT_NOTION_DATABASE_URL?.trim()) fail('CONFIG_INVALID', 'CHATGPT_SHOT_NOTION_DATABASE_URL is required in the repository-root .env.');
+  return { root, envPath, notionToken: env.NOTION_TOKEN, databaseUrl: env.CHATGPT_SHOT_NOTION_DATABASE_URL };
 }
 export const moduleDirectory = dirname(fileURLToPath(import.meta.url));

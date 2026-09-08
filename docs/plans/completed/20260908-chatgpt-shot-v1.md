@@ -62,10 +62,10 @@ to Markdown only after `State = completed`.
   window; the second failure is reported without a third submission.
 - The CLI surface is exactly `init`, `login`, `doctor`, and `submit`.
 - Root `.env` is the only Notion configuration surface: it requires `NOTION_TOKEN` and
-  `NOTION_INVOCATION_DATABASE_URL`. The tool derives the database ID internally, never prints the
+  `CHATGPT_SHOT_NOTION_DATABASE_URL`. The tool derives the database ID internally, never prints the
   token, and does not mutate `.env`.
 - The user creates and supplies an empty Invocation database through
-  `NOTION_INVOCATION_DATABASE_URL`. On first initialization, `init` confirms it has no invocation
+  `CHATGPT_SHOT_NOTION_DATABASE_URL`. On first initialization, `init` confirms it has no invocation
   pages, configures the required schema, and reads it back. A configured database is read and
   schema-validated, never replaced or repaired. `init` never creates a database or needs a parent
   page. Required schema: title `ID`, select `State` (`pending`,
