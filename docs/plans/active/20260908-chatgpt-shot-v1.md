@@ -21,10 +21,10 @@ to Markdown only after `State = completed`.
   `.env`. Configuration is always resolved from the repository root, never from `process.cwd()`.
 - The implementation is TypeScript/Node with Playwright behind a browser transport boundary.
   A dedicated persistent local browser profile is reused by `login`, `doctor`, and `submit`.
-  Manual authentication is performed in headed system Chrome through the same persistent runtime
-  used by deterministic Playwright execution; credential entry is never automated. The runtime
-  remains headed because the provider challenges headless Chrome before the authenticated composer
-  is available.
+  Manual authentication is performed in a user-controlled system Chrome process; credential entry
+  is never automated. Deterministic Playwright execution reuses its persistent profile and system
+  credential store, remains headed, and does not use a headless runtime because the provider
+  challenges it before the authenticated composer is available.
 - Authentication preflight requires both an available composer and absence of visible ChatGPT
   login controls; a guest composer is not an authenticated execution environment.
 - The CLI surface is exactly `init --notion-database`, `login`, `doctor`, and `submit`.
