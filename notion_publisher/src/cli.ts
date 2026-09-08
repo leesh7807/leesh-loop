@@ -1,15 +1,16 @@
 import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFile } from "node:fs/promises";
-import { buildPageBlocks, buildTaskProperties, deriveIdentifier, extractPlanTitle, loadConfig, PublicationError, PUBLISHER_PENDING_STATE, validatePlanTitle } from "./core.js";
+import { buildPageBlocks, buildTaskProperties, deriveIdentifier, extractPlanTitle, loadConfig, PublicationError, PUBLISHER_PENDING_STATE, resolvePublishTarget, validatePlanTitle } from "./core.js";
 import { NotionClient, pendingPublicationBlock, PENDING_PUBLICATION_MARKER } from "./notion.js";
 
-export async function publishPlan(planPath: string, configPath: string, client: NotionClient): Promise<{ identifier: string; page_id: string; url?: string }> {
+export async function publishPlan(planPath: string, configPath: string, targetUrl: string | undefined, client: NotionClient): Promise<{ identifier: string; page_id: string; url?: string }> {
   const plan = await readFile(planPath, "utf8");
   const { config, policy } = await loadConfig(configPath);
+  const target = resolvePublishTarget(targetUrl);
   const title = extractPlanTitle(plan, planPath);
   validatePlanTitle(title);
-  const dataSource = await client.ensureSurface(config.parentId, policy);
+  const dataSource = await client.ensureSurface(target.parentId, policy);
   const identifier = deriveIdentifier(plan, planPath);
   const blocks = buildPageBlocks(policy, plan);
   const existing = await client.findPublication(dataSource, policy, identifier);
@@ -29,15 +30,30 @@ export async function publishPlan(planPath: string, configPath: string, client: 
   return { identifier, page_id: page.id, url: page.url };
 }
 
+async function localEnvironment(): Promise<Record<string, string>> {
+  try {
+    const env = await readFile(resolve(process.cwd(), ".env"), "utf8");
+    return Object.fromEntries(env.split(/\r?\n/).flatMap((line) => {
+      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+      return match ? [[match[1], match[2].trim().replace(/^['"]|['"]$/g, "")]] : [];
+    }));
+  } catch { return {}; }
+}
+
+function environmentValue(name: string, local: Record<string, string>): string | undefined {
+  return Object.prototype.hasOwnProperty.call(process.env, name) ? process.env[name] : local[name];
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const get = (name: string) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined; };
   const planArg = get("--plan"), configArg = get("--config");
   if (!planArg || !configArg) throw new PublicationError("usage: notion-plan-publisher --plan PATH --config PATH");
-  let token = process.env.NOTION_TOKEN;
-  if (!token) { try { const env = await readFile(resolve(process.cwd(), ".env"), "utf8"); token = env.split(/\r?\n/).find((line) => line.startsWith("NOTION_TOKEN="))?.split("=").slice(1).join("=").trim().replace(/^['"]|['"]$/g, ""); } catch { /* environment variable is primary */ } }
+  const local = await localEnvironment();
+  const token = environmentValue("NOTION_TOKEN", local);
+  const targetUrl = environmentValue("NOTION_PUBLISH_TARGET_URL", local);
   if (!token) throw new PublicationError("missing NOTION_TOKEN");
-  console.log(JSON.stringify(await publishPlan(resolve(planArg), resolve(configArg), new NotionClient(token))));
+  console.log(JSON.stringify(await publishPlan(resolve(planArg), resolve(configArg), targetUrl, new NotionClient(token))));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
