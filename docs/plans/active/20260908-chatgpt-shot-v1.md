@@ -42,10 +42,13 @@ to Markdown only after `State = completed`.
   or proxies arbitrary CDP commands. A focused direct CDP adapter owns only the inherited pipe and
   the deterministic ChatGPT operations; no automation framework launches Chrome. `submit` reuses
   that background runtime without foreground activation.
-- The Unix socket resides in a `0700` runtime directory, is mode `0600`, and rejects a peer whose
-  available OS UID does not match the broker owner. The broker is the sole process that opens the
-  dedicated profile; invocation tabs are separate and are closed after acknowledgment, terminal
-  error, timeout, or cancellation while Chrome itself remains available until explicit `shutdown`.
+- The Unix socket resides in a short, per-UID temporary runtime directory keyed by a repository hash
+  (rather than under the repository, avoiding Unix socket pathname limits), is mode `0600`, and
+  rejects a peer whose available OS UID does not match the broker owner. The broker is the sole
+  process that opens the dedicated profile; invocation tabs are separate and are closed after
+  acknowledgment, terminal error, timeout, or cancellation while Chrome itself remains available
+  until explicit `shutdown`. A successful `shutdown` response is sent only after the Chrome child
+  has exited and released the profile, so `login` can safely take ownership next.
 - Each invocation owns a distinct fresh browser page. Browser-sensitive work is broker-owned while
   Notion polling after acknowledgment remains concurrent.
 - Browser tab cleanup begins before authentication and Notion invocation creation, so every command
@@ -99,6 +102,8 @@ to Markdown only after `State = completed`.
   `pending -> in_progress -> completed`; its canonical page body projected to
   `PRIVATE_PIPE_DIRECT_CDP_FINAL_SMOKE_OK`. No assistant-response extraction or TCP CDP endpoint
   participated in that path.
+- Broker lifecycle PASS: after `doctor`, `shutdown` waited for the broker-owned Chrome to exit;
+  no broker, dedicated-profile Chrome, or runtime socket remained before a subsequent command.
 
 ## Verification
 

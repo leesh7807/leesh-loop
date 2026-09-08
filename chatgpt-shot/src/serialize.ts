@@ -38,7 +38,7 @@ const fallback = (block: any) => {
 };
 
 export async function markdownResult(store: NotionStore, pageId: string): Promise<string> {
-  async function render(blocks: any[], depth = 0): Promise<string[]> {
+  async function render(blocks: any[], listDepth = 0): Promise<string[]> {
     const lines: string[] = [];
 
     for (const block of blocks) {
@@ -54,7 +54,7 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
         // Markdown tables require a delimiter row even when Notion has no header.
         // The first Notion row becomes a synthetic Markdown header in that case.
         output.splice(1, 0, `| ${Array(columns).fill('---').join(' | ')} |`);
-        lines.push(...output.map((line) => indent(line, depth)));
+        lines.push(...output.map((line) => indent(line, listDepth)));
         continue;
       }
 
@@ -81,9 +81,10 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
           }
       }
 
-      if (line !== undefined) lines.push(indent(line, depth));
+      if (line !== undefined) lines.push(indent(line, listDepth));
       if (block.has_children) {
-        lines.push(...await render(await store.children(block.id), depth + 1));
+        const listParent = ['bulleted_list_item', 'numbered_list_item', 'to_do'].includes(block.type);
+        lines.push(...await render(await store.children(block.id), listParent ? listDepth + 1 : listDepth));
       }
     }
     return lines;

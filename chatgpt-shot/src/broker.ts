@@ -2,13 +2,14 @@ import { ChildProcess, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import net from 'node:net';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { createHash, randomUUID } from 'node:crypto';
 import { fail } from './errors.js';
 
 type Request = { operation: string; sessionId?: string; prompt?: string; invocationId?: string };
 type Response = { ok: true; value?: unknown } | { ok: false; code: string; message: string };
 type Message = { id?: number; sessionId?: string; result?: any; error?: { message: string } };
-const runtimeDirectory = (root: string) => join(root, '.chatgpt-shot-runtime');
+const runtimeDirectory = (root: string) => join(tmpdir(), `chatgpt-shot-${process.getuid?.() ?? 'user'}`, createHash('sha256').update(root).digest('hex').slice(0, 16));
 export const brokerSocket = (root: string) => join(runtimeDirectory(root), 'broker.sock');
 const profile = (root: string) => join(root, '.chatgpt-shot-profile');
 const chrome = () => [process.env.CHATGPT_SHOT_BROWSER, '/usr/bin/google-chrome-stable', '/usr/bin/google-chrome'].find((path): path is string => Boolean(path && existsSync(path)));
@@ -69,7 +70,7 @@ class Broker {
     await this.runtime();
     if (request.operation === 'ensure') return;
     if (request.operation === 'auth') return this.auth(this.control!);
-    if (request.operation === 'open') { const page = await this.createPage(); await page.navigate(); const auth = await this.auth(page); if (!auth.authenticated) { await page.close().catch(() => {}); fail('CHATGPT_AUTH_REQUIRED', 'ChatGPT authentication is required. Run `chatgpt-shot login`.'); } await this.composer(page); const id = randomUUID(); this.pages.set(id, page); return id; }
+    if (request.operation === 'open') { const page = await this.createPage(); try { await page.navigate(); const auth = await this.auth(page); if (!auth.authenticated) fail('CHATGPT_AUTH_REQUIRED', 'ChatGPT authentication is required. Run `chatgpt-shot login`.'); await this.composer(page); const id = randomUUID(); this.pages.set(id, page); return id; } catch (error) { await page.close().catch(() => {}); throw error; } }
     const page = request.sessionId ? this.pages.get(request.sessionId) : undefined; if (!page) return fail('BROWSER_UNAVAILABLE', 'Browser invocation page is unavailable.');
     if (request.operation === 'fill') { await this.composer(page); await page.evaluate(`value=>{${visibility}const e=[...document.querySelectorAll('textarea,[contenteditable="true"]')].find(visible);if(!e)throw new Error('composer unavailable');e.focus();if(e instanceof HTMLTextAreaElement){const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;s.call(e,value)}else e.textContent=value;e.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:value}))}`, [request.prompt ?? '']); return; }
     if (request.operation === 'submit') { const clicked = await page.evaluate<boolean>(`()=>{${visibility}const b=[...document.querySelectorAll('button')].find(e=>/send prompt|send message/i.test([e.getAttribute('aria-label'),e.textContent].filter(Boolean).join(' '))&&!e.disabled&&visible(e));if(!b)return false;b.click();return true}`); if (!clicked) await this.cdp!.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }, page.sessionId).then(() => this.cdp!.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }, page.sessionId)); return; }
@@ -77,13 +78,23 @@ class Broker {
     if (request.operation === 'close') { await page.close().catch(() => {}); this.pages.delete(request.sessionId!); return; }
     fail('INTERNAL_ERROR', `Unsupported broker operation ${request.operation}.`);
   }
-  async close() { for (const page of this.pages.values()) await page.close().catch(() => {}); this.pages.clear(); this.cdp?.close(); if (this.process && !this.process.killed) this.process.kill(); this.process = undefined; this.cdp = undefined; this.control = undefined; }
+  async close() {
+    for (const page of this.pages.values()) await page.close().catch(() => {});
+    this.pages.clear(); this.cdp?.close(); const child = this.process;
+    this.process = undefined; this.cdp = undefined; this.control = undefined;
+    if (!child || child.exitCode !== null) return;
+    await new Promise<void>((resolve) => {
+      const force = setTimeout(() => child.kill('SIGKILL'), 5_000);
+      child.once('exit', () => { clearTimeout(force); resolve(); });
+      child.kill('SIGTERM');
+    });
+  }
 }
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function runBroker(root: string): Promise<void> {
   const directory = runtimeDirectory(root); mkdirSync(directory, { recursive: true, mode: 0o700 }); chmodSync(directory, 0o700); const socket = brokerSocket(root); const broker = new Broker(root); let stopping = false;
-  const server = net.createServer({ allowHalfOpen: true }, connection => { const peer = (connection as unknown as { getPeerCredentials?: () => { uid?: number } }).getPeerCredentials?.(); if (peer?.uid !== undefined && process.getuid && peer.uid !== process.getuid()) return connection.destroy(); let body = ''; connection.setEncoding('utf8'); connection.on('data', chunk => { body += chunk; }); connection.on('end', async () => { let response: Response; let stop = false; try { const request = JSON.parse(body) as Request; stop = request.operation === 'shutdown'; response = { ok: true, value: stop ? undefined : await broker.handle(request) }; } catch (error: any) { response = { ok: false, code: error?.code ?? 'INTERNAL_ERROR', message: error?.message ?? String(error) }; } connection.end(JSON.stringify(response), () => { if (stop) void shutdown(); }); }); });
+  const server = net.createServer({ allowHalfOpen: true }, connection => { const peer = (connection as unknown as { getPeerCredentials?: () => { uid?: number } }).getPeerCredentials?.(); if (peer?.uid !== undefined && process.getuid && peer.uid !== process.getuid()) return connection.destroy(); let body = ''; connection.setEncoding('utf8'); connection.on('data', chunk => { body += chunk; }); connection.on('end', async () => { let response: Response; try { const request = JSON.parse(body) as Request; if (request.operation === 'shutdown') { await shutdown(); response = { ok: true }; } else response = { ok: true, value: await broker.handle(request) }; } catch (error: any) { response = { ok: false, code: error?.code ?? 'INTERNAL_ERROR', message: error?.message ?? String(error) }; } connection.end(JSON.stringify(response)); }); });
   const shutdown = async () => { if (stopping) return; stopping = true; await broker.close(); server.close(); try { unlinkSync(socket); } catch {} };
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(socket, () => { try { chmodSync(socket, 0o600); resolve(); } catch (error) { reject(error); } }); }); process.on('SIGINT', () => void shutdown()); process.on('SIGTERM', () => void shutdown());
 }

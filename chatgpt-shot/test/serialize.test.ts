@@ -49,6 +49,14 @@ test('keeps non-list children within their list item', async () => {
   const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
   assert.equal(result, '- Deploy\n\n    Only after tests pass');
 });
+test('does not turn children of non-list blocks into indented code', async () => {
+  const blocks = new Map<string, any[]>([
+    ['page', [{ id:'toggle',type:'toggle',toggle:{rich_text:[{plain_text:'Details'}]},has_children:true }]],
+    ['toggle', [{ id:'detail',type:'paragraph',paragraph:{rich_text:[{plain_text:'Nested text'}]},has_children:false }]],
+  ]);
+  const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
+  assert.equal(result, 'Details\n\nNested text');
+});
 test('uses a fence longer than backticks in Notion code', async () => {
   const result = await markdownResult({ children: async () => [{ id:'code',type:'code',code:{language:'markdown',rich_text:[{plain_text:'before\n```\nafter'}]},has_children:false }] } as any, 'page');
   assert.equal(result, '````markdown\nbefore\n```\nafter\n````');
