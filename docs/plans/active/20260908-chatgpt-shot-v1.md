@@ -31,12 +31,13 @@ to Markdown only after `State = completed`.
   browser-profile sign-in does not authenticate ChatGPT itself.
 - Authentication preflight requires both an available composer and absence of visible ChatGPT
   login controls; a guest composer is not an authenticated execution environment.
-- The preferred browser lifecycle is one locally managed, long-lived browser runtime rather than
-  launching and closing a browser for each CLI command. Its process management may run in the
-  background, but the headed browser window remains an active user-visible surface after login,
-  `doctor`, and `submit`. Later commands attach to that same runtime and persistent profile.
-  Implementation must preserve a local-only attachment boundary, profile locking, serialized
-  fill/submit interaction where needed, and clear recovery when the user closes the window.
+- Browser lifecycle must not repeatedly launch a foreground window that steals the user's focus
+  during normal commands. Prefer one locally managed, long-lived runtime that commands reuse in
+  the background. If the authentication or browser runtime cannot operate in the background, keep
+  one foreground browser window alive and reuse it rather than repeatedly opening and closing it.
+  Later commands attach to the same runtime and persistent profile. Implementation must preserve a
+  local-only attachment boundary, profile locking, serialized fill/submit interaction where needed,
+  and clear recovery when the retained browser is closed.
 - The CLI surface is exactly `init --notion-database`, `login`, `doctor`, and `submit`.
 - `NOTION_TOKEN` is the sole Notion credential name. Initialization writes only
   `NOTION_INVOCATION_DATABASE_ID`, preserving unrelated `.env` entries and never printing the
