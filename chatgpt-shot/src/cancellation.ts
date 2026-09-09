@@ -8,7 +8,8 @@ export function installCancellationHandler(
   const cancel = (signal: 'SIGINT' | 'SIGTERM') => {
     if (exiting) return;
     exiting = true;
-    void close().finally(() => host.exit(signal === 'SIGINT' ? 130 : 143));
+    void Promise.race([close(), new Promise<void>((resolve) => setTimeout(resolve, 2_000))])
+      .finally(() => host.exit(signal === 'SIGINT' ? 130 : 143));
   };
 
   const onSigint = () => cancel('SIGINT');

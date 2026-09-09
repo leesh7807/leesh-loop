@@ -1,15 +1,24 @@
 import { ChildProcess, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, unlinkSync } from 'node:fs';
 import net from 'node:net';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { fail } from './errors.js';
 
 type Request = { operation: string; sessionId?: string; prompt?: string; invocationId?: string };
 type Response = { ok: true; value?: unknown } | { ok: false; code: string; message: string };
 type Message = { id?: number; sessionId?: string; result?: any; error?: { message: string } };
-const runtimeDirectory = (root: string) => join(tmpdir(), `chatgpt-shot-${process.getuid?.() ?? 'user'}`, createHash('sha256').update(root).digest('hex').slice(0, 16));
+const uid = process.getuid?.();
+const ownedDirectory = (path: string) => { try { const stat = lstatSync(path); return stat.isDirectory() && (uid === undefined || stat.uid === uid) && (stat.mode & 0o022) === 0; } catch { return false; } };
+const runtimeBase = () => {
+  const candidate = process.env.XDG_RUNTIME_DIR;
+  if (candidate && ownedDirectory(candidate)) return candidate;
+  const cache = join(homedir(), '.cache');
+  if (!ownedDirectory(cache)) fail('BROWSER_UNAVAILABLE', 'No owner-controlled local runtime directory is available.');
+  return cache;
+};
+const runtimeDirectory = (root: string) => join(runtimeBase(), 'chatgpt-shot', createHash('sha256').update(root).digest('hex').slice(0, 16));
 export const brokerSocket = (root: string) => join(runtimeDirectory(root), 'broker.sock');
 const profile = (root: string) => join(root, '.chatgpt-shot-profile');
 const chrome = () => [process.env.CHATGPT_SHOT_BROWSER, '/usr/bin/google-chrome-stable', '/usr/bin/google-chrome'].find((path): path is string => Boolean(path && existsSync(path)));
@@ -24,7 +33,10 @@ class PipeCdp {
   send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<any> {
     if (this.closed) return Promise.reject(new Error('Chrome private debugging pipe is closed.'));
     const id = ++this.next; this.input.write(`${JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })}\0`);
-    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => { if (this.pending.delete(id)) reject(new Error(`CDP ${method} timed out.`)); }, 30_000);
+      this.pending.set(id, { resolve: (value) => { clearTimeout(timeout); resolve(value); }, reject: (error) => { clearTimeout(timeout); reject(error); } });
+    });
   }
   private receive(message: Message) { if (!message.id) return; const pending = this.pending.get(message.id); if (!pending) return; this.pending.delete(message.id); message.error ? pending.reject(new Error(message.error.message)) : pending.resolve(message.result); }
   private finish() { if (this.closed) return; this.closed = true; for (const pending of this.pending.values()) pending.reject(new Error('Chrome private debugging pipe closed.')); this.pending.clear(); }
@@ -93,9 +105,15 @@ class Broker {
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function runBroker(root: string): Promise<void> {
-  const directory = runtimeDirectory(root); mkdirSync(directory, { recursive: true, mode: 0o700 }); chmodSync(directory, 0o700); const socket = brokerSocket(root); const broker = new Broker(root); let stopping = false;
+  const directory = runtimeDirectory(root); mkdirSync(directory, { recursive: true, mode: 0o700 }); chmodSync(directory, 0o700); if (!ownedDirectory(directory)) fail('BROWSER_UNAVAILABLE', 'Broker runtime directory is not owner-controlled.'); const socket = brokerSocket(root); const broker = new Broker(root); let stopping = false;
   const server = net.createServer({ allowHalfOpen: true }, connection => { const peer = (connection as unknown as { getPeerCredentials?: () => { uid?: number } }).getPeerCredentials?.(); if (peer?.uid !== undefined && process.getuid && peer.uid !== process.getuid()) return connection.destroy(); let body = ''; connection.setEncoding('utf8'); connection.on('data', chunk => { body += chunk; }); connection.on('end', async () => { let response: Response; try { const request = JSON.parse(body) as Request; if (request.operation === 'shutdown') { await shutdown(); response = { ok: true }; } else response = { ok: true, value: await broker.handle(request) }; } catch (error: any) { response = { ok: false, code: error?.code ?? 'INTERNAL_ERROR', message: error?.message ?? String(error) }; } connection.end(JSON.stringify(response)); }); });
   const shutdown = async () => { if (stopping) return; stopping = true; await broker.close(); server.close(); try { unlinkSync(socket); } catch {} };
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(socket, () => { try { chmodSync(socket, 0o600); resolve(); } catch (error) { reject(error); } }); }); process.on('SIGINT', () => void shutdown()); process.on('SIGTERM', () => void shutdown());
 }
-export const brokerRequest = async (root: string, request: Request): Promise<any> => await new Promise((resolve, reject) => { const socket = net.createConnection(brokerSocket(root)); let body = ''; socket.setEncoding('utf8'); socket.once('error', reject); socket.on('data', chunk => { body += chunk; }); socket.on('end', () => { try { const response = JSON.parse(body) as Response; if (!response.ok) { const error: any = new Error(response.message); error.code = response.code; reject(error); } else resolve(response.value); } catch (error) { reject(error); } }); socket.end(JSON.stringify(request)); });
+export const brokerRequest = async (root: string, request: Request): Promise<any> => await new Promise((resolve, reject) => {
+  const path = brokerSocket(root); try { const stat = lstatSync(path); if (!stat.isSocket() || (uid !== undefined && stat.uid !== uid)) throw new Error('Broker socket is not owned by this OS user.'); } catch (error: any) { if (error.code !== 'ENOENT') return reject(error); }
+  const socket = net.createConnection(path); let body = ''; let settled = false;
+  const finish = (error?: Error, value?: any) => { if (settled) return; settled = true; clearTimeout(timeout); socket.destroy(); error ? reject(error) : resolve(value); };
+  const timeout = setTimeout(() => finish(new Error('Broker RPC timed out.')), 15_000);
+  socket.setEncoding('utf8'); socket.once('error', (error) => finish(error)); socket.on('data', chunk => { body += chunk; }); socket.on('end', () => { try { const response = JSON.parse(body) as Response; if (!response.ok) { const error: any = new Error(response.message); error.code = response.code; finish(error); } else finish(undefined, response.value); } catch (error: any) { finish(error); } }); socket.end(JSON.stringify(request));
+});

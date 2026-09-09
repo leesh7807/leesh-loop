@@ -49,6 +49,11 @@ to Markdown only after `State = completed`.
   acknowledgment, terminal error, timeout, or cancellation while Chrome itself remains available
   until explicit `shutdown`. A successful `shutdown` response is sent only after the Chrome child
   has exited and released the profile, so `login` can safely take ownership next.
+- The runtime base itself is validated as owner-controlled before it is used. Clients validate that
+  the broker socket is a socket owned by their OS UID before connecting, preventing a different
+  local user from preclaiming a predictable shared-temporary pathname. Broker RPCs and private CDP
+  requests have bounded deadlines; cancellation has an independent short exit bound if broker
+  cleanup is wedged.
 - Each invocation owns a distinct fresh browser page. Browser-sensitive work is broker-owned while
   Notion polling after acknowledgment remains concurrent.
 - Browser tab cleanup begins before authentication and Notion invocation creation, so every command
@@ -59,6 +64,9 @@ to Markdown only after `State = completed`.
   preserved as a Markdown task list. Any child block of a list item is indented with that list
   context, code fences are longer than every backtick run in their Notion code content, and
   equation expressions are projected as displayed LaTex Markdown.
+- Result serialization treats Notion rich text as literal content unless an explicit Notion
+  annotation supplies Markdown formatting, escapes Markdown syntax that would alter the source
+  block meaning, and never applies list/table whitespace normalization inside fenced code content.
 - Once Notion reports `in_progress`, `completed`, or `failed`, acknowledgment is proven and the
   browser inspection path is disabled. A `not_submitted` retry starts one new bounded acknowledgment
   window; the second failure is reported without a third submission. A `submitted` inspection

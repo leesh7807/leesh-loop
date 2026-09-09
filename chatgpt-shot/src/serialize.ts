@@ -1,20 +1,32 @@
 import { fail } from './errors.js';
 import type { NotionStore } from './notion.js';
 
-const richText = (items: any[] = []) => items.map((item) => {
-  const value = item.plain_text ?? item.text?.content ?? '';
+const escapeLiteral = (value: string) => value
+  .replace(/([\\`*_{}\[\]()!|])/g, '\\$1')
+  .replace(/(^|\n)([ \t]*)(?=(?:[-+*] |\d+\. |#{1,6} |> |-){1})/g, '$1$2\\');
+const inlineFence = (value: string) => '`'.repeat(Math.max(1, ...(value.match(/`+/g) ?? []).map((run) => run.length + 1)));
+const richText = (items: any[] = [], literal = false) => items.map((item) => {
+  const raw = item.plain_text ?? item.text?.content ?? '';
   const href = item.href ?? item.text?.link?.url;
-  return href
-    ? `[${value.replace(/[\\\[\]]/g, '\\$&')}](${href.replace(/\)/g, '\\)')})`
-    : value;
+  if (literal) return raw;
+  const annotations = item.annotations ?? {};
+  let value = annotations.code ? `${inlineFence(raw)}${raw}${inlineFence(raw)}` : escapeLiteral(raw);
+  if (!annotations.code) {
+    if (annotations.bold) value = `**${value}**`;
+    if (annotations.italic) value = `*${value}*`;
+    if (annotations.strikethrough) value = `~~${value}~~`;
+    if (annotations.underline) value = `<u>${value}</u>`;
+  }
+  return href ? `[${value}](${href.replace(/\)/g, '\\)')})` : value;
 }).join('');
 
-const rich = (block: any) => richText(
+const rich = (block: any, literal = false) => richText(
   block[block.type]?.rich_text ?? block[block.type]?.text ?? [],
+  literal,
 );
 
 const tableRow = (block: any) => `| ${(block.table_row?.cells ?? [])
-  .map((cell: any[]) => richText(cell).replace(/\|/g, '\\|'))
+  .map((cell: any[]) => richText(cell))
   .join(' | ')} |`;
 
 const fenceFor = (text: string) => {
@@ -58,7 +70,7 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
         continue;
       }
 
-      const text = rich(block);
+      const text = rich(block, block.type === 'code');
       let line: string | undefined;
 
       switch (block.type) {
@@ -90,8 +102,18 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
     return lines;
   }
 
-  return (await render(await store.children(pageId)))
-    .join('\n\n')
+  const normalize = (markdown: string) => markdown
     .replace(/((?:^|\n)[ \t]*(?:[-*+] |\d+\. )[^\n]*)\n\n(?=[ \t]*(?:[-*+] |\d+\. ))/g, '$1\n')
     .replace(/\n\n(?=[ \t]*\|)/g, '\n');
+  const source = (await render(await store.children(pageId))).join('\n\n');
+  const output: string[] = []; let prose: string[] = []; let literal: string[] | undefined; let fence: string | undefined;
+  const flushProse = () => { if (prose.length) output.push(normalize(prose.join('\n'))); prose = []; };
+  for (const line of source.split('\n')) {
+    const opened = line.match(/^[ \t]*(`{3,})/);
+    if (!literal && opened) { flushProse(); literal = [line]; fence = opened[1]; continue; }
+    if (literal) { literal.push(line); if (new RegExp(`^[ \\t]*${fence}[ \\t]*$`).test(line)) { output.push(literal.join('\n')); literal = undefined; fence = undefined; } continue; }
+    prose.push(line);
+  }
+  if (literal) output.push(literal.join('\n')); else flushProse();
+  return output.join('\n');
 }

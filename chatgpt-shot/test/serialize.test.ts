@@ -65,3 +65,14 @@ test('preserves Notion equation expressions', async () => {
   const result = await markdownResult({ children: async () => [{ id:'equation',type:'equation',equation:{expression:'e=mc^2'},has_children:false }] } as any, 'page');
   assert.equal(result, '$$\ne=mc^2\n$$');
 });
+test('does not normalize list or table-looking literal code', async () => {
+  const result = await markdownResult({ children: async () => [{ id:'code',type:'code',code:{language:'text',rich_text:[{plain_text:'- first\n\n- second\n\n| literal'}]},has_children:false }] } as any, 'page');
+  assert.equal(result, '```text\n- first\n\n- second\n\n| literal\n```');
+});
+test('escapes literal Markdown syntax and preserves Notion annotations', async () => {
+  const result = await markdownResult({ children: async () => [
+    { id:'literal',type:'paragraph',paragraph:{rich_text:[{plain_text:'--- *literal*'}]},has_children:false },
+    { id:'formatted',type:'paragraph',paragraph:{rich_text:[{plain_text:'bold',annotations:{bold:true}},{plain_text:' code',annotations:{code:true}}]},has_children:false },
+  ] } as any, 'page');
+  assert.equal(result, '\\--- \\*literal\\*\n\n**bold**` code`');
+});
