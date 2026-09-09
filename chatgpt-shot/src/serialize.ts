@@ -2,22 +2,26 @@ import { fail } from './errors.js';
 import type { NotionStore } from './notion.js';
 
 const escapeLiteral = (value: string) => value
-  .replace(/([\\`*_{}\[\]()!|~])/g, '\\$1')
-  .replace(/(^|\n)([ \t]*)(?=(?:[-+*] |\d+\. |#{1,6} |> |-){1})/g, '$1$2\\');
+  .replace(/([\\`*_{}\[\]()!|~<&>])/g, '\\$1')
+  .replace(/(^|\n)([ \t]*)(\d+)([.)])(?= )/g, '$1$2$3\\$4')
+  .replace(/(^|\n)([ \t]*)([-+*>])(?= )/g, '$1$2\\$3')
+  .replace(/(^|\n)([ \t]*)(#{1,6})(?= )/g, '$1$2\\$3')
+  .replace(/(^|\n)([ \t]*)(-{3,})(?=\s*$)/g, '$1$2\\$3');
 const inlineFence = (value: string) => '`'.repeat(Math.max(1, ...(value.match(/`+/g) ?? []).map((run) => run.length + 1)));
-const richText = (items: any[] = [], literal = false) => items.map((item) => {
+const richText = (items: any[] = [], literal = false, tableCell = false) => items.map((item) => {
   const raw = item.plain_text ?? item.text?.content ?? '';
   const href = item.href ?? item.text?.link?.url;
   if (literal) return raw;
   const annotations = item.annotations ?? {};
-  let value = annotations.code ? `${inlineFence(raw)} ${raw} ${inlineFence(raw)}` : escapeLiteral(raw);
+  const tableCode = tableCell && annotations.code ? raw.replace(/(\\*)\|/g, (_: string, slashes: string) => `${'\\'.repeat(slashes.length * 2 + 1)}|`) : raw;
+  let value = annotations.code ? `${inlineFence(tableCode)} ${tableCode} ${inlineFence(tableCode)}` : escapeLiteral(raw);
   if (!annotations.code) {
     if (annotations.bold) value = `**${value}**`;
     if (annotations.italic) value = `*${value}*`;
     if (annotations.strikethrough) value = `~~${value}~~`;
     if (annotations.underline) value = `<u>${value}</u>`;
   }
-  return href ? `[${value}](${href.replace(/\)/g, '\\)')})` : value;
+  return href ? `[${value}](${href.replace(/[()]/g, '\\$&')})` : value;
 }).join('');
 
 const rich = (block: any, literal = false) => richText(
@@ -26,7 +30,7 @@ const rich = (block: any, literal = false) => richText(
 );
 
 const tableRow = (block: any) => `| ${(block.table_row?.cells ?? [])
-  .map((cell: any[]) => richText(cell).replace(/(?<!\\)\|/g, '\\|'))
+  .map((cell: any[]) => richText(cell, false, true).replace(/\n/g, '<br>'))
   .join(' | ')} |`;
 
 const fenceFor = (text: string) => {
@@ -37,6 +41,11 @@ const fenceFor = (text: string) => {
 const indent = (text: string, depth: number) => {
   const prefix = '    '.repeat(depth);
   return prefix ? text.split('\n').map((line) => `${prefix}${line}`).join('\n') : text;
+};
+const contextualIndent = (text: string, listDepth: number, quoteDepth: number) => {
+  let value = indent(text, listDepth);
+  for (let i = 0; i < quoteDepth; i++) value = value.split('\n').map((line) => line ? `> ${line}` : '>').join('\n');
+  return value;
 };
 
 const fallback = (block: any) => {
@@ -50,7 +59,7 @@ const fallback = (block: any) => {
 };
 
 export async function markdownResult(store: NotionStore, pageId: string): Promise<string> {
-  async function render(blocks: any[], listDepth = 0): Promise<string[]> {
+  async function render(blocks: any[], listDepth = 0, quoteDepth = 0): Promise<string[]> {
     const lines: string[] = [];
 
     for (const block of blocks) {
@@ -66,7 +75,7 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
         // Markdown tables require a delimiter row even when Notion has no header.
         // The first Notion row becomes a synthetic Markdown header in that case.
         output.splice(1, 0, `| ${Array(columns).fill('---').join(' | ')} |`);
-        lines.push(...output.map((line) => indent(line, listDepth)));
+        lines.push(...output.map((line) => contextualIndent(line, listDepth, quoteDepth)));
         continue;
       }
 
@@ -93,10 +102,10 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
           }
       }
 
-      if (line !== undefined) lines.push(indent(line, listDepth));
+      if (line !== undefined) lines.push(contextualIndent(line, listDepth, quoteDepth));
       if (block.has_children) {
         const listParent = ['bulleted_list_item', 'numbered_list_item', 'to_do'].includes(block.type);
-        lines.push(...await render(await store.children(block.id), listParent ? listDepth + 1 : listDepth));
+        lines.push(...await render(await store.children(block.id), listParent ? listDepth + 1 : listDepth, block.type === 'quote' ? quoteDepth + 1 : quoteDepth));
       }
     }
     return lines;

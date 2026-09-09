@@ -23,7 +23,15 @@ export async function manualLogin(root: string): Promise<void> {
   const profile = profilePath(root); mkdirSync(profile, { recursive: true, mode: 0o700 });
   await new Promise<void>((resolve, reject) => { const child: import('node:child_process').ChildProcess = spawn(executable!, [`--user-data-dir=${profile}`, '--profile-directory=Default', '--no-first-run', '--no-default-browser-check', 'https://chatgpt.com/'], { stdio: 'ignore' }); child.once('error', reject); child.once('close', () => resolve()); });
 }
-export async function shutdownBroker(root: string): Promise<void> { await request(root, 'shutdown'); }
+export async function shutdownBroker(root: string): Promise<void> {
+  try { await request(root, 'shutdown'); }
+  catch (error: any) {
+    // No broker is the normal first-login and already-shut-down state. Do not conceal a live
+    // broker's shutdown failure, which has a different error category.
+    if (error?.code === 'ENOENT' || error?.code === 'ECONNREFUSED') return;
+    throw error;
+  }
+}
 
 export class ChatGPTBrowser implements BrowserTransport {
   private sessionId?: string;

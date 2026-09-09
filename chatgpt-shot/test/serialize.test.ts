@@ -74,7 +74,7 @@ test('escapes literal Markdown syntax and preserves Notion annotations', async (
     { id:'literal',type:'paragraph',paragraph:{rich_text:[{plain_text:'--- *literal*'}]},has_children:false },
     { id:'formatted',type:'paragraph',paragraph:{rich_text:[{plain_text:'bold',annotations:{bold:true}},{plain_text:' code',annotations:{code:true}}]},has_children:false },
   ] } as any, 'page');
-  assert.equal(result, '\\--- \\*literal\\*\n\n**bold**`  code `');
+  assert.equal(result, '--- \\*literal\\*\n\n**bold**`  code `');
 });
 test('keeps table pipes inside annotated inline code in their cell', async () => {
   const blocks = new Map<string, any[]>([
@@ -89,4 +89,36 @@ test('preserves inline-code boundary backticks, spaces, and literal tildes', asy
     {plain_text:'`x`',annotations:{code:true}}, {plain_text:' '}, {plain_text:' x ',annotations:{code:true}}, {plain_text:' ~~literal~~'},
   ]},has_children:false }] } as any, 'page');
   assert.equal(result, '`` `x` `` `  x  ` \\~\\~literal\\~\\~');
+});
+test('keeps numbered, HTML, and entity-looking text literal', async () => {
+  const result = await markdownResult({ children: async () => [{ id:'p',type:'paragraph',paragraph:{rich_text:[{plain_text:'1. literal\n<b>raw</b> &copy;'}]},has_children:false }] } as any, 'page');
+  assert.equal(result, '1\\. literal\n\\<b\\>raw\\</b\\> \\&copy;');
+});
+test('keeps multiline table cells inside one physical Markdown row', async () => {
+  const blocks = new Map<string, any[]>([
+    ['page', [{ id:'t',type:'table',table:{has_column_header:true},has_children:true }]],
+    ['t', [{ id:'r',type:'table_row',table_row:{cells:[[{plain_text:'a\nb'}],[{plain_text:'c'}]]},has_children:false }]],
+  ]);
+  const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
+  assert.equal(result, '| a<br>b | c |\n| --- | --- |');
+});
+test('keeps balanced parentheses URLs as links', async () => {
+  const result = await markdownResult({ children: async () => [{ id:'p',type:'paragraph',paragraph:{rich_text:[{plain_text:'Open',href:'https://example.com/foo(bar)'}]},has_children:false }] } as any, 'page');
+  assert.equal(result, '[Open](https://example.com/foo\\(bar\\))');
+});
+test('keeps quote descendants within the blockquote', async () => {
+  const blocks = new Map<string, any[]>([
+    ['page', [{ id:'q',type:'quote',quote:{rich_text:[{plain_text:'Parent'}]},has_children:true }]],
+    ['q', [{ id:'p',type:'paragraph',paragraph:{rich_text:[{plain_text:'Child'}]},has_children:false }]],
+  ]);
+  const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
+  assert.equal(result, '> Parent\n\n> Child');
+});
+test('preserves a literal backslash before an inline-code table pipe', async () => {
+  const blocks = new Map<string, any[]>([
+    ['page', [{ id:'t',type:'table',table:{has_column_header:true},has_children:true }]],
+    ['t', [{ id:'r',type:'table_row',table_row:{cells:[[{plain_text:'a\\|b',annotations:{code:true}}],[{plain_text:'c'}]]},has_children:false }]],
+  ]);
+  const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
+  assert.equal(result, '| ` a\\\\\\|b ` | c |\n| --- | --- |');
 });
