@@ -76,6 +76,8 @@ to Markdown only after `State = completed`.
   Fresh-page open has a broker-side absolute deadline shorter than its RPC caller deadline; target
   creation, navigation probes, auth, and composer checks share that deadline, and failed opens close
   their target before the caller can time out without a session ID.
+  Prompt fill likewise uses a 45-second broker-side composer/fill deadline below its 60-second RPC
+  caller deadline, so a transient rerender cannot leave caller and broker with conflicting outcomes.
 - Each invocation owns a distinct fresh browser page. Browser-sensitive work is broker-owned while
   Notion polling after acknowledgment remains concurrent. The actual fresh page is navigated,
   authenticated, and composer-validated before its pending Invocation record is created, so a
