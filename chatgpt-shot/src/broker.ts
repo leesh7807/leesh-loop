@@ -16,6 +16,7 @@ const runtimeBase = () => {
   // intentionally per-session and may differ between those invocations, so it cannot name the
   // durable broker identity.
   const cache = join(homedir(), '.cache');
+  if (!existsSync(cache)) mkdirSync(cache, { recursive: true, mode: 0o700 });
   if (!ownedDirectory(cache)) fail('BROWSER_UNAVAILABLE', 'No owner-controlled local runtime directory is available.');
   return cache;
 };
@@ -100,7 +101,16 @@ class Broker {
     for (let i = 0; i < 30; i++) { const state = await page.evaluate<boolean>('()=>document.readyState!=="loading"'); if (state) { if (await page.evaluate<boolean>('()=>/just a moment|checking your browser/i.test(document.body.innerText)')) fail('USER_INTERVENTION_REQUIRED', 'ChatGPT Web requires user intervention before automation can continue.'); return; } await delay(500); }
     fail('BROWSER_UNAVAILABLE', 'ChatGPT did not become ready before its deadline.');
   }
-  private async auth(page: Page) { await this.ready(page); return page.evaluate<{ loginVisible: boolean; accountVisible: boolean; authenticated: boolean }>(authProbe); }
+  private async auth(page: Page) {
+    await this.ready(page);
+    let last: { loginVisible: boolean; accountVisible: boolean; authenticated: boolean } = { loginVisible: false, accountVisible: false, authenticated: false };
+    for (let i = 0; i < 60; i++) {
+      last = await page.evaluate<{ loginVisible: boolean; accountVisible: boolean; authenticated: boolean }>(authProbe);
+      if (last.authenticated || last.loginVisible) return last;
+      await delay(500);
+    }
+    return last;
+  }
   private async composer(page: Page) { await this.ready(page); for (let i = 0; i < 60; i++) { if (await page.evaluate<boolean>(composerProbe)) return; await delay(500); } fail('BROWSER_UNAVAILABLE', 'The authenticated ChatGPT composer is unavailable.'); }
   async handle(request: Request): Promise<unknown> {
     await this.runtime();

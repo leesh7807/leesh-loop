@@ -51,6 +51,9 @@ to Markdown only after `State = completed`.
   until explicit `shutdown`. A successful `shutdown` response is sent only after the Chrome child
   has exited and released the profile, so `login` can safely take ownership next.
 - The runtime base itself is validated as owner-controlled before it is used. Clients validate that
+  the per-user cache base is created owner-only when absent (while an existing unsafe base is still
+  rejected), so a fresh local account can initialize browser runtime state.
+  Clients validate that
   the broker socket is a socket owned by their OS UID before connecting, preventing a different
   local user from preclaiming a predictable shared-temporary pathname. Broker RPCs and private CDP
   requests have bounded deadlines; cancellation has an independent short exit bound if broker
@@ -78,6 +81,8 @@ to Markdown only after `State = completed`.
   their target before the caller can time out without a session ID.
   Prompt fill likewise uses a 45-second broker-side composer/fill deadline below its 60-second RPC
   caller deadline, so a transient rerender cannot leave caller and broker with conflicting outcomes.
+  Authentication similarly waits through a bounded account-UI hydration window, returning early only
+  on account evidence or an explicit visible logged-out control; composer readiness remains separate.
 - Each invocation owns a distinct fresh browser page. Browser-sensitive work is broker-owned while
   Notion polling after acknowledgment remains concurrent. The actual fresh page is navigated,
   authenticated, and composer-validated before its pending Invocation record is created, so a
