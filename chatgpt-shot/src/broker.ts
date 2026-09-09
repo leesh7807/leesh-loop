@@ -55,10 +55,11 @@ const authProbe = `()=>{${visibility}const c=[...document.querySelectorAll('a,bu
 const composerProbe = `()=>{${visibility}return [...document.querySelectorAll('textarea,[contenteditable="true"]')].some(visible)}`;
 
 class Broker {
-  private process?: ChildProcess; private cdp?: PipeCdp; private control?: Page; private starting?: Promise<void>;
+  private process?: ChildProcess; private cdp?: PipeCdp; private control?: Page; private starting?: Promise<void>; private startingChild?: ChildProcess; private startingCdp?: PipeCdp; private stopping = false;
   private readonly pages = new Map<string, Page>();
   constructor(private readonly root: string) {}
   private async runtime() {
+    if (this.stopping) fail('BROWSER_UNAVAILABLE', 'Browser broker is shutting down.');
     if (this.cdp && this.control) return;
     if (this.starting) return this.starting;
     const start = this.startRuntime(); this.starting = start; try { return await start; } finally { this.starting = undefined; }
@@ -68,15 +69,15 @@ class Broker {
     const directory = profile(this.root); mkdirSync(directory, { recursive: true, mode: 0o700 }); chmodSync(directory, 0o700);
     const child = spawn(executable!, [`--user-data-dir=${directory}`, '--profile-directory=Default', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check', '--disable-background-mode', '--start-minimized'], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] }) as ChildProcess;
     const input = child.stdio[3], output = child.stdio[4]; if (!input || !output) { child.kill(); fail('BROWSER_UNAVAILABLE', 'Chrome did not create its private debugging pipe.'); }
-    const cdp = new PipeCdp(input as NodeJS.WritableStream, output as NodeJS.ReadableStream);
+    const cdp = new PipeCdp(input as NodeJS.WritableStream, output as NodeJS.ReadableStream); this.startingChild = child; this.startingCdp = cdp;
     child.once('exit', () => { if (this.process === child) { this.process = undefined; this.cdp = undefined; this.control = undefined; this.pages.clear(); } });
     try {
-      const control = await this.createPage(cdp); await control.navigate(); await this.ready(control);
+      const control = await this.createPage(cdp); await control.navigate(); await this.ready(control); if (this.stopping) throw new Error('Broker shutdown began during startup.');
       this.process = child; this.cdp = cdp; this.control = control;
     } catch (error) {
       cdp.close(); if (child.exitCode === null) child.kill('SIGTERM');
       throw error;
-    }
+    } finally { if (this.startingChild === child) this.startingChild = undefined; if (this.startingCdp === cdp) this.startingCdp = undefined; }
   }
   private async createPage(cdp = this.cdp!) { const created = await cdp.send('Target.createTarget', { url: 'about:blank' }); const attached = await cdp.send('Target.attachToTarget', { targetId: created.targetId, flatten: true }); return new Page(created.targetId, attached.sessionId, cdp); }
   private async ready(page: Page) {
@@ -98,9 +99,20 @@ class Broker {
     fail('INTERNAL_ERROR', `Unsupported broker operation ${request.operation}.`);
   }
   async close() {
+    this.stopping = true;
+    // A startup has not published ownership yet, but it still owns the profile.
+    // Stop and reap it before reporting shutdown complete.
+    const startingChild = this.startingChild;
+    this.startingCdp?.close();
+    if (startingChild?.exitCode === null) startingChild.kill('SIGTERM');
+    await this.starting?.catch(() => {});
+    await this.terminate(startingChild);
     await Promise.all([...this.pages.values()].map((page) => page.close().catch(() => {})));
     this.pages.clear(); this.cdp?.close(); const child = this.process;
     this.process = undefined; this.cdp = undefined; this.control = undefined;
+    await this.terminate(child);
+  }
+  private async terminate(child?: ChildProcess) {
     if (!child || child.exitCode !== null) return;
     await new Promise<void>((resolve) => {
       const force = setTimeout(() => child.kill('SIGKILL'), 5_000);

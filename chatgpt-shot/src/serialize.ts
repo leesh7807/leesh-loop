@@ -6,7 +6,8 @@ const escapeLiteral = (value: string) => value
   .replace(/(^|\n)([ \t]*)(\d+)([.)])(?= )/g, '$1$2$3\\$4')
   .replace(/(^|\n)([ \t]*)([-+*>])(?= )/g, '$1$2\\$3')
   .replace(/(^|\n)([ \t]*)(#{1,6})(?= )/g, '$1$2\\$3')
-  .replace(/(^|\n)([ \t]*)(-{3,})(?=\s*$)/g, '$1$2\\$3');
+  .replace(/(^|\n)([ \t]*)([-=]{3,})(?=[ \t]*(?:\n|$))/g, '$1$2\\$3')
+  .replace(/(^|\n)(?: {4,}|\t+)/g, (line) => line.replace(/ /g, '&nbsp;').replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;'));
 const inlineFence = (value: string) => '`'.repeat(Math.max(1, ...(value.match(/`+/g) ?? []).map((run) => run.length + 1)));
 const richText = (items: any[] = [], literal = false, tableCell = false) => items.map((item) => {
   const raw = item.plain_text ?? item.text?.content ?? '';
@@ -115,7 +116,13 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
   const normalize = (markdown: string) => markdown
     .replace(/((?:^|\n)[ \t]*(?:[-*+] |\d+\. )[^\n]*)\n\n(?=[ \t]*(?:[-*+] |\d+\. ))/g, '$1\n')
     .replace(/\n\n(?=[ \t]*\|)/g, '\n');
-  const source = (await render(await store.children(pageId))).join('\n\n');
+  const blocks = await render(await store.children(pageId));
+  const quotePrefix = (block: string) => block.match(/^((?: {4})*(?:> )+)/)?.[1]?.trimEnd();
+  const source = blocks.reduce((output, block, index) => {
+    if (!index) return block;
+    const previous = quotePrefix(blocks[index - 1]); const current = quotePrefix(block);
+    return `${output}${previous && current ? `\n${previous}\n` : '\n\n'}${block}`;
+  }, '');
   const output: string[] = []; let prose: string[] = []; let literal: string[] | undefined; let fence: string | undefined;
   const flushProse = () => { if (prose.length) output.push(normalize(prose.join('\n'))); prose = []; };
   for (const line of source.split('\n')) {

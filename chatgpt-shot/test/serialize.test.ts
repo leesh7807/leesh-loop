@@ -94,6 +94,10 @@ test('keeps numbered, HTML, and entity-looking text literal', async () => {
   const result = await markdownResult({ children: async () => [{ id:'p',type:'paragraph',paragraph:{rich_text:[{plain_text:'1. literal\n<b>raw</b> &copy;'}]},has_children:false }] } as any, 'page');
   assert.equal(result, '1\\. literal\n\\<b\\>raw\\</b\\> \\&copy;');
 });
+test('keeps setext-looking and indented paragraph text literal', async () => {
+  const result = await markdownResult({ children: async () => [{ id:'p',type:'paragraph',paragraph:{rich_text:[{plain_text:'Title\n===\n\ntext\n\n    code'}]},has_children:false }] } as any, 'page');
+  assert.equal(result, 'Title\n\\===\n\ntext\n\n&nbsp;&nbsp;&nbsp;&nbsp;code');
+});
 test('keeps multiline table cells inside one physical Markdown row', async () => {
   const blocks = new Map<string, any[]>([
     ['page', [{ id:'t',type:'table',table:{has_column_header:true},has_children:true }]],
@@ -112,7 +116,7 @@ test('keeps quote descendants within the blockquote', async () => {
     ['q', [{ id:'p',type:'paragraph',paragraph:{rich_text:[{plain_text:'Child'}]},has_children:false }]],
   ]);
   const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
-  assert.equal(result, '> Parent\n\n> Child');
+  assert.equal(result, '> Parent\n>\n> Child');
 });
 test('keeps quote descendants inside their list item in ancestor order', async () => {
   const blocks = new Map<string, any[]>([
@@ -121,7 +125,18 @@ test('keeps quote descendants inside their list item in ancestor order', async (
     ['q', [{ id:'p',type:'paragraph',paragraph:{rich_text:[{plain_text:'Child'}]},has_children:false }]],
   ]);
   const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
-  assert.equal(result, '- item\n\n    > Parent\n\n    > Child');
+  assert.equal(result, '- item\n\n    > Parent\n    >\n    > Child');
+});
+test('keeps multiple list children in one blockquote', async () => {
+  const blocks = new Map<string, any[]>([
+    ['page', [{ id:'q',type:'quote',quote:{rich_text:[{plain_text:'Parent'}]},has_children:true }]],
+    ['q', [
+      { id:'a',type:'bulleted_list_item',bulleted_list_item:{rich_text:[{plain_text:'A'}]},has_children:false },
+      { id:'b',type:'bulleted_list_item',bulleted_list_item:{rich_text:[{plain_text:'B'}]},has_children:false },
+    ]],
+  ]);
+  const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
+  assert.equal(result, '> Parent\n>\n> - A\n>\n> - B');
 });
 test('preserves a literal backslash before an inline-code table pipe', async () => {
   const blocks = new Map<string, any[]>([

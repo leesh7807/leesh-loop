@@ -59,8 +59,10 @@ to Markdown only after `State = completed`.
   profile is released. Shutdown is idempotent when no broker exists, which is the normal first
   `login` state; a live broker shutdown failure remains an error and prevents profile handoff.
 - Broker runtime startup publishes Chrome ownership only after its private pipe, control target,
-  navigation, and readiness checks all succeed. Any partial startup closes its pipe and terminates
-  its child; an older child exit cannot erase a newer published runtime.
+  navigation, and readiness checks all succeed. Shutdown also owns an in-flight unpublished
+  startup: it closes its pipe, terminates and reaps its child, and prevents late publication before
+  reporting profile release. Any other partial startup closes its pipe and terminates its child;
+  an older child exit cannot erase a newer published runtime.
 - Each invocation owns a distinct fresh browser page. Browser-sensitive work is broker-owned while
   Notion polling after acknowledgment remains concurrent.
 - Browser tab cleanup begins before authentication and Notion invocation creation, so every command
@@ -78,7 +80,9 @@ to Markdown only after `State = completed`.
   edge backticks/whitespace; table-cell pipes are escaped even inside an inline-code span.
   Tables encode rich-text line breaks as `<br>` within a physical Markdown row, links escape both
   parentheses in destinations, and descendants retain an ordered ancestor container stack (rather
-  than independent list/quote depths) so list-within-quote and quote-within-list preserve nesting.
+  than independent list/quote depths) so list-within-quote and quote-within-list preserve nesting;
+  quote-context separators retain their quote marker. Literal paragraphs also neutralize Setext
+  underlines and indentation that would otherwise become Markdown code blocks.
 - Once Notion reports `in_progress`, `completed`, or `failed`, acknowledgment is proven and the
   browser inspection path is disabled. A `not_submitted` retry starts one new bounded acknowledgment
   window; the second failure is reported without a third submission. A `submitted` inspection
