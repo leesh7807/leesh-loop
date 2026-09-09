@@ -31,11 +31,11 @@ class PipeCdp {
     output.setEncoding('utf8'); output.on('data', (chunk: string) => { this.buffer += chunk; let end: number; while ((end = this.buffer.indexOf('\0')) >= 0) { const body = this.buffer.slice(0, end); this.buffer = this.buffer.slice(end + 1); if (body) this.receive(JSON.parse(body)); } });
     const close = () => this.finish(); input.once('error', close); output.once('end', close); output.once('close', close); output.once('error', close);
   }
-  send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<any> {
+  send(method: string, params: Record<string, unknown> = {}, sessionId?: string, timeoutMs = 30_000): Promise<any> {
     if (this.closed) return Promise.reject(new Error('Chrome private debugging pipe is closed.'));
     const id = ++this.next; this.input.write(`${JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })}\0`);
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => { if (this.pending.delete(id)) reject(new Error(`CDP ${method} timed out.`)); }, 30_000);
+      const timeout = setTimeout(() => { if (this.pending.delete(id)) reject(new Error(`CDP ${method} timed out.`)); }, timeoutMs);
       this.pending.set(id, { resolve: (value) => { clearTimeout(timeout); resolve(value); }, reject: (error) => { clearTimeout(timeout); reject(error); } });
     });
   }
@@ -45,11 +45,14 @@ class PipeCdp {
 }
 
 class Page {
+  private deadline = Number.POSITIVE_INFINITY;
   constructor(readonly targetId: string, readonly sessionId: string, private readonly cdp: PipeCdp) {}
-  async evaluate<T>(expression: string, args: unknown[] = []): Promise<T> { const result = await this.cdp.send('Runtime.evaluate', { expression: `(${expression})(...${JSON.stringify(args)})`, awaitPromise: true, returnByValue: true }, this.sessionId); if (result.exceptionDetails) throw new Error(result.exceptionDetails.text ?? 'Page evaluation failed.'); return result.result.value as T; }
+  async within<T>(deadline: number, operation: () => Promise<T>): Promise<T> { const previous = this.deadline; this.deadline = Math.min(previous, deadline); try { return await operation(); } finally { this.deadline = previous; } }
+  private remaining() { const ms = this.deadline - Date.now(); if (ms <= 0) fail('BROWSER_UNAVAILABLE', 'ChatGPT browser operation exceeded its broker deadline.'); return Math.min(30_000, ms); }
+  async evaluate<T>(expression: string, args: unknown[] = []): Promise<T> { const result = await this.cdp.send('Runtime.evaluate', { expression: `(${expression})(...${JSON.stringify(args)})`, awaitPromise: true, returnByValue: true }, this.sessionId, this.remaining()); if (result.exceptionDetails) throw new Error(result.exceptionDetails.text ?? 'Page evaluation failed.'); return result.result.value as T; }
   async navigate(url = 'https://chatgpt.com/') {
-    await this.cdp.send('Page.enable', {}, this.sessionId);
-    const result = await this.cdp.send('Page.navigate', { url }, this.sessionId);
+    await this.cdp.send('Page.enable', {}, this.sessionId, this.remaining());
+    const result = await this.cdp.send('Page.navigate', { url }, this.sessionId, this.remaining());
     if (result.errorText) fail('BROWSER_UNAVAILABLE', `ChatGPT navigation failed: ${result.errorText}`);
     const origin = new URL(url).origin;
     for (let i = 0; i < 60; i++) {
@@ -58,7 +61,7 @@ class Page {
     }
     fail('BROWSER_UNAVAILABLE', 'ChatGPT navigation did not commit before its deadline.');
   }
-  async close() { await this.cdp.send('Target.closeTarget', { targetId: this.targetId }); }
+  async close() { await this.cdp.send('Target.closeTarget', { targetId: this.targetId }, undefined, 5_000); }
 }
 
 const visibility = `const visible=e=>{const s=getComputedStyle(e),b=e.getBoundingClientRect();return s.visibility!=='hidden'&&s.display!=='none'&&b.width>0&&b.height>0};`;
@@ -83,14 +86,14 @@ class Broker {
     const cdp = new PipeCdp(input as NodeJS.WritableStream, output as NodeJS.ReadableStream); this.startingChild = child; this.startingCdp = cdp;
     child.once('exit', () => { if (this.process === child) { this.process = undefined; this.cdp = undefined; this.control = undefined; this.pages.clear(); } });
     try {
-      const control = await this.createPage(cdp); await control.navigate(); await this.ready(control); if (this.stopping) throw new Error('Broker shutdown began during startup.');
+      const deadline = Date.now() + 150_000; const control = await this.createPage(cdp, deadline); await control.within(deadline, async () => { await control.navigate(); await this.ready(control); }); if (this.stopping) throw new Error('Broker shutdown began during startup.');
       this.process = child; this.cdp = cdp; this.control = control;
     } catch (error) {
       cdp.close(); if (child.exitCode === null) child.kill('SIGTERM');
       throw error;
     } finally { if (this.startingChild === child) this.startingChild = undefined; if (this.startingCdp === cdp) this.startingCdp = undefined; }
   }
-  private async createPage(cdp = this.cdp!) { const created = await cdp.send('Target.createTarget', { url: 'about:blank' }); const attached = await cdp.send('Target.attachToTarget', { targetId: created.targetId, flatten: true }); return new Page(created.targetId, attached.sessionId, cdp); }
+  private async createPage(cdp = this.cdp!, deadline = Date.now() + 30_000) { const remaining = () => { const ms = deadline - Date.now(); if (ms <= 0) fail('BROWSER_UNAVAILABLE', 'ChatGPT target creation exceeded its broker deadline.'); return Math.min(30_000, ms); }; const created = await cdp.send('Target.createTarget', { url: 'about:blank' }, undefined, remaining()); const attached = await cdp.send('Target.attachToTarget', { targetId: created.targetId, flatten: true }, undefined, remaining()); return new Page(created.targetId, attached.sessionId, cdp); }
   private async ready(page: Page) {
     for (let i = 0; i < 30; i++) { const state = await page.evaluate<boolean>('()=>document.readyState!=="loading"'); if (state) { if (await page.evaluate<boolean>('()=>/just a moment|checking your browser/i.test(document.body.innerText)')) fail('USER_INTERVENTION_REQUIRED', 'ChatGPT Web requires user intervention before automation can continue.'); return; } await delay(500); }
     fail('BROWSER_UNAVAILABLE', 'ChatGPT did not become ready before its deadline.');
@@ -101,7 +104,7 @@ class Broker {
     await this.runtime();
     if (request.operation === 'ensure') return;
     if (request.operation === 'auth') return this.auth(this.control!);
-    if (request.operation === 'open') { const page = await this.createPage(); try { await page.navigate(); const auth = await this.auth(page); if (!auth.authenticated) fail('CHATGPT_AUTH_REQUIRED', 'ChatGPT authentication is required. Run `chatgpt-shot login`.'); await this.composer(page); const id = randomUUID(); this.pages.set(id, page); return id; } catch (error) { await page.close().catch(() => {}); throw error; } }
+    if (request.operation === 'open') { const deadline = Date.now() + 75_000; const page = await this.createPage(this.cdp!, deadline); try { await page.within(deadline, async () => { await page.navigate(); const auth = await this.auth(page); if (!auth.authenticated) fail('CHATGPT_AUTH_REQUIRED', 'ChatGPT authentication is required. Run `chatgpt-shot login`.'); await this.composer(page); }); const id = randomUUID(); this.pages.set(id, page); return id; } catch (error) { await page.close().catch(() => {}); throw error; } }
     const page = request.sessionId ? this.pages.get(request.sessionId) : undefined; if (!page) return fail('BROWSER_UNAVAILABLE', 'Browser invocation page is unavailable.');
     if (request.operation === 'fill') { await this.composer(page); await page.evaluate(`value=>{${visibility}const e=[...document.querySelectorAll('textarea,[contenteditable="true"]')].find(visible);if(!e)throw new Error('composer unavailable');e.focus();if(e instanceof HTMLTextAreaElement){const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;s.call(e,value)}else e.textContent=value;e.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:value}))}`, [request.prompt ?? '']); return; }
     if (request.operation === 'submit') { const clicked = await page.evaluate<boolean>(`()=>{${visibility}const b=[...document.querySelectorAll('button')].find(e=>/send prompt|send message/i.test([e.getAttribute('aria-label'),e.textContent].filter(Boolean).join(' '))&&!e.disabled&&visible(e));if(!b)return false;b.click();return true}`); if (!clicked) await this.cdp!.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }, page.sessionId).then(() => this.cdp!.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }, page.sessionId)); return; }

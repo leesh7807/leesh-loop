@@ -73,6 +73,9 @@ to Markdown only after `State = completed`.
 - Each new browser target verifies that ChatGPT navigation has committed to the requested origin and
   reports CDP navigation errors as browser failures before readiness, authentication, or composer
   inspection. It never classifies an `about:blank` or failed navigation as missing authentication.
+  Fresh-page open has a broker-side absolute deadline shorter than its RPC caller deadline; target
+  creation, navigation probes, auth, and composer checks share that deadline, and failed opens close
+  their target before the caller can time out without a session ID.
 - Each invocation owns a distinct fresh browser page. Browser-sensitive work is broker-owned while
   Notion polling after acknowledgment remains concurrent. The actual fresh page is navigated,
   authenticated, and composer-validated before its pending Invocation record is created, so a
