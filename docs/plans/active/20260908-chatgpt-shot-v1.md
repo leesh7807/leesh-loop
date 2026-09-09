@@ -53,7 +53,10 @@ to Markdown only after `State = completed`.
   the broker socket is a socket owned by their OS UID before connecting, preventing a different
   local user from preclaiming a predictable shared-temporary pathname. Broker RPCs and private CDP
   requests have bounded deadlines; cancellation has an independent short exit bound if broker
-  cleanup is wedged.
+  cleanup is wedged. Operations that deliberately wait for a fresh ChatGPT composer or shutdown
+  use a caller deadline longer than their broker-side bounded wait budget, and a broker shutdown
+  has one shared completion promise: every successful response means Chrome has exited and the
+  profile is released.
 - Each invocation owns a distinct fresh browser page. Browser-sensitive work is broker-owned while
   Notion polling after acknowledgment remains concurrent.
 - Browser tab cleanup begins before authentication and Notion invocation creation, so every command
@@ -66,7 +69,9 @@ to Markdown only after `State = completed`.
   equation expressions are projected as displayed LaTex Markdown.
 - Result serialization treats Notion rich text as literal content unless an explicit Notion
   annotation supplies Markdown formatting, escapes Markdown syntax that would alter the source
-  block meaning, and never applies list/table whitespace normalization inside fenced code content.
+  block meaning (including literal tildes), and never applies list/table whitespace normalization
+  inside fenced code content. Inline code uses a fence and synthetic padding that preserve literal
+  edge backticks/whitespace; table-cell pipes are escaped even inside an inline-code span.
 - Once Notion reports `in_progress`, `completed`, or `failed`, acknowledgment is proven and the
   browser inspection path is disabled. A `not_submitted` retry starts one new bounded acknowledgment
   window; the second failure is reported without a third submission. A `submitted` inspection

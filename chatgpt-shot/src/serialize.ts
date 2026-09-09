@@ -2,7 +2,7 @@ import { fail } from './errors.js';
 import type { NotionStore } from './notion.js';
 
 const escapeLiteral = (value: string) => value
-  .replace(/([\\`*_{}\[\]()!|])/g, '\\$1')
+  .replace(/([\\`*_{}\[\]()!|~])/g, '\\$1')
   .replace(/(^|\n)([ \t]*)(?=(?:[-+*] |\d+\. |#{1,6} |> |-){1})/g, '$1$2\\');
 const inlineFence = (value: string) => '`'.repeat(Math.max(1, ...(value.match(/`+/g) ?? []).map((run) => run.length + 1)));
 const richText = (items: any[] = [], literal = false) => items.map((item) => {
@@ -10,7 +10,7 @@ const richText = (items: any[] = [], literal = false) => items.map((item) => {
   const href = item.href ?? item.text?.link?.url;
   if (literal) return raw;
   const annotations = item.annotations ?? {};
-  let value = annotations.code ? `${inlineFence(raw)}${raw}${inlineFence(raw)}` : escapeLiteral(raw);
+  let value = annotations.code ? `${inlineFence(raw)} ${raw} ${inlineFence(raw)}` : escapeLiteral(raw);
   if (!annotations.code) {
     if (annotations.bold) value = `**${value}**`;
     if (annotations.italic) value = `*${value}*`;
@@ -26,7 +26,7 @@ const rich = (block: any, literal = false) => richText(
 );
 
 const tableRow = (block: any) => `| ${(block.table_row?.cells ?? [])
-  .map((cell: any[]) => richText(cell))
+  .map((cell: any[]) => richText(cell).replace(/(?<!\\)\|/g, '\\|'))
   .join(' | ')} |`;
 
 const fenceFor = (text: string) => {

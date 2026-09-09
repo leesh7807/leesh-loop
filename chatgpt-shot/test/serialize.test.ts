@@ -74,5 +74,19 @@ test('escapes literal Markdown syntax and preserves Notion annotations', async (
     { id:'literal',type:'paragraph',paragraph:{rich_text:[{plain_text:'--- *literal*'}]},has_children:false },
     { id:'formatted',type:'paragraph',paragraph:{rich_text:[{plain_text:'bold',annotations:{bold:true}},{plain_text:' code',annotations:{code:true}}]},has_children:false },
   ] } as any, 'page');
-  assert.equal(result, '\\--- \\*literal\\*\n\n**bold**` code`');
+  assert.equal(result, '\\--- \\*literal\\*\n\n**bold**`  code `');
+});
+test('keeps table pipes inside annotated inline code in their cell', async () => {
+  const blocks = new Map<string, any[]>([
+    ['page', [{ id:'t',type:'table',table:{has_column_header:true},has_children:true }]],
+    ['t', [{ id:'r',type:'table_row',table_row:{cells:[[{plain_text:'a|b',annotations:{code:true}}],[{plain_text:'c'}]]},has_children:false }]],
+  ]);
+  const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
+  assert.equal(result, '| ` a\\|b ` | c |\n| --- | --- |');
+});
+test('preserves inline-code boundary backticks, spaces, and literal tildes', async () => {
+  const result = await markdownResult({ children: async () => [{ id:'p',type:'paragraph',paragraph:{rich_text:[
+    {plain_text:'`x`',annotations:{code:true}}, {plain_text:' '}, {plain_text:' x ',annotations:{code:true}}, {plain_text:' ~~literal~~'},
+  ]},has_children:false }] } as any, 'page');
+  assert.equal(result, '`` `x` `` `  x  ` \\~\\~literal\\~\\~');
 });

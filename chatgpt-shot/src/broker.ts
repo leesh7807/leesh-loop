@@ -91,7 +91,7 @@ class Broker {
     fail('INTERNAL_ERROR', `Unsupported broker operation ${request.operation}.`);
   }
   async close() {
-    for (const page of this.pages.values()) await page.close().catch(() => {});
+    await Promise.all([...this.pages.values()].map((page) => page.close().catch(() => {})));
     this.pages.clear(); this.cdp?.close(); const child = this.process;
     this.process = undefined; this.cdp = undefined; this.control = undefined;
     if (!child || child.exitCode !== null) return;
@@ -107,13 +107,15 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export async function runBroker(root: string): Promise<void> {
   const directory = runtimeDirectory(root); mkdirSync(directory, { recursive: true, mode: 0o700 }); chmodSync(directory, 0o700); if (!ownedDirectory(directory)) fail('BROWSER_UNAVAILABLE', 'Broker runtime directory is not owner-controlled.'); const socket = brokerSocket(root); const broker = new Broker(root); let stopping = false;
   const server = net.createServer({ allowHalfOpen: true }, connection => { const peer = (connection as unknown as { getPeerCredentials?: () => { uid?: number } }).getPeerCredentials?.(); if (peer?.uid !== undefined && process.getuid && peer.uid !== process.getuid()) return connection.destroy(); let body = ''; connection.setEncoding('utf8'); connection.on('data', chunk => { body += chunk; }); connection.on('end', async () => { let response: Response; try { const request = JSON.parse(body) as Request; if (request.operation === 'shutdown') { await shutdown(); response = { ok: true }; } else response = { ok: true, value: await broker.handle(request) }; } catch (error: any) { response = { ok: false, code: error?.code ?? 'INTERNAL_ERROR', message: error?.message ?? String(error) }; } connection.end(JSON.stringify(response)); }); });
-  const shutdown = async () => { if (stopping) return; stopping = true; await broker.close(); server.close(); try { unlinkSync(socket); } catch {} };
+  let shutdownPromise: Promise<void> | undefined;
+  const shutdown = () => shutdownPromise ??= (async () => { if (stopping) return; stopping = true; await broker.close(); server.close(); try { unlinkSync(socket); } catch {} })();
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(socket, () => { try { chmodSync(socket, 0o600); resolve(); } catch (error) { reject(error); } }); }); process.on('SIGINT', () => void shutdown()); process.on('SIGTERM', () => void shutdown());
 }
 export const brokerRequest = async (root: string, request: Request): Promise<any> => await new Promise((resolve, reject) => {
   const path = brokerSocket(root); try { const stat = lstatSync(path); if (!stat.isSocket() || (uid !== undefined && stat.uid !== uid)) throw new Error('Broker socket is not owned by this OS user.'); } catch (error: any) { if (error.code !== 'ENOENT') return reject(error); }
   const socket = net.createConnection(path); let body = ''; let settled = false;
   const finish = (error?: Error, value?: any) => { if (settled) return; settled = true; clearTimeout(timeout); socket.destroy(); error ? reject(error) : resolve(value); };
-  const timeout = setTimeout(() => finish(new Error('Broker RPC timed out.')), 15_000);
+  const timeoutMs = request.operation === 'open' || request.operation === 'shutdown' ? 90_000 : 15_000;
+  const timeout = setTimeout(() => finish(new Error('Broker RPC timed out.')), timeoutMs);
   socket.setEncoding('utf8'); socket.once('error', (error) => finish(error)); socket.on('data', chunk => { body += chunk; }); socket.on('end', () => { try { const response = JSON.parse(body) as Response; if (!response.ok) { const error: any = new Error(response.message); error.code = response.code; finish(error); } else finish(undefined, response.value); } catch (error: any) { finish(error); } }); socket.end(JSON.stringify(request));
 });
