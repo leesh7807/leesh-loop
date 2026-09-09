@@ -147,7 +147,9 @@ export const brokerRequest = async (root: string, request: Request): Promise<any
   const finish = (error?: Error, value?: any) => { if (settled) return; settled = true; clearTimeout(timeout); socket.destroy(); error ? reject(error) : resolve(value); };
   // Submit can fall back from a 30s DOM evaluation to two 30s CDP key events. Its caller must
   // never time out while the broker can still perform that side effect.
-  const timeoutMs = request.operation === 'submit' ? 95_000 : request.operation === 'open' || request.operation === 'shutdown' ? 90_000 : 15_000;
+  // ensure may cold-start Chrome, create/attach a target, navigate, and wait for readiness.
+  // Its caller must outlive every bounded private-CDP operation in that startup path.
+  const timeoutMs = request.operation === 'ensure' ? 180_000 : request.operation === 'submit' ? 95_000 : request.operation === 'open' || request.operation === 'shutdown' ? 90_000 : 15_000;
   const timeout = setTimeout(() => finish(new Error('Broker RPC timed out.')), timeoutMs);
   socket.setEncoding('utf8'); socket.once('error', (error) => finish(error)); socket.on('data', chunk => { body += chunk; }); socket.on('end', () => { try { const response = JSON.parse(body) as Response; if (!response.ok) { const error: any = new Error(response.message); error.code = response.code; finish(error); } else finish(undefined, response.value); } catch (error: any) { finish(error); } }); socket.end(JSON.stringify(request));
 });

@@ -42,7 +42,9 @@ export async function submit(store: NotionStore, databaseId: string, browser: Br
         if (current.state !== 'pending') { log('acknowledged', id); acknowledged = { ...current, at: Date.now() }; return; }
         if (!inspected && Date.now() - acknowledgementStarted >= ackMs) {
           inspected = true; log('submission_inspection_started', id);
-          const result = await browser.inspectSubmission(id);
+          // Losing the invocation page after a successful browser submit makes delivery
+          // ambiguous; it is never safe to reinterpret that as ordinary browser unavailability.
+          const result = await browser.inspectSubmission(id).catch(() => 'uncertain' as const);
           if (result === 'not_submitted' && attempts < 2) { log('submission_retry_attempted', id); await deliver(true); acknowledgementStarted = Date.now(); inspected = false; continue; }
           if (result === 'uncertain') fail('SUBMISSION_UNCERTAIN', `Submission status for ${id} is uncertain; it was not retried.`);
           if (result === 'submitted') fail('ACKNOWLEDGMENT_TIMEOUT', `Submitted invocation ${id} was not acknowledged by Notion.`);

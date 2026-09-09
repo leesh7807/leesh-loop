@@ -54,11 +54,14 @@ to Markdown only after `State = completed`.
   the broker socket is a socket owned by their OS UID before connecting, preventing a different
   local user from preclaiming a predictable shared-temporary pathname. Broker RPCs and private CDP
   requests have bounded deadlines; cancellation has an independent short exit bound if broker
-  cleanup is wedged. Operations that deliberately wait for a fresh ChatGPT composer or shutdown
+  cleanup is wedged. Cold `ensure` uses a startup deadline that covers Chrome launch, private-CDP
+  target setup, navigation, and readiness rather than the ordinary RPC deadline. Operations that
+  deliberately wait for a fresh ChatGPT composer or shutdown
   use a caller deadline longer than their broker-side bounded wait budget. The side-effecting
   submission RPC covers its complete broker/CDP budget; any transport failure after submit has
   begun is classified as `SUBMISSION_UNCERTAIN` and receives invocation-specific inspection before
-  retry policy is applied. A broker shutdown
+  retry policy is applied; loss of the invocation page during acknowledgment inspection has the
+  same uncertain result and is never treated as a safe retry. A broker shutdown
   has one shared completion promise: every successful response means Chrome has exited and the
   profile is released. Shutdown is idempotent when no broker exists, which is the normal first
   `login` state; a live broker shutdown failure remains an error and prevents profile handoff.
@@ -107,8 +110,10 @@ to Markdown only after `State = completed`.
   token, and does not mutate `.env`.
 - The user creates and supplies an empty Invocation database through
   `CHATGPT_SHOT_NOTION_DATABASE_URL`. On first initialization, `init` confirms it has no invocation
-  pages, configures the required schema, and reads it back. A configured database is read and
-  schema-validated, never replaced or repaired. `init` never creates a database or needs a parent
+  pages, configures the required schema, records a `chatgpt-shot` provisioning marker in the
+  database description, and reads it back. A configured database is read and schema-validated,
+  never replaced or repaired: an empty database that exposes any Invocation field or the marker is
+  already provisioned and schema drift fails fast. `init` never creates a database or needs a parent
   page. Required schema: title `ID`, select `State` (`pending`,
   `in_progress`, `completed`, `failed`), rich-text `Error`, `Created At` created time, and
   `Updated At` last-edited time.

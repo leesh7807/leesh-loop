@@ -2,6 +2,7 @@ import { Client } from '@notionhq/client';
 import { fail, ShotError } from './errors.js';
 
 export const STATES = ['pending', 'in_progress', 'completed', 'failed'] as const;
+export const INVOCATION_DATABASE_MARKER = 'Managed by chatgpt-shot invocation protocol v1.';
 export type State = typeof STATES[number];
 export type Invocation = { id: string; pageId: string; state: State; error: string };
 const text = (value: any) => Array.isArray(value) ? value.map((x: any) => x.plain_text ?? x.text?.content ?? '').join('') : '';
@@ -19,8 +20,16 @@ export class NotionStore {
     const options = database.properties.State.select.options.map((x: any) => x.name);
     if (!STATES.every(state => options.includes(state))) fail('NOTION_SCHEMA_INVALID', 'State is missing one or more required options.');
   }
+  isProvisionable(database: any): boolean {
+    const properties = database.properties ?? {};
+    // A configured database that has ever exposed part of the Invocation contract is not a blank
+    // target. Schema drift must fail validation rather than being silently repaired.
+    return !text(database.description).includes(INVOCATION_DATABASE_MARKER)
+      && !['ID', 'State', 'Error', 'Created At', 'Updated At'].some((name) => properties[name] !== undefined);
+  }
   async initializeSchema(database: any): Promise<any> {
     try {
+      if (!this.isProvisionable(database)) fail('NOTION_SCHEMA_INVALID', 'Configured Invocation database is already provisioned or has an incompatible schema.');
       const existing: any = await this.client.databases.query({ database_id: database.id, page_size: 1 });
       if (existing.results.length) fail('NOTION_INIT_FAILED', 'The supplied Invocation database is not empty; refusing to alter its schema.');
       const props = database.properties ?? {}; const byType = (type: string) => Object.values(props).find((p: any) => p.type === type) as any;
@@ -32,7 +41,8 @@ export class NotionStore {
       update[updated?.id ?? 'Updated At'] = { last_edited_time: {}, name: 'Updated At' };
       update.State = { select: { options: STATES.map(name => ({ name })) }, name: 'State' };
       update.Error = { rich_text: {}, name: 'Error' };
-      return await this.client.databases.update({ database_id: database.id, properties: update });
+      const description = text(database.description);
+      return await this.client.databases.update({ database_id: database.id, properties: update, description: [{ type: 'text', text: { content: [description, INVOCATION_DATABASE_MARKER].filter(Boolean).join('\n') } }] });
     } catch (e) { if (e instanceof ShotError) throw e; return fail('NOTION_INIT_FAILED', 'Could not configure the supplied Invocation database.', e); }
   }
   async createInvocation(databaseId: string, id: string): Promise<Invocation> { try { const page: any = await this.client.pages.create({ parent: { database_id: databaseId }, properties: { ID: { title: [{ text: { content: id } }] }, State: { select: { name: 'pending' } }, Error: { rich_text: [] } } }); return { id, pageId: page.id, state: 'pending', error: '' }; } catch (e) { return fail('INVOCATION_CREATE_FAILED', 'Could not create pending invocation.', e); } }
