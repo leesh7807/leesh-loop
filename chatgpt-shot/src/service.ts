@@ -34,7 +34,13 @@ export async function submit(store: NotionStore, databaseId: string, browser: Br
           log('submission_retry_attempted', id); return deliver(true);
         }
       };
-      await deliver();
+      try { await deliver(); }
+      catch (error: any) {
+        // Filling is a definite pre-submission phase. Do not leave its durable record looking like
+        // live work when no delivery attempt reached ChatGPT.
+        if (attempts === 0) await store.failUndeliveredInvocation(invocation.pageId, id, `Local delivery failed before prompt submission: ${error?.message ?? String(error)}`);
+        throw error;
+      }
       let acknowledgementStarted = Date.now(); let inspected = false;
 
       while (true) {
