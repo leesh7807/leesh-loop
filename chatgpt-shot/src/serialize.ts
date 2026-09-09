@@ -77,7 +77,7 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
         // Markdown tables require a delimiter row even when Notion has no header.
         // The first Notion row becomes a synthetic Markdown header in that case.
         output.splice(1, 0, `| ${Array(columns).fill('---').join(' | ')} |`);
-        lines.push(...output.map((line) => ({ markdown: contextualIndent(line, containers), context: containers })));
+        lines.push({ markdown: contextualIndent(output.join('\n'), containers), context: containers });
         continue;
       }
 
@@ -118,8 +118,7 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
   }
 
   const normalize = (markdown: string) => markdown
-    .replace(/((?:^|\n)[ \t]*(?:[-*+] |\d+\. )[^\n]*)\n\n(?=[ \t]*(?:[-*+] |\d+\. ))/g, '$1\n')
-    .replace(/\n\n(?=[ \t]*\|)/g, '\n');
+    .replace(/((?:^|\n)[ \t]*(?:[-*+] |\d+\. )[^\n]*)\n\n(?=[ \t]*(?:[-*+] |\d+\. ))/g, '$1\n');
   const blocks = await render(await store.children(pageId));
   const sharedContext = (left: Container[], right: Container[]) => {
     const shared: Container[] = [];

@@ -27,6 +27,18 @@ test('uses a synthetic Markdown header for a headerless Notion table', async () 
   const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
   assert.equal(result, '| Alice | 10 |\n| --- | --- |\n| Bob | 20 |');
 });
+test('keeps adjacent Notion tables as separate Markdown blocks', async () => {
+  const blocks = new Map<string, any[]>([
+    ['page', [
+      { id:'first',type:'table',table:{has_column_header:false},has_children:true },
+      { id:'second',type:'table',table:{has_column_header:false},has_children:true },
+    ]],
+    ['first', [{ id:'first-row',type:'table_row',table_row:{cells:[[{plain_text:'A'}]]},has_children:false }]],
+    ['second', [{ id:'second-row',type:'table_row',table_row:{cells:[[{plain_text:'B'}]]},has_children:false }]],
+  ]);
+  const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
+  assert.equal(result, '| A |\n| --- |\n\n| B |\n| --- |');
+});
 test('serializes media URLs instead of failing completed Results', async () => {
   const result = await markdownResult({ children: async () => [
     { id:'image',type:'image',image:{external:{url:'https://example.com/image.png'},caption:[{plain_text:'Diagram'}]},has_children:false },

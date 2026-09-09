@@ -55,7 +55,10 @@ to Markdown only after `State = completed`.
   local user from preclaiming a predictable shared-temporary pathname. Broker RPCs and private CDP
   requests have bounded deadlines; cancellation has an independent short exit bound if broker
   cleanup is wedged. Operations that deliberately wait for a fresh ChatGPT composer or shutdown
-  use a caller deadline longer than their broker-side bounded wait budget, and a broker shutdown
+  use a caller deadline longer than their broker-side bounded wait budget. The side-effecting
+  submission RPC covers its complete broker/CDP budget; any transport failure after submit has
+  begun is classified as `SUBMISSION_UNCERTAIN` and receives invocation-specific inspection before
+  retry policy is applied. A broker shutdown
   has one shared completion promise: every successful response means Chrome has exited and the
   profile is released. Shutdown is idempotent when no broker exists, which is the normal first
   `login` state; a live broker shutdown failure remains an error and prevents profile handoff.
@@ -68,7 +71,9 @@ to Markdown only after `State = completed`.
   reports CDP navigation errors as browser failures before readiness, authentication, or composer
   inspection. It never classifies an `about:blank` or failed navigation as missing authentication.
 - Each invocation owns a distinct fresh browser page. Browser-sensitive work is broker-owned while
-  Notion polling after acknowledgment remains concurrent.
+  Notion polling after acknowledgment remains concurrent. The actual fresh page is navigated,
+  authenticated, and composer-validated before its pending Invocation record is created, so a
+  fresh-context preflight failure never leaves a mailbox record for work that was not delivered.
 - Browser tab cleanup begins before authentication and Notion invocation creation, so every command
   path that opens a tab releases it even when preflight or invocation creation fails.
 - Result serialization preserves nested Markdown list hierarchy with four-space levels and
@@ -82,7 +87,8 @@ to Markdown only after `State = completed`.
   block meaning (including literal tildes), and never applies list/table whitespace normalization
   inside fenced code content. Inline code uses a fence and synthetic padding that preserve literal
   edge backticks/whitespace; table-cell pipes are escaped even inside an inline-code span.
-  Tables encode rich-text line breaks as `<br>` within a physical Markdown row, links escape both
+  Tables are rendered atomically (with their rows joined internally) so adjacent Notion tables
+  remain separate Markdown blocks. They encode rich-text line breaks as `<br>` within a physical row, links escape both
   parentheses in destinations, and descendants retain an ordered ancestor container stack (rather
   than independent list/quote depths) so list-within-quote and quote-within-list preserve nesting;
   quote-context separators are derived from the shared structural container stack (including

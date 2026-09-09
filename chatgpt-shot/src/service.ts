@@ -16,10 +16,26 @@ export async function submit(store: NotionStore, databaseId: string, browser: Br
   try {
     await browser.withBrowser(async () => {
       await browser.ensureAvailable(); await browser.ensureAuthenticated();
-      const id = randomUUID(); invocation = await store.createInvocation(databaseId, id); log('invocation_created', id);
+      // The invocation must not exist until the actual fresh submission page has passed its own
+      // navigation/auth/composer preflight.
+      await browser.openFreshContext();
+      const id = randomUUID(); invocation = await store.createInvocation(databaseId, id); log('invocation_created', id); log('browser_context_ready', id);
       let attempts = 0;
-      const attempt = async () => { await browser.openFreshContext(); log('browser_context_ready', id); await browser.fillPrompt(wrapPrompt(prompt, id, invocation!.pageId)); log('prompt_filled', id); await browser.submitPrompt(); attempts++; log('submission_attempted', id); };
-      await attempt(); let acknowledgementStarted = Date.now(); let inspected = false;
+      const attempt = async (fresh = false) => { if (fresh) { await browser.openFreshContext(); log('browser_context_ready', id); } await browser.fillPrompt(wrapPrompt(prompt, id, invocation!.pageId)); log('prompt_filled', id); attempts++; log('submission_attempted', id); await browser.submitPrompt(); };
+      const deliver = async (fresh = false): Promise<void> => {
+        try { await attempt(fresh); return; }
+        catch (error: any) {
+          if (error?.code !== 'SUBMISSION_UNCERTAIN') throw error;
+          log('submission_inspection_started', id);
+          const result = await browser.inspectSubmission(id).catch(() => 'uncertain' as const);
+          if (result === 'submitted') return;
+          if (result === 'uncertain') fail('SUBMISSION_UNCERTAIN', `Submission status for ${id} is uncertain; it was not retried.`);
+          if (attempts >= 2) fail('ACKNOWLEDGMENT_TIMEOUT', `Second submission was not acknowledged for ${id}.`);
+          log('submission_retry_attempted', id); return deliver(true);
+        }
+      };
+      await deliver();
+      let acknowledgementStarted = Date.now(); let inspected = false;
 
       while (true) {
         const current = await store.readInvocation(invocation.pageId, id);
@@ -27,7 +43,7 @@ export async function submit(store: NotionStore, databaseId: string, browser: Br
         if (!inspected && Date.now() - acknowledgementStarted >= ackMs) {
           inspected = true; log('submission_inspection_started', id);
           const result = await browser.inspectSubmission(id);
-          if (result === 'not_submitted' && attempts < 2) { log('submission_retry_attempted', id); await attempt(); acknowledgementStarted = Date.now(); inspected = false; continue; }
+          if (result === 'not_submitted' && attempts < 2) { log('submission_retry_attempted', id); await deliver(true); acknowledgementStarted = Date.now(); inspected = false; continue; }
           if (result === 'uncertain') fail('SUBMISSION_UNCERTAIN', `Submission status for ${id} is uncertain; it was not retried.`);
           if (result === 'submitted') fail('ACKNOWLEDGMENT_TIMEOUT', `Submitted invocation ${id} was not acknowledged by Notion.`);
           fail('ACKNOWLEDGMENT_TIMEOUT', `Second submission was not acknowledged for ${id}.`);
