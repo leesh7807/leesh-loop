@@ -101,7 +101,8 @@ to Markdown only after `State = completed`.
   than independent list/quote depths) so list-within-quote and quote-within-list preserve nesting;
   quote-context separators are derived from the shared structural container stack (including
   interleaved quote/list/quote ancestry) rather than inferred from rendered text. Literal paragraphs
-  also neutralize Setext underlines and indentation that would otherwise become Markdown code blocks.
+  neutralize CommonMark block-marker variants (including one-character Setext underlines and
+  tab/end-of-line heading/list forms) and indentation that would otherwise become Markdown code blocks.
 - Once Notion reports `in_progress`, `completed`, or `failed`, acknowledgment is proven and the
   browser inspection path is disabled. A `not_submitted` retry starts one new bounded acknowledgment
   window; the second failure is reported without a third submission. A `submitted` inspection

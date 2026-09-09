@@ -82,6 +82,8 @@ class Broker {
     const executable = chrome(); if (!executable) fail('BROWSER_UNAVAILABLE', 'A supported system Chrome executable is unavailable.');
     const directory = profile(this.root); mkdirSync(directory, { recursive: true, mode: 0o700 }); chmodSync(directory, 0o700);
     const child = spawn(executable!, [`--user-data-dir=${directory}`, '--profile-directory=Default', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check', '--disable-background-mode', '--start-minimized'], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] }) as ChildProcess;
+    try { await new Promise<void>((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); }); }
+    catch (error) { return fail('BROWSER_UNAVAILABLE', `Could not launch Chrome: ${error instanceof Error ? error.message : String(error)}`, error); }
     const input = child.stdio[3], output = child.stdio[4]; if (!input || !output) { child.kill(); fail('BROWSER_UNAVAILABLE', 'Chrome did not create its private debugging pipe.'); }
     const cdp = new PipeCdp(input as NodeJS.WritableStream, output as NodeJS.ReadableStream); this.startingChild = child; this.startingCdp = cdp;
     child.once('exit', () => { if (this.process === child) { this.process = undefined; this.cdp = undefined; this.control = undefined; this.pages.clear(); } });

@@ -110,6 +110,10 @@ test('keeps setext-looking and indented paragraph text literal', async () => {
   const result = await markdownResult({ children: async () => [{ id:'p',type:'paragraph',paragraph:{rich_text:[{plain_text:'Title\n===\n\ntext\n\n    code'}]},has_children:false }] } as any, 'page');
   assert.equal(result, 'Title\n\\===\n\ntext\n\n&nbsp;&nbsp;&nbsp;&nbsp;code');
 });
+test('escapes short Setext and tab-terminated literal block markers', async () => {
+  const result = await markdownResult({ children: async () => [{ id:'p',type:'paragraph',paragraph:{rich_text:[{plain_text:'Title\n=\n#\tHeading\n1)\titem'}]},has_children:false }] } as any, 'page');
+  assert.equal(result, 'Title\n\\=\n\\#\tHeading\n1\\)\titem');
+});
 test('keeps multiline table cells inside one physical Markdown row', async () => {
   const blocks = new Map<string, any[]>([
     ['page', [{ id:'t',type:'table',table:{has_column_header:true},has_children:true }]],

@@ -3,10 +3,11 @@ import type { NotionStore } from './notion.js';
 
 const escapeLiteral = (value: string) => value
   .replace(/([\\`*_{}\[\]()!|~<&>])/g, '\\$1')
-  .replace(/(^|\n)([ \t]*)(\d+)([.)])(?= )/g, '$1$2$3\\$4')
-  .replace(/(^|\n)([ \t]*)([-+*>])(?= )/g, '$1$2\\$3')
-  .replace(/(^|\n)([ \t]*)(#{1,6})(?= )/g, '$1$2\\$3')
-  .replace(/(^|\n)([ \t]*)([-=]{3,})(?=[ \t]*(?:\n|$))/g, '$1$2\\$3')
+  .replace(/(^|\n)([ \t]*)(\d+)([.)])(?=[ \t])/g, '$1$2$3\\$4')
+  .replace(/(^|\n)([ \t]*)([-+])(?=[ \t])/g, '$1$2\\$3')
+  .replace(/(^|\n)([ \t]*)(>)(?=[ \t]|$)/g, '$1$2\\$3')
+  .replace(/(^|\n)([ \t]*)(#{1,6})(?=[ \t]|$)/g, '$1$2\\$3')
+  .replace(/(^|\n)([ \t]*)([-=]+)(?=[ \t]*(?:\n|$))/g, '$1$2\\$3')
   .replace(/(^|\n)(?: {4,}|\t+)/g, (line) => line.replace(/ /g, '&nbsp;').replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;'));
 const inlineFence = (value: string) => '`'.repeat(Math.max(1, ...(value.match(/`+/g) ?? []).map((run) => run.length + 1)));
 const richText = (items: any[] = [], literal = false, tableCell = false) => items.map((item) => {
