@@ -33,6 +33,12 @@ intentionally foregrounded during normal automation. `shutdown` explicitly close
 when the session is absent. Results
 come only from the completed Notion page body, never the ChatGPT assistant UI.
 
+The local `NOTION_TOKEN` and the ChatGPT account's Notion connection are separate authorization
+paths. Before relying on `submit`, configure the authenticated ChatGPT account so it can open and
+edit the supplied Invocation database/page through its own Notion connection. `doctor` validates
+only local Notion access and browser readiness; a simple smoke `submit` is the authoritative check
+that ChatGPT can set State and publish Result to that database.
+
 To reuse a manually authenticated ChatGPT session, close the login browser before invoking a
 normal command so the broker can exclusively own the same dedicated profile. ChatGPT login and
 Chrome-profile sign-in are separate: neither substitutes for the other. Authentication preflight

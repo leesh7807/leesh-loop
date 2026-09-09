@@ -114,6 +114,15 @@ test('keeps quote descendants within the blockquote', async () => {
   const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
   assert.equal(result, '> Parent\n\n> Child');
 });
+test('keeps quote descendants inside their list item in ancestor order', async () => {
+  const blocks = new Map<string, any[]>([
+    ['page', [{ id:'l',type:'bulleted_list_item',bulleted_list_item:{rich_text:[{plain_text:'item'}]},has_children:true }]],
+    ['l', [{ id:'q',type:'quote',quote:{rich_text:[{plain_text:'Parent'}]},has_children:true }]],
+    ['q', [{ id:'p',type:'paragraph',paragraph:{rich_text:[{plain_text:'Child'}]},has_children:false }]],
+  ]);
+  const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
+  assert.equal(result, '- item\n\n    > Parent\n\n    > Child');
+});
 test('preserves a literal backslash before an inline-code table pipe', async () => {
   const blocks = new Map<string, any[]>([
     ['page', [{ id:'t',type:'table',table:{has_column_header:true},has_children:true }]],

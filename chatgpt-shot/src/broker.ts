@@ -68,10 +68,17 @@ class Broker {
     const directory = profile(this.root); mkdirSync(directory, { recursive: true, mode: 0o700 }); chmodSync(directory, 0o700);
     const child = spawn(executable!, [`--user-data-dir=${directory}`, '--profile-directory=Default', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check', '--disable-background-mode', '--start-minimized'], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] }) as ChildProcess;
     const input = child.stdio[3], output = child.stdio[4]; if (!input || !output) { child.kill(); fail('BROWSER_UNAVAILABLE', 'Chrome did not create its private debugging pipe.'); }
-    const cdp = new PipeCdp(input as NodeJS.WritableStream, output as NodeJS.ReadableStream); child.once('exit', () => { this.process = undefined; this.cdp = undefined; this.control = undefined; this.pages.clear(); });
-    this.process = child; this.cdp = cdp; this.control = await this.createPage(); await this.control.navigate(); await this.ready(this.control);
+    const cdp = new PipeCdp(input as NodeJS.WritableStream, output as NodeJS.ReadableStream);
+    child.once('exit', () => { if (this.process === child) { this.process = undefined; this.cdp = undefined; this.control = undefined; this.pages.clear(); } });
+    try {
+      const control = await this.createPage(cdp); await control.navigate(); await this.ready(control);
+      this.process = child; this.cdp = cdp; this.control = control;
+    } catch (error) {
+      cdp.close(); if (child.exitCode === null) child.kill('SIGTERM');
+      throw error;
+    }
   }
-  private async createPage() { const created = await this.cdp!.send('Target.createTarget', { url: 'about:blank' }); const attached = await this.cdp!.send('Target.attachToTarget', { targetId: created.targetId, flatten: true }); return new Page(created.targetId, attached.sessionId, this.cdp!); }
+  private async createPage(cdp = this.cdp!) { const created = await cdp.send('Target.createTarget', { url: 'about:blank' }); const attached = await cdp.send('Target.attachToTarget', { targetId: created.targetId, flatten: true }); return new Page(created.targetId, attached.sessionId, cdp); }
   private async ready(page: Page) {
     for (let i = 0; i < 30; i++) { const state = await page.evaluate<boolean>('()=>document.readyState!=="loading"'); if (state) break; await delay(500); }
     if (await page.evaluate<boolean>('()=>/just a moment|checking your browser/i.test(document.body.innerText)')) fail('USER_INTERVENTION_REQUIRED', 'ChatGPT Web requires user intervention before automation can continue.');

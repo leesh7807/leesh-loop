@@ -58,6 +58,9 @@ to Markdown only after `State = completed`.
   has one shared completion promise: every successful response means Chrome has exited and the
   profile is released. Shutdown is idempotent when no broker exists, which is the normal first
   `login` state; a live broker shutdown failure remains an error and prevents profile handoff.
+- Broker runtime startup publishes Chrome ownership only after its private pipe, control target,
+  navigation, and readiness checks all succeed. Any partial startup closes its pipe and terminates
+  its child; an older child exit cannot erase a newer published runtime.
 - Each invocation owns a distinct fresh browser page. Browser-sensitive work is broker-owned while
   Notion polling after acknowledgment remains concurrent.
 - Browser tab cleanup begins before authentication and Notion invocation creation, so every command
@@ -74,7 +77,8 @@ to Markdown only after `State = completed`.
   inside fenced code content. Inline code uses a fence and synthetic padding that preserve literal
   edge backticks/whitespace; table-cell pipes are escaped even inside an inline-code span.
   Tables encode rich-text line breaks as `<br>` within a physical Markdown row, links escape both
-  parentheses in destinations, and quote descendants retain quote context.
+  parentheses in destinations, and descendants retain an ordered ancestor container stack (rather
+  than independent list/quote depths) so list-within-quote and quote-within-list preserve nesting.
 - Once Notion reports `in_progress`, `completed`, or `failed`, acknowledgment is proven and the
   browser inspection path is disabled. A `not_submitted` retry starts one new bounded acknowledgment
   window; the second failure is reported without a third submission. A `submitted` inspection
@@ -95,6 +99,10 @@ to Markdown only after `State = completed`.
   `Updated At` last-edited time.
 - ChatGPT authentication is always manual. `submit` is non-interactive and preflights browser
   availability and authentication before it creates a pending invocation.
+- Local Notion API credentials cannot establish that the authenticated ChatGPT account has a usable
+  Notion connector authorization for the Invocation database. `doctor` reports this as unverified;
+  operating setup must configure that separate connection and a real smoke submit is the only
+  authoritative validation of ChatGPT-to-Notion State/Result writes.
 - Each invocation has a fresh ChatGPT context. The wrapped caller prompt directs ChatGPT to mark
   the referenced invocation `in_progress` first, place its complete result in the page body, and
   mark it `completed` last; failures populate `Error` then end in `failed`.

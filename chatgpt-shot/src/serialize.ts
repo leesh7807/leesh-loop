@@ -42,10 +42,10 @@ const indent = (text: string, depth: number) => {
   const prefix = '    '.repeat(depth);
   return prefix ? text.split('\n').map((line) => `${prefix}${line}`).join('\n') : text;
 };
-const contextualIndent = (text: string, listDepth: number, quoteDepth: number) => {
-  let value = indent(text, listDepth);
-  for (let i = 0; i < quoteDepth; i++) value = value.split('\n').map((line) => line ? `> ${line}` : '>').join('\n');
-  return value;
+type Container = 'list' | 'quote';
+const contextualIndent = (text: string, containers: Container[]) => {
+  const prefix = containers.map((container) => container === 'list' ? '    ' : '> ').join('');
+  return text.split('\n').map((line) => line ? `${prefix}${line}` : prefix.trimEnd()).join('\n');
 };
 
 const fallback = (block: any) => {
@@ -59,7 +59,7 @@ const fallback = (block: any) => {
 };
 
 export async function markdownResult(store: NotionStore, pageId: string): Promise<string> {
-  async function render(blocks: any[], listDepth = 0, quoteDepth = 0): Promise<string[]> {
+  async function render(blocks: any[], containers: Container[] = []): Promise<string[]> {
     const lines: string[] = [];
 
     for (const block of blocks) {
@@ -75,7 +75,7 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
         // Markdown tables require a delimiter row even when Notion has no header.
         // The first Notion row becomes a synthetic Markdown header in that case.
         output.splice(1, 0, `| ${Array(columns).fill('---').join(' | ')} |`);
-        lines.push(...output.map((line) => contextualIndent(line, listDepth, quoteDepth)));
+        lines.push(...output.map((line) => contextualIndent(line, containers)));
         continue;
       }
 
@@ -102,10 +102,11 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
           }
       }
 
-      if (line !== undefined) lines.push(contextualIndent(line, listDepth, quoteDepth));
+      if (line !== undefined) lines.push(contextualIndent(line, containers));
       if (block.has_children) {
         const listParent = ['bulleted_list_item', 'numbered_list_item', 'to_do'].includes(block.type);
-        lines.push(...await render(await store.children(block.id), listParent ? listDepth + 1 : listDepth, block.type === 'quote' ? quoteDepth + 1 : quoteDepth));
+        const childContainers = [...containers, ...(listParent ? ['list' as const] : []), ...(block.type === 'quote' ? ['quote' as const] : [])];
+        lines.push(...await render(await store.children(block.id), childContainers));
       }
     }
     return lines;
