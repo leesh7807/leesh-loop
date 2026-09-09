@@ -13,7 +13,9 @@ async function request(root: string, operation: string, sessionId?: string, prom
 export async function ensureBroker(root: string) {
   try { await request(root, 'ensure'); return; } catch (error: any) { if (error?.code === 'ECONNREFUSED') try { unlinkSync(brokerSocket(root)); } catch {} }
   if (!existsSync(process.argv[1])) fail('BROWSER_UNAVAILABLE', 'Cannot locate the chatgpt-shot broker entry point.');
-  const child = spawn(process.execPath, [process.argv[1], '__broker'], { detached: true, stdio: 'ignore' }); child.unref();
+  // Development execution via tsx supplies the TypeScript loader through execArgv; retain it when
+  // the detached broker is spawned so the broker has the same executable semantics as its caller.
+  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], '__broker'], { detached: true, stdio: 'ignore' }); child.unref();
   for (let attempt = 0; attempt < 50; attempt++) { try { await request(root, 'ensure'); return; } catch { await wait(100); } }
   fail('BROWSER_UNAVAILABLE', 'Could not start the local ChatGPT browser broker.');
 }

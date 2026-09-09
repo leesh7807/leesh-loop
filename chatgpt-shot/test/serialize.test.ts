@@ -138,6 +138,19 @@ test('keeps multiple list children in one blockquote', async () => {
   const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
   assert.equal(result, '> Parent\n>\n> - A\n>\n> - B');
 });
+test('keeps an inner quote intact through quote-list-quote ancestry', async () => {
+  const blocks = new Map<string, any[]>([
+    ['page', [{ id:'outer',type:'quote',quote:{rich_text:[{plain_text:'Outer'}]},has_children:true }]],
+    ['outer', [{ id:'item',type:'bulleted_list_item',bulleted_list_item:{rich_text:[{plain_text:'item'}]},has_children:true }]],
+    ['item', [{ id:'inner',type:'quote',quote:{rich_text:[{plain_text:'Inner'}]},has_children:true }]],
+    ['inner', [
+      { id:'a',type:'bulleted_list_item',bulleted_list_item:{rich_text:[{plain_text:'A'}]},has_children:false },
+      { id:'b',type:'bulleted_list_item',bulleted_list_item:{rich_text:[{plain_text:'B'}]},has_children:false },
+    ]],
+  ]);
+  const result = await markdownResult({ children: async (id: string) => blocks.get(id) ?? [] } as any, 'page');
+  assert.equal(result, '> Outer\n>\n> - item\n>\n>     > Inner\n>     >\n>     > - A\n>     >\n>     > - B');
+});
 test('preserves a literal backslash before an inline-code table pipe', async () => {
   const blocks = new Map<string, any[]>([
     ['page', [{ id:'t',type:'table',table:{has_column_header:true},has_children:true }]],

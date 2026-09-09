@@ -12,8 +12,9 @@ type Message = { id?: number; sessionId?: string; result?: any; error?: { messag
 const uid = process.getuid?.();
 const ownedDirectory = (path: string) => { try { const stat = lstatSync(path); return stat.isDirectory() && (uid === undefined || stat.uid === uid) && (stat.mode & 0o022) === 0; } catch { return false; } };
 const runtimeBase = () => {
-  const candidate = process.env.XDG_RUNTIME_DIR;
-  if (candidate && ownedDirectory(candidate)) return candidate;
+  // A broker owns a repository profile across separate CLI invocations. XDG_RUNTIME_DIR is
+  // intentionally per-session and may differ between those invocations, so it cannot name the
+  // durable broker identity.
   const cache = join(homedir(), '.cache');
   if (!ownedDirectory(cache)) fail('BROWSER_UNAVAILABLE', 'No owner-controlled local runtime directory is available.');
   return cache;
@@ -28,7 +29,7 @@ class PipeCdp {
   private next = 0; private buffer = ''; private closed = false; private readonly pending = new Map<number, { resolve(value: any): void; reject(error: Error): void }>();
   constructor(private readonly input: NodeJS.WritableStream, output: NodeJS.ReadableStream) {
     output.setEncoding('utf8'); output.on('data', (chunk: string) => { this.buffer += chunk; let end: number; while ((end = this.buffer.indexOf('\0')) >= 0) { const body = this.buffer.slice(0, end); this.buffer = this.buffer.slice(end + 1); if (body) this.receive(JSON.parse(body)); } });
-    const close = () => this.finish(); output.once('end', close); output.once('close', close); output.once('error', close);
+    const close = () => this.finish(); input.once('error', close); output.once('end', close); output.once('close', close); output.once('error', close);
   }
   send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<any> {
     if (this.closed) return Promise.reject(new Error('Chrome private debugging pipe is closed.'));
@@ -46,7 +47,17 @@ class PipeCdp {
 class Page {
   constructor(readonly targetId: string, readonly sessionId: string, private readonly cdp: PipeCdp) {}
   async evaluate<T>(expression: string, args: unknown[] = []): Promise<T> { const result = await this.cdp.send('Runtime.evaluate', { expression: `(${expression})(...${JSON.stringify(args)})`, awaitPromise: true, returnByValue: true }, this.sessionId); if (result.exceptionDetails) throw new Error(result.exceptionDetails.text ?? 'Page evaluation failed.'); return result.result.value as T; }
-  async navigate(url = 'https://chatgpt.com/') { await this.cdp.send('Page.enable', {}, this.sessionId); await this.cdp.send('Page.navigate', { url }, this.sessionId); }
+  async navigate(url = 'https://chatgpt.com/') {
+    await this.cdp.send('Page.enable', {}, this.sessionId);
+    const result = await this.cdp.send('Page.navigate', { url }, this.sessionId);
+    if (result.errorText) fail('BROWSER_UNAVAILABLE', `ChatGPT navigation failed: ${result.errorText}`);
+    const origin = new URL(url).origin;
+    for (let i = 0; i < 60; i++) {
+      if (await this.evaluate<string>('()=>location.href').then((current) => new URL(current).origin === origin).catch(() => false)) return;
+      await delay(500);
+    }
+    fail('BROWSER_UNAVAILABLE', 'ChatGPT navigation did not commit before its deadline.');
+  }
   async close() { await this.cdp.send('Target.closeTarget', { targetId: this.targetId }); }
 }
 
@@ -81,8 +92,8 @@ class Broker {
   }
   private async createPage(cdp = this.cdp!) { const created = await cdp.send('Target.createTarget', { url: 'about:blank' }); const attached = await cdp.send('Target.attachToTarget', { targetId: created.targetId, flatten: true }); return new Page(created.targetId, attached.sessionId, cdp); }
   private async ready(page: Page) {
-    for (let i = 0; i < 30; i++) { const state = await page.evaluate<boolean>('()=>document.readyState!=="loading"'); if (state) break; await delay(500); }
-    if (await page.evaluate<boolean>('()=>/just a moment|checking your browser/i.test(document.body.innerText)')) fail('USER_INTERVENTION_REQUIRED', 'ChatGPT Web requires user intervention before automation can continue.');
+    for (let i = 0; i < 30; i++) { const state = await page.evaluate<boolean>('()=>document.readyState!=="loading"'); if (state) { if (await page.evaluate<boolean>('()=>/just a moment|checking your browser/i.test(document.body.innerText)')) fail('USER_INTERVENTION_REQUIRED', 'ChatGPT Web requires user intervention before automation can continue.'); return; } await delay(500); }
+    fail('BROWSER_UNAVAILABLE', 'ChatGPT did not become ready before its deadline.');
   }
   private async auth(page: Page) { await this.ready(page); return page.evaluate<{ loginVisible: boolean; accountVisible: boolean; authenticated: boolean }>(authProbe); }
   private async composer(page: Page) { await this.ready(page); for (let i = 0; i < 60; i++) { if (await page.evaluate<boolean>(composerProbe)) return; await delay(500); } fail('BROWSER_UNAVAILABLE', 'The authenticated ChatGPT composer is unavailable.'); }
@@ -125,7 +136,7 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function runBroker(root: string): Promise<void> {
   const directory = runtimeDirectory(root); mkdirSync(directory, { recursive: true, mode: 0o700 }); chmodSync(directory, 0o700); if (!ownedDirectory(directory)) fail('BROWSER_UNAVAILABLE', 'Broker runtime directory is not owner-controlled.'); const socket = brokerSocket(root); const broker = new Broker(root); let stopping = false;
-  const server = net.createServer({ allowHalfOpen: true }, connection => { const peer = (connection as unknown as { getPeerCredentials?: () => { uid?: number } }).getPeerCredentials?.(); if (peer?.uid !== undefined && process.getuid && peer.uid !== process.getuid()) return connection.destroy(); let body = ''; connection.setEncoding('utf8'); connection.on('data', chunk => { body += chunk; }); connection.on('end', async () => { let response: Response; try { const request = JSON.parse(body) as Request; if (request.operation === 'shutdown') { await shutdown(); response = { ok: true }; } else response = { ok: true, value: await broker.handle(request) }; } catch (error: any) { response = { ok: false, code: error?.code ?? 'INTERNAL_ERROR', message: error?.message ?? String(error) }; } connection.end(JSON.stringify(response)); }); });
+  const server = net.createServer({ allowHalfOpen: true }, connection => { const peer = (connection as unknown as { getPeerCredentials?: () => { uid?: number } }).getPeerCredentials?.(); if (peer?.uid !== undefined && process.getuid && peer.uid !== process.getuid()) return connection.destroy(); let body = ''; connection.setEncoding('utf8'); connection.on('error', () => {}); connection.on('data', chunk => { body += chunk; }); connection.on('end', async () => { let response: Response; try { const request = JSON.parse(body) as Request; if (request.operation === 'shutdown') { await shutdown(); response = { ok: true }; } else response = { ok: true, value: await broker.handle(request) }; } catch (error: any) { response = { ok: false, code: error?.code ?? 'INTERNAL_ERROR', message: error?.message ?? String(error) }; } connection.end(JSON.stringify(response)); }); });
   let shutdownPromise: Promise<void> | undefined;
   const shutdown = () => shutdownPromise ??= (async () => { if (stopping) return; stopping = true; await broker.close(); server.close(); try { unlinkSync(socket); } catch {} })();
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(socket, () => { try { chmodSync(socket, 0o600); resolve(); } catch (error) { reject(error); } }); }); process.on('SIGINT', () => void shutdown()); process.on('SIGTERM', () => void shutdown());

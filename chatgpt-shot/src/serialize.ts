@@ -44,6 +44,7 @@ const indent = (text: string, depth: number) => {
   return prefix ? text.split('\n').map((line) => `${prefix}${line}`).join('\n') : text;
 };
 type Container = 'list' | 'quote';
+type RenderedBlock = { markdown: string; context: Container[] };
 const contextualIndent = (text: string, containers: Container[]) => {
   const prefix = containers.map((container) => container === 'list' ? '    ' : '> ').join('');
   return text.split('\n').map((line) => line ? `${prefix}${line}` : prefix.trimEnd()).join('\n');
@@ -60,8 +61,8 @@ const fallback = (block: any) => {
 };
 
 export async function markdownResult(store: NotionStore, pageId: string): Promise<string> {
-  async function render(blocks: any[], containers: Container[] = []): Promise<string[]> {
-    const lines: string[] = [];
+  async function render(blocks: any[], containers: Container[] = []): Promise<RenderedBlock[]> {
+    const lines: RenderedBlock[] = [];
 
     for (const block of blocks) {
       if (block.type === 'table') {
@@ -76,7 +77,7 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
         // Markdown tables require a delimiter row even when Notion has no header.
         // The first Notion row becomes a synthetic Markdown header in that case.
         output.splice(1, 0, `| ${Array(columns).fill('---').join(' | ')} |`);
-        lines.push(...output.map((line) => contextualIndent(line, containers)));
+        lines.push(...output.map((line) => ({ markdown: contextualIndent(line, containers), context: containers })));
         continue;
       }
 
@@ -103,7 +104,10 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
           }
       }
 
-      if (line !== undefined) lines.push(contextualIndent(line, containers));
+      if (line !== undefined) {
+        const context = block.type === 'quote' ? [...containers, 'quote' as const] : containers;
+        lines.push({ markdown: contextualIndent(line, containers), context });
+      }
       if (block.has_children) {
         const listParent = ['bulleted_list_item', 'numbered_list_item', 'to_do'].includes(block.type);
         const childContainers = [...containers, ...(listParent ? ['list' as const] : []), ...(block.type === 'quote' ? ['quote' as const] : [])];
@@ -117,11 +121,16 @@ export async function markdownResult(store: NotionStore, pageId: string): Promis
     .replace(/((?:^|\n)[ \t]*(?:[-*+] |\d+\. )[^\n]*)\n\n(?=[ \t]*(?:[-*+] |\d+\. ))/g, '$1\n')
     .replace(/\n\n(?=[ \t]*\|)/g, '\n');
   const blocks = await render(await store.children(pageId));
-  const quotePrefix = (block: string) => block.match(/^((?: {4})*(?:> )+)/)?.[1]?.trimEnd();
+  const sharedContext = (left: Container[], right: Container[]) => {
+    const shared: Container[] = [];
+    for (let i = 0; i < Math.min(left.length, right.length) && left[i] === right[i]; i++) shared.push(left[i]);
+    return shared;
+  };
   const source = blocks.reduce((output, block, index) => {
-    if (!index) return block;
-    const previous = quotePrefix(blocks[index - 1]); const current = quotePrefix(block);
-    return `${output}${previous && current ? `\n${previous}\n` : '\n\n'}${block}`;
+    if (!index) return block.markdown;
+    const shared = sharedContext(blocks[index - 1].context, block.context);
+    const separator = shared.includes('quote') ? `\n${contextualIndent('', shared)}\n` : '\n\n';
+    return `${output}${separator}${block.markdown}`;
   }, '');
   const output: string[] = []; let prose: string[] = []; let literal: string[] | undefined; let fence: string | undefined;
   const flushProse = () => { if (prose.length) output.push(normalize(prose.join('\n'))); prose = []; };

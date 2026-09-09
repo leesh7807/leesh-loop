@@ -42,8 +42,9 @@ to Markdown only after `State = completed`.
   or proxies arbitrary CDP commands. A focused direct CDP adapter owns only the inherited pipe and
   the deterministic ChatGPT operations; no automation framework launches Chrome. `submit` reuses
   that background runtime without foreground activation.
-- The Unix socket resides in a short, per-UID temporary runtime directory keyed by a repository hash
-  (rather than under the repository, avoiding Unix socket pathname limits), is mode `0600`, and
+- The Unix socket resides in a short, owner-controlled per-user cache directory keyed by a repository
+  hash (rather than under the repository or session-scoped `XDG_RUNTIME_DIR`, avoiding pathname
+  limits and preserving broker discovery across supported invocation environments), is mode `0600`, and
   rejects a peer whose available OS UID does not match the broker owner. The broker is the sole
   process that opens the dedicated profile; invocation tabs are separate and are closed after
   acknowledgment, terminal error, timeout, or cancellation while Chrome itself remains available
@@ -63,6 +64,9 @@ to Markdown only after `State = completed`.
   startup: it closes its pipe, terminates and reaps its child, and prevents late publication before
   reporting profile release. Any other partial startup closes its pipe and terminates its child;
   an older child exit cannot erase a newer published runtime.
+- Each new browser target verifies that ChatGPT navigation has committed to the requested origin and
+  reports CDP navigation errors as browser failures before readiness, authentication, or composer
+  inspection. It never classifies an `about:blank` or failed navigation as missing authentication.
 - Each invocation owns a distinct fresh browser page. Browser-sensitive work is broker-owned while
   Notion polling after acknowledgment remains concurrent.
 - Browser tab cleanup begins before authentication and Notion invocation creation, so every command
@@ -81,8 +85,9 @@ to Markdown only after `State = completed`.
   Tables encode rich-text line breaks as `<br>` within a physical Markdown row, links escape both
   parentheses in destinations, and descendants retain an ordered ancestor container stack (rather
   than independent list/quote depths) so list-within-quote and quote-within-list preserve nesting;
-  quote-context separators retain their quote marker. Literal paragraphs also neutralize Setext
-  underlines and indentation that would otherwise become Markdown code blocks.
+  quote-context separators are derived from the shared structural container stack (including
+  interleaved quote/list/quote ancestry) rather than inferred from rendered text. Literal paragraphs
+  also neutralize Setext underlines and indentation that would otherwise become Markdown code blocks.
 - Once Notion reports `in_progress`, `completed`, or `failed`, acknowledgment is proven and the
   browser inspection path is disabled. A `not_submitted` retry starts one new bounded acknowledgment
   window; the second failure is reported without a third submission. A `submitted` inspection
