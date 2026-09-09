@@ -90,6 +90,8 @@ to Markdown only after `State = completed`.
   fresh-context preflight failure never leaves a mailbox record for work that was not delivered.
   If prompt fill then fails definitively before a submit attempt, the created record is terminalized
   as `failed` with a local delivery Error rather than left as misleading `pending` work.
+  The same terminalization applies after bounded retries when every attempted delivery is confirmed
+  `not_submitted`; any `submitted` or `uncertain` evidence keeps the record nonterminal for safety.
   If a client disconnects or is cancelled while broker-side `open` is still in progress, the broker
   discards any session it completed but could not deliver, so no invocation tab becomes orphaned.
 - Browser tab cleanup begins before authentication and Notion invocation creation, so every command

@@ -20,8 +20,9 @@ export async function submit(store: NotionStore, databaseId: string, browser: Br
       // navigation/auth/composer preflight.
       await browser.openFreshContext();
       const id = randomUUID(); invocation = await store.createInvocation(databaseId, id); log('invocation_created', id); log('browser_context_ready', id);
-      let attempts = 0;
-      const attempt = async (fresh = false) => { if (fresh) { await browser.openFreshContext(); log('browser_context_ready', id); } await browser.fillPrompt(wrapPrompt(prompt, id, invocation!.pageId)); log('prompt_filled', id); attempts++; log('submission_attempted', id); await browser.submitPrompt(); };
+      let attempts = 0; let submissionMayExist = false;
+      const terminalizeUndelivered = async (error: unknown) => await store.failUndeliveredInvocation(invocation!.pageId, id, `Local delivery failed before prompt submission: ${error instanceof Error ? error.message : String(error)}`);
+      const attempt = async (fresh = false) => { if (fresh) { await browser.openFreshContext(); log('browser_context_ready', id); } await browser.fillPrompt(wrapPrompt(prompt, id, invocation!.pageId)); log('prompt_filled', id); attempts++; log('submission_attempted', id); submissionMayExist = true; await browser.submitPrompt(); };
       const deliver = async (fresh = false): Promise<void> => {
         try { await attempt(fresh); return; }
         catch (error: any) {
@@ -30,33 +31,35 @@ export async function submit(store: NotionStore, databaseId: string, browser: Br
           const result = await browser.inspectSubmission(id).catch(() => 'uncertain' as const);
           if (result === 'submitted') return;
           if (result === 'uncertain') fail('SUBMISSION_UNCERTAIN', `Submission status for ${id} is uncertain; it was not retried.`);
+          submissionMayExist = false;
           if (attempts >= 2) fail('ACKNOWLEDGMENT_TIMEOUT', `Second submission was not acknowledged for ${id}.`);
           log('submission_retry_attempted', id); return deliver(true);
         }
       };
-      try { await deliver(); }
-      catch (error: any) {
-        // Filling is a definite pre-submission phase. Do not leave its durable record looking like
-        // live work when no delivery attempt reached ChatGPT.
-        if (attempts === 0) await store.failUndeliveredInvocation(invocation.pageId, id, `Local delivery failed before prompt submission: ${error?.message ?? String(error)}`);
-        throw error;
-      }
-      let acknowledgementStarted = Date.now(); let inspected = false;
-
-      while (true) {
-        const current = await store.readInvocation(invocation.pageId, id);
-        if (current.state !== 'pending') { log('acknowledged', id); acknowledged = { ...current, at: Date.now() }; return; }
-        if (!inspected && Date.now() - acknowledgementStarted >= ackMs) {
-          inspected = true; log('submission_inspection_started', id);
-          // Losing the invocation page after a successful browser submit makes delivery
-          // ambiguous; it is never safe to reinterpret that as ordinary browser unavailability.
-          const result = await browser.inspectSubmission(id).catch(() => 'uncertain' as const);
-          if (result === 'not_submitted' && attempts < 2) { log('submission_retry_attempted', id); await deliver(true); acknowledgementStarted = Date.now(); inspected = false; continue; }
-          if (result === 'uncertain') fail('SUBMISSION_UNCERTAIN', `Submission status for ${id} is uncertain; it was not retried.`);
-          if (result === 'submitted') fail('ACKNOWLEDGMENT_TIMEOUT', `Submitted invocation ${id} was not acknowledged by Notion.`);
-          fail('ACKNOWLEDGMENT_TIMEOUT', `Second submission was not acknowledged for ${id}.`);
+      try {
+        await deliver();
+        let acknowledgementStarted = Date.now(); let inspected = false;
+        while (true) {
+          const current = await store.readInvocation(invocation.pageId, id);
+          if (current.state !== 'pending') { log('acknowledged', id); acknowledged = { ...current, at: Date.now() }; return; }
+          if (!inspected && Date.now() - acknowledgementStarted >= ackMs) {
+            inspected = true; log('submission_inspection_started', id);
+            // Losing the invocation page after a successful browser submit makes delivery
+            // ambiguous; it is never safe to reinterpret that as ordinary browser unavailability.
+            const result = await browser.inspectSubmission(id).catch(() => 'uncertain' as const);
+            if (result === 'not_submitted') {
+              submissionMayExist = false;
+              if (attempts < 2) { log('submission_retry_attempted', id); await deliver(true); acknowledgementStarted = Date.now(); inspected = false; continue; }
+              fail('ACKNOWLEDGMENT_TIMEOUT', `Second submission was not acknowledged for ${id}.`);
+            }
+            if (result === 'uncertain') fail('SUBMISSION_UNCERTAIN', `Submission status for ${id} is uncertain; it was not retried.`);
+            fail('ACKNOWLEDGMENT_TIMEOUT', `Submitted invocation ${id} was not acknowledged by Notion.`);
+          }
+          await sleep(pollMs);
         }
-        await sleep(pollMs);
+      } catch (error) {
+        if (!submissionMayExist) await terminalizeUndelivered(error);
+        throw error;
       }
     });
 
