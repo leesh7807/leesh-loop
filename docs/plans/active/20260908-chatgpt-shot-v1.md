@@ -82,11 +82,14 @@ to Markdown only after `State = completed`.
   Prompt fill likewise uses a 45-second broker-side composer/fill deadline below its 60-second RPC
   caller deadline, so a transient rerender cannot leave caller and broker with conflicting outcomes.
   Authentication similarly waits through a bounded account-UI hydration window, returning early only
-  on account evidence or an explicit visible logged-out control; composer readiness remains separate.
+  on account evidence or an explicit visible logged-out control; its 45-second broker deadline is
+  below the 60-second auth RPC deadline. Composer readiness remains separate.
 - Each invocation owns a distinct fresh browser page. Browser-sensitive work is broker-owned while
   Notion polling after acknowledgment remains concurrent. The actual fresh page is navigated,
   authenticated, and composer-validated before its pending Invocation record is created, so a
   fresh-context preflight failure never leaves a mailbox record for work that was not delivered.
+  If a client disconnects or is cancelled while broker-side `open` is still in progress, the broker
+  discards any session it completed but could not deliver, so no invocation tab becomes orphaned.
 - Browser tab cleanup begins before authentication and Notion invocation creation, so every command
   path that opens a tab releases it even when preflight or invocation creation fails.
 - Result serialization preserves nested Markdown list hierarchy with four-space levels and

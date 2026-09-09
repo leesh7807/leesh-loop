@@ -102,14 +102,16 @@ class Broker {
     fail('BROWSER_UNAVAILABLE', 'ChatGPT did not become ready before its deadline.');
   }
   private async auth(page: Page) {
-    await this.ready(page);
-    let last: { loginVisible: boolean; accountVisible: boolean; authenticated: boolean } = { loginVisible: false, accountVisible: false, authenticated: false };
-    for (let i = 0; i < 60; i++) {
-      last = await page.evaluate<{ loginVisible: boolean; accountVisible: boolean; authenticated: boolean }>(authProbe);
-      if (last.authenticated || last.loginVisible) return last;
-      await delay(500);
-    }
-    return last;
+    return page.within(Date.now() + 45_000, async () => {
+      await this.ready(page);
+      let last: { loginVisible: boolean; accountVisible: boolean; authenticated: boolean } = { loginVisible: false, accountVisible: false, authenticated: false };
+      for (let i = 0; i < 60; i++) {
+        last = await page.evaluate<{ loginVisible: boolean; accountVisible: boolean; authenticated: boolean }>(authProbe);
+        if (last.authenticated || last.loginVisible) return last;
+        await delay(500);
+      }
+      return last;
+    });
   }
   private async composer(page: Page) { await this.ready(page); for (let i = 0; i < 60; i++) { if (await page.evaluate<boolean>(composerProbe)) return; await delay(500); } fail('BROWSER_UNAVAILABLE', 'The authenticated ChatGPT composer is unavailable.'); }
   async handle(request: Request): Promise<unknown> {
@@ -124,6 +126,7 @@ class Broker {
     if (request.operation === 'close') { await page.close().catch(() => {}); this.pages.delete(request.sessionId!); return; }
     fail('INTERNAL_ERROR', `Unsupported broker operation ${request.operation}.`);
   }
+  async discard(sessionId: string) { const page = this.pages.get(sessionId); if (!page) return; this.pages.delete(sessionId); await page.close().catch(() => {}); }
   async close() {
     this.stopping = true;
     // A startup has not published ownership yet, but it still owns the profile.
@@ -151,7 +154,7 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function runBroker(root: string): Promise<void> {
   const directory = runtimeDirectory(root); mkdirSync(directory, { recursive: true, mode: 0o700 }); chmodSync(directory, 0o700); if (!ownedDirectory(directory)) fail('BROWSER_UNAVAILABLE', 'Broker runtime directory is not owner-controlled.'); const socket = brokerSocket(root); const broker = new Broker(root); let stopping = false;
-  const server = net.createServer({ allowHalfOpen: true }, connection => { const peer = (connection as unknown as { getPeerCredentials?: () => { uid?: number } }).getPeerCredentials?.(); if (peer?.uid !== undefined && process.getuid && peer.uid !== process.getuid()) return connection.destroy(); let body = ''; connection.setEncoding('utf8'); connection.on('error', () => {}); connection.on('data', chunk => { body += chunk; }); connection.on('end', async () => { let response: Response; try { const request = JSON.parse(body) as Request; if (request.operation === 'shutdown') { await shutdown(); response = { ok: true }; } else response = { ok: true, value: await broker.handle(request) }; } catch (error: any) { response = { ok: false, code: error?.code ?? 'INTERNAL_ERROR', message: error?.message ?? String(error) }; } connection.end(JSON.stringify(response)); }); });
+  const server = net.createServer({ allowHalfOpen: true }, connection => { const peer = (connection as unknown as { getPeerCredentials?: () => { uid?: number } }).getPeerCredentials?.(); if (peer?.uid !== undefined && process.getuid && peer.uid !== process.getuid()) return connection.destroy(); let body = ''; let responseStarted = false; let clientGone = false; connection.setEncoding('utf8'); connection.on('error', () => {}); connection.on('close', () => { if (!responseStarted) clientGone = true; }); connection.on('data', chunk => { body += chunk; }); connection.on('end', async () => { let response: Response; try { const request = JSON.parse(body) as Request; if (request.operation === 'shutdown') { await shutdown(); response = { ok: true }; } else { const value = await broker.handle(request); if ((clientGone || connection.destroyed) && request.operation === 'open' && typeof value === 'string') await broker.discard(value); if (clientGone || connection.destroyed) return; response = { ok: true, value }; } } catch (error: any) { response = { ok: false, code: error?.code ?? 'INTERNAL_ERROR', message: error?.message ?? String(error) }; } responseStarted = true; connection.end(JSON.stringify(response)); }); });
   let shutdownPromise: Promise<void> | undefined;
   const shutdown = () => shutdownPromise ??= (async () => { if (stopping) return; stopping = true; await broker.close(); server.close(); try { unlinkSync(socket); } catch {} })();
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(socket, () => { try { chmodSync(socket, 0o600); resolve(); } catch (error) { reject(error); } }); }); process.on('SIGINT', () => void shutdown()); process.on('SIGTERM', () => void shutdown());
@@ -164,7 +167,7 @@ export const brokerRequest = async (root: string, request: Request): Promise<any
   // never time out while the broker can still perform that side effect.
   // ensure may cold-start Chrome, create/attach a target, navigate, and wait for readiness.
   // Its caller must outlive every bounded private-CDP operation in that startup path.
-  const timeoutMs = request.operation === 'ensure' ? 180_000 : request.operation === 'submit' ? 95_000 : request.operation === 'open' || request.operation === 'shutdown' ? 90_000 : request.operation === 'fill' ? 60_000 : 15_000;
+  const timeoutMs = request.operation === 'ensure' ? 180_000 : request.operation === 'submit' ? 95_000 : request.operation === 'open' || request.operation === 'shutdown' ? 90_000 : request.operation === 'fill' || request.operation === 'auth' ? 60_000 : 15_000;
   const timeout = setTimeout(() => finish(new Error('Broker RPC timed out.')), timeoutMs);
   socket.setEncoding('utf8'); socket.once('error', (error) => finish(error)); socket.on('data', chunk => { body += chunk; }); socket.on('end', () => { try { const response = JSON.parse(body) as Response; if (!response.ok) { const error: any = new Error(response.message); error.code = response.code; finish(error); } else finish(undefined, response.value); } catch (error: any) { finish(error); } }); socket.end(JSON.stringify(request));
 });
