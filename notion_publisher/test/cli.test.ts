@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 import { PublicationError } from "../src/core.js";
 import { NotionClient, PENDING_PUBLICATION_MARKER } from "../src/notion.js";
 import { PUBLISHER_PENDING_STATE } from "../src/core.js";
-import { publishPlan } from "../src/cli.js";
+import { publishPlanFile } from "../src/cli.js";
+import { publish } from "../src/publisher.js";
+import { DEFAULT_POLICY } from "../src/core.js";
 const DATABASE_URL = "https://notion.so/3d28a26586258052b3ecccc9c33787e3";
 
 class PublicationFake extends NotionClient {
@@ -38,14 +40,14 @@ async function inputs() {
 test("task creation followed by Plan append failure preserves retryable state", async () => {
   const { plan, config } = await inputs();
   const client = new PublicationFake();
-  await assert.rejects(publishPlan(plan, config, DATABASE_URL, client), /authentication failure/);
+  await assert.rejects(publishPlanFile(plan, config, DATABASE_URL, client), /authentication failure/);
   assert.deepEqual(client.finalized, []);
 });
 
 test("first marker failure leaves an owned task marker", async () => {
   const { plan, config } = await inputs();
   const client = new PublicationFake(null, 1);
-  await assert.rejects(publishPlan(plan, config, DATABASE_URL, client), /authentication failure/);
+  await assert.rejects(publishPlanFile(plan, config, DATABASE_URL, client), /authentication failure/);
   assert.equal(client.createdProperties.Description.rich_text[0].text.content, PENDING_PUBLICATION_MARKER);
   assert.deepEqual(client.finalized, []);
 });
@@ -53,7 +55,7 @@ test("first marker failure leaves an owned task marker", async () => {
 test("a later invocation repairs the incomplete publication", async () => {
   const { plan, config } = await inputs();
   const client = new PublicationFake({ pageId: "page", complete: false });
-  const result = await publishPlan(plan, config, DATABASE_URL, client);
+  const result = await publishPlanFile(plan, config, DATABASE_URL, client);
   assert.equal(result.page_id, "page");
   assert.equal(client.ensuredDatabase, "3d28a265-8625-8052-b3ec-ccc9c33787e3");
   assert.deepEqual(client.repaired, ["page"]);
@@ -62,10 +64,19 @@ test("a later invocation repairs the incomplete publication", async () => {
 test("successful first publication removes its pending transaction state", async () => {
   const { plan, config } = await inputs();
   const client = new PublicationFake(null, 0);
-  const result = await publishPlan(plan, config, DATABASE_URL, client);
+  const result = await publishPlanFile(plan, config, DATABASE_URL, client);
   assert.equal(result.page_id, "page");
   assert.equal(client.createdProperties.State.select.name, PUBLISHER_PENDING_STATE);
   assert.deepEqual(client.finalized, ["page"]);
+});
+
+test("CLI preserves its filename title fallback for a heading-less Plan", async () => {
+  const { directory, config } = await inputs();
+  const namedPlan = join(directory, "2026-09-10-add-adapter.md");
+  await writeFile(namedPlan, "Implement the adapter contract.");
+  const client = new PublicationFake(null, 0);
+  await publishPlanFile(namedPlan, config, DATABASE_URL, client);
+  assert.equal(client.createdProperties.Title.title[0].text.content, "2026-09-10-add-adapter.md");
 });
 
 class StatefulRetryFake extends NotionClient {
@@ -85,17 +96,37 @@ class StatefulRetryFake extends NotionClient {
 test("failed publication is repaired by the next invocation and then becomes a duplicate", async () => {
   const { plan, config } = await inputs();
   const client = new StatefulRetryFake("token");
-  await assert.rejects(publishPlan(plan, config, DATABASE_URL, client), /Plan append/);
-  const repaired = await publishPlan(plan, config, DATABASE_URL, client);
+  await assert.rejects(publishPlanFile(plan, config, DATABASE_URL, client), /Plan append/);
+  const repaired = await publishPlanFile(plan, config, DATABASE_URL, client);
   assert.equal(repaired.page_id, "page");
-  await assert.rejects(publishPlan(plan, config, DATABASE_URL, client), /duplicate publication/);
+  await assert.rejects(publishPlanFile(plan, config, DATABASE_URL, client), /duplicate publication/);
+});
+
+class ConcurrentPublicationFake extends NotionClient {
+  phase: "none" | "complete" = "none";
+  created = 0;
+  override async ensureDatabase() { return "ds"; }
+  override async findPublication() { return this.phase === "none" ? null : { pageId: "page", complete: true }; }
+  override async createTask() { this.created += 1; return { id: "page", url: "https://notion.so/page" }; }
+  override async appendBlocks() {}
+  override async finalizePublication() { this.phase = "complete"; }
+}
+
+test("concurrent in-process publication calls create only one task", async () => {
+  const client = new ConcurrentPublicationFake("token");
+  const input = { plan: "# Concurrent Plan\ncontent", databaseUrl: DATABASE_URL, client, config: { policy: DEFAULT_POLICY } };
+  const results = await Promise.allSettled([publish(input), publish(input)]);
+  assert.equal(client.created, 1);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.match((results.find((result) => result.status === "rejected") as PromiseRejectedResult).reason.message, /duplicate publication/);
 });
 
 test("oversized plan title fails before Notion mutation", async () => {
   const { plan, config } = await inputs();
   await writeFile(plan, `# ${"x".repeat(1901)}\ncontent`);
   const client = new PublicationFake();
-  await assert.rejects(publishPlan(plan, config, DATABASE_URL, client), /title exceeds/);
+  await assert.rejects(publishPlanFile(plan, config, DATABASE_URL, client), /title exceeds/);
   assert.deepEqual(client.finalized, []);
 });
 
@@ -103,15 +134,15 @@ test("missing or invalid database binding fails before any Notion mutation", asy
   const { plan, config } = await inputs();
   for (const target of [undefined, "https://example.com/notion-database"]) {
     const client = new PublicationFake(null, 0);
-    await assert.rejects(publishPlan(plan, config, target, client), /NOTION_PUBLISH_DATABASE_URL|invalid database URL/);
+    await assert.rejects(publishPlanFile(plan, config, target as string, client), /publication database URL|invalid database URL/);
     assert.equal(client.appendCalls, 0);
     assert.equal(client.createdProperties, undefined);
   }
 });
 
-test("normal CLI loads its database binding from current-directory .env and honors process overrides", async () => {
+test("CLI requires an explicit destination and does not use an environment destination", async () => {
   const { plan, config, directory } = await inputs();
-  await writeFile(join(directory, ".env"), ["NOTION_TOKEN=local-token", `NOTION_PUBLISH_DATABASE_URL=${DATABASE_URL}`].join("\n"));
+  await writeFile(join(directory, ".env"), "NOTION_TOKEN=local-token");
   const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url));
   const result = spawnSync(process.execPath, [cli, "--plan", plan, "--config", config], {
     cwd: directory,
@@ -119,12 +150,39 @@ test("normal CLI loads its database binding from current-directory .env and hono
     encoding: "utf8",
   });
   assert.equal(result.status, 2);
-  assert.match(result.stderr, /invalid database URL/);
+  assert.match(result.stderr, /--database-url URL/);
 });
 
-test("legacy-only environment is rejected without Notion mutation", async () => {
-  const { plan, config } = await inputs();
+test("publisher core publishes in-memory Plan content without environment or filesystem discovery", async () => {
   const client = new PublicationFake(null, 0);
-  await assert.rejects(publishPlan(plan, config, undefined, client, DATABASE_URL), /no longer supported; migrate/);
-  assert.equal(client.createdProperties, undefined);
+  const original = process.env.NOTION_PUBLISH_DATABASE_URL;
+  delete process.env.NOTION_PUBLISH_DATABASE_URL;
+  try {
+    const result = await publish({ plan: "# In-memory Plan\ncontent", databaseUrl: DATABASE_URL, client, config: { policy: DEFAULT_POLICY } });
+    assert.equal(result.page_id, "page");
+    assert.equal(client.ensuredDatabase, "3d28a265-8625-8052-b3ec-ccc9c33787e3");
+  } finally {
+    if (original === undefined) delete process.env.NOTION_PUBLISH_DATABASE_URL;
+    else process.env.NOTION_PUBLISH_DATABASE_URL = original;
+  }
+});
+
+test("heading-less in-memory Plans require a caller-resolved fallback title", async () => {
+  const client = new PublicationFake(null, 0);
+  await assert.rejects(publish({ plan: "Plain text Plan", databaseUrl: DATABASE_URL, client, config: { policy: DEFAULT_POLICY } }), /H1 or caller-supplied fallback title/);
+  await publish({ plan: "Plain text Plan", fallbackTitle: "Operator Plan", databaseUrl: DATABASE_URL, client, config: { policy: DEFAULT_POLICY } });
+  assert.equal(client.createdProperties.Title.title[0].text.content, "Operator Plan");
+});
+
+test("publisher core never lets an environment destination override its caller", async () => {
+  const client = new PublicationFake(null, 0);
+  const original = process.env.NOTION_PUBLISH_DATABASE_URL;
+  process.env.NOTION_PUBLISH_DATABASE_URL = "https://example.com/notion-database";
+  try {
+    await publish({ plan: "# Explicit Destination\ncontent", databaseUrl: DATABASE_URL, client, config: { policy: DEFAULT_POLICY } });
+    assert.equal(client.ensuredDatabase, "3d28a265-8625-8052-b3ec-ccc9c33787e3");
+  } finally {
+    if (original === undefined) delete process.env.NOTION_PUBLISH_DATABASE_URL;
+    else process.env.NOTION_PUBLISH_DATABASE_URL = original;
+  }
 });
