@@ -62,7 +62,9 @@ Agents work against the target repository according to its `WORKFLOW.md`, then w
 
 Leesh Loop assumes that the target repository already has a harness suitable for agent work. This follows from Symphony's model of running workers against the repository's existing development environment and rules.
 
-`WORKFLOW.md` is the execution contract that tells Symphony how work should be carried out in that repository.
+`WORKFLOW.md` is the repository-owned execution contract that tells Symphony how work should be carried out in that repository. It uses Symphony's YAML-front-matter runtime configuration and Markdown worker prompt structure.
+
+[`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md) defines the reusable Leesh Loop execution semantics: evidence-led execution, Plan versus Workpad updates, follow-up work, human-judgment boundaries, verification, and completion. Each target repository's `WORKFLOW.md` applies those semantics with its own commands, paths, delivery flow, and supported tracker configuration; the template deliberately contains none of those repository-specific details.
 
 ## Publisher
 
@@ -77,6 +79,8 @@ Notion Tasks
 ```
 
 Rather than copying plan content into free-form Notion pages, it creates or updates records according to the task schema, relations, and state vocabulary used by Leesh Loop.
+
+The Publisher does not plan or execute work, synchronize later repository Plan corrections back to Notion, or decide workflow behavior. The published Plan is the accepted starting state; mutable execution history belongs in the Workpad, while durable corrections remain in the repository Plan.
 
 ## Symphony
 

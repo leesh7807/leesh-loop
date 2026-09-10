@@ -1,26 +1,28 @@
 # Plan Instructions
 
-Create and maintain a plan that keeps the work aligned with the objective and makes completion easy to judge.
+Create and maintain a Plan that keeps work aligned with its accepted objective and makes completion easy to judge. A Plan is a durable repository artifact: it records the accepted objective, boundaries, important decisions, assumptions, constraints, and verification design. It is not a prediction of every implementation step. Execution discovery is expected rather than a planning failure.
 
-- Name each plan document using the format `date-summary`.
+- Name each Plan document using the format `date-summary`.
+- Use confirmed product intent, repository conventions, and available evidence to settle decisions that could materially change the objective or its boundaries before execution begins.
+- Record only the decisions, assumptions, and defaults needed to keep implementation aligned with the objective. When the user explains an important choice, preserve the relevant rationale, constraints, alternatives, or accepted tradeoffs; do not invent them.
+- Define verification in terms of observable evidence through the intended path. Fix terminology before planning: use one term for one meaning.
+- Keep active Plans under `docs/plans/active/`. Before making a Pull Request, move the Plan to `docs/plans/completed/`.
 
-- Use the confirmed objective, repository conventions, and available evidence to settle decisions that could change the outcome.
+## Execution relationship
 
-- Record only the decisions, assumptions, and defaults needed to keep implementation aligned with the objective.
+The accepted Plan is the planning baseline, not an immutable implementation script. An executor may autonomously adapt the technical approach, touch additional files or components, add necessary tests or verification, replace disproved technical assumptions, and refine an invalid or insufficient verification method when evidence requires it. Additional work required to achieve the accepted objective remains in the current task even when the Plan did not enumerate it. Execution-path divergence alone does not require human approval.
 
-- When the user explains an important choice, record that explanation if a later reviewer will need it. This can include stated constraints, alternatives, rationale, and accepted tradeoffs.
+Update the repository Plan when execution reveals **durable planning knowledge**: information that should remain part of the correct understanding of the completed work. This includes material corrections to assumptions, responsibility boundaries, constraints, accepted implementation requirements, verification methods, and repository or integration behavior relevant to maintenance or review. A Plan update itself does not require approval.
 
-- Do not invent reasons, tradeoffs, or justifications for the user. If the user did not explain a choice, record the choice without adding a reason.
+Do not update a Plan merely to mirror history. Put transient execution state in the task's mutable **Workpad**: progress, attempts, command output, temporary failures, investigation notes, intermediate evidence, blockers, and handoff state. For example, a resolved command failure belongs only in the Workpad; evidence that an important Plan assumption was false must also correct the repository Plan.
 
-- Define verification in terms of observable evidence. The plan must make clear how to tell whether the intended result works through the intended path.
+Return to human judgment when evidence would require changing the accepted objective, a material product decision, a material external contract or compatibility decision, an accepted boundary into a materially different capability, or an unsettled alternative whose tradeoff materially affects product or contract behavior. Do not escalate ordinary implementation discovery, failed approaches, required additional implementation work, or verification refinement.
 
-- Fix terminology before planning. Use one term for one meaning.
+## Follow-up work
 
-- Update the plan during execution only when new evidence changes an important assumption, decision, boundary, or verification method.
+Do not absorb meaningful work discovered during execution when it is not required to complete the current accepted objective. Create a separate follow-up only when concrete evidence supports the need, its outcome and completion are independently understandable and judgeable, and defining it does not invent a material product or contract decision. Do not publish speculative improvements merely because they could be made. If a follow-up depends on a material undecided choice, return that choice to human judgment instead.
 
-- Do not use the plan as an execution log.
-
-- Keep active plans under `docs/plans/active/`. Before making a Pull Request, move the plan to `docs/plans/completed/`.
+The intended Leesh Loop path for a valid follow-up is a new follow-up Plan artifact, then the normal Publisher path to a Notion task. The current Plan does not implement or assume an agent-to-Publisher invocation, tracker relation writing, or adapter tooling.
 
 When reviewing the plan, check that each planned unit describes a coherent outcome in the problem domain rather than merely an implementation step.
 
