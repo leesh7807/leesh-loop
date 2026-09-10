@@ -16,7 +16,7 @@ Define Leesh Loop planning and execution contracts so repository agents can exec
 - A compliant Leesh Loop adapter provides a separate authenticated agent-side task surface for immutable Plan snapshot read, idempotent Workpad read/append, decision/blocker recording, and task-state transitions with readback. It remains separate from adapter reads.
 - Initial binding writes a Workpad checkpoint. Normal follow-up attempts resume the existing workspace, branch, Workpad, and durable Plan corrections without re-checkout or snapshot rematerialization; missing or inconsistent continuation state is an operator recovery blocker.
 - Binding/recovery blockers and material human judgment transition through the task surface to repository-defined non-dispatchable states with authoritative readback. Autonomous implementation and independent review remain runnable.
-- Symphony `attempt` is the deterministic branch signal: null starts initial binding, while an integer resumes continuation. The root workflow renders that signal; human-judgment trigger semantics remain solely in the template.
+- Symphony `attempt` is diagnostic context, not binding authority. The template classifies initial binding, a missing-checkpoint safe retry, and continuation from the Workpad checkpoint plus workspace/materialized Plan state; the root workflow renders attempt context. Human-judgment trigger semantics remain solely in the template.
 - Completion uses Workpad intent and repository-finalized checkpoints before the idempotent terminal task transition. A reopened terminal task is binding-blocked until the operator who reopens it restores the Plan to its referenced active path, records recovery, and only then makes the task dispatchable.
 - Publisher does not plan, execute, synchronize later repository Plan changes, or make workflow decisions. The published Plan is an immutable accepted starting snapshot, not a completed task artifact.
 - `AGENTS.md` is corrected because its project map was an authoritative navigation entry point with stale paths and a duplicate top-level heading.
@@ -27,7 +27,7 @@ Define Leesh Loop planning and execution contracts so repository agents can exec
 - Confirm the root workflow has Symphony YAML front matter, an `after_create` repository checkout, and Liquid task context including `issue.description`; confirm the template pins checkout to the published base commit and materializes the immutable Plan snapshot before Plan resolution.
 - Confirm the template requires the separate agent-side mutation surface and defines checkpointed, recoverable completion and reopen recovery.
 - Confirm the template differentiates initial binding from follow-up attempts and makes binding or human-judgment stops scheduler-visible through non-dispatchable state readback.
-- Confirm the root prompt renders `attempt` and does not narrow the template's human-judgment triggers.
+- Confirm the root prompt renders `attempt` without treating it as binding authority, and does not narrow the template's human-judgment triggers.
 - Confirm Publisher text calls the Plan an accepted snapshot rather than a completed artifact, without changing publication mechanics.
 
 ## Verification Tools

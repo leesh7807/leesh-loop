@@ -28,9 +28,9 @@ Normalized task description (its first two lines bind the repository Plan materi
 {{ issue.description }}
 
 {% if attempt %}
-Follow-up attempt: {{ attempt }}. Resume the existing task workspace according to the common workflow; do not reinitialize its Plan binding.
+Follow-up attempt: {{ attempt }}. Inspect durable binding state according to the common workflow; resume or safely complete an interrupted initial binding without resetting the workspace.
 {% else %}
-Initial attempt: establish the task Plan binding according to the common workflow before implementation.
+Initial invocation. Inspect durable binding state according to the common workflow before implementation.
 {% endif %}
 
 Read and follow the repository's `AGENTS.md` before beginning. Its repository-wide rules, including the `symphony/` boundary, authority order, safety requirements, and reporting standard, remain authoritative and are not repeated here.
