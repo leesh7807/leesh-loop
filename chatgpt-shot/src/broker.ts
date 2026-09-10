@@ -3,7 +3,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, unlinkSync } from 'node:fs
 import net from 'node:net';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { fail } from './errors.js';
 
 type Request = { operation: string; sessionId?: string; prompt?: string; invocationId?: string };
@@ -15,14 +15,14 @@ const runtimeBase = () => {
   // A broker owns a repository profile across separate CLI invocations. XDG_RUNTIME_DIR is
   // intentionally per-session and may differ between those invocations, so it cannot name the
   // durable broker identity.
-  const cache = join(homedir(), '.cache');
+  const cache = process.env.XDG_CACHE_HOME?.trim() || join(homedir(), '.cache');
   if (!existsSync(cache)) mkdirSync(cache, { recursive: true, mode: 0o700 });
   if (!ownedDirectory(cache)) fail('BROWSER_UNAVAILABLE', 'No owner-controlled local runtime directory is available.');
   return cache;
 };
-const runtimeDirectory = (root: string) => join(runtimeBase(), 'chatgpt-shot', createHash('sha256').update(root).digest('hex').slice(0, 16));
-export const brokerSocket = (root: string) => join(runtimeDirectory(root), 'broker.sock');
-const profile = (root: string) => join(root, '.chatgpt-shot-profile');
+const runtimeDirectory = () => join(runtimeBase(), 'chatgpt-shot');
+export const brokerSocket = (_profile: string) => join(runtimeDirectory(), 'broker.sock');
+const profile = (path: string) => path;
 const chrome = () => [process.env.CHATGPT_SHOT_BROWSER, '/usr/bin/google-chrome-stable', '/usr/bin/google-chrome'].find((path): path is string => Boolean(path && existsSync(path)));
 
 /** Minimal, process-private CDP adapter; it deliberately exposes no raw CDP across broker IPC. */
@@ -152,8 +152,8 @@ class Broker {
 }
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export async function runBroker(root: string): Promise<void> {
-  const directory = runtimeDirectory(root); mkdirSync(directory, { recursive: true, mode: 0o700 }); chmodSync(directory, 0o700); if (!ownedDirectory(directory)) fail('BROWSER_UNAVAILABLE', 'Broker runtime directory is not owner-controlled.'); const socket = brokerSocket(root); const broker = new Broker(root); let stopping = false;
+export async function runBroker(profilePath: string): Promise<void> {
+  const directory = runtimeDirectory(); mkdirSync(directory, { recursive: true, mode: 0o700 }); chmodSync(directory, 0o700); if (!ownedDirectory(directory)) fail('BROWSER_UNAVAILABLE', 'Broker runtime directory is not owner-controlled.'); const socket = brokerSocket(profilePath); const broker = new Broker(profilePath); let stopping = false;
   const server = net.createServer({ allowHalfOpen: true }, connection => { const peer = (connection as unknown as { getPeerCredentials?: () => { uid?: number } }).getPeerCredentials?.(); if (peer?.uid !== undefined && process.getuid && peer.uid !== process.getuid()) return connection.destroy(); let body = ''; let responseStarted = false; let clientGone = false; connection.setEncoding('utf8'); connection.on('error', () => {}); connection.on('close', () => { if (!responseStarted) clientGone = true; }); connection.on('data', chunk => { body += chunk; }); connection.on('end', async () => { let response: Response; try { const request = JSON.parse(body) as Request; if (request.operation === 'shutdown') { await shutdown(); response = { ok: true }; } else { const value = await broker.handle(request); if ((clientGone || connection.destroyed) && request.operation === 'open' && typeof value === 'string') await broker.discard(value); if (clientGone || connection.destroyed) return; response = { ok: true, value }; } } catch (error: any) { response = { ok: false, code: error?.code ?? 'INTERNAL_ERROR', message: error?.message ?? String(error) }; } responseStarted = true; connection.end(JSON.stringify(response)); }); });
   let shutdownPromise: Promise<void> | undefined;
   const shutdown = () => shutdownPromise ??= (async () => { if (stopping) return; stopping = true; await broker.close(); server.close(); try { unlinkSync(socket); } catch {} })();
