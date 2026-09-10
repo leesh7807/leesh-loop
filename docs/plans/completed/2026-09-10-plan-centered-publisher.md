@@ -29,6 +29,8 @@ Keep the existing CLI as one invocation path around the same publisher core. Do 
 - The CLI remains supported as a convenience path: it may read a Plan file, resolve invocation-specific inputs, and forward Plan content to the shared core.
 - Callers convert transport-specific inputs into Plan content before invoking the core. Do not add transport-specific core inputs or a second publisher implementation.
 - Preserve identifier derivation, title handling, schema validation, duplicate detection, incomplete-publication recovery, mutation ordering, and finalization. Make any semantic input formerly derived from `planPath` explicit, or remove it if it has no domain meaning.
+- A heading-less Plan requires a caller-resolved fallback title. The CLI supplies its filename as that fallback, preserving its prior observable behavior without passing a path to the core.
+- The core serializes concurrent publication calls for the same database and Plan within one process. The operator must serialize that pair across processes or hosts because Notion supplies no cross-process uniqueness or transaction.
 
 The intended boundary is:
 
@@ -58,6 +60,8 @@ The publisher participates only in the publication path.
 - Core tests pass with no Plan file, configuration path, `NOTION_PUBLISH_DATABASE_URL`, local publication `.env` destination, or `WORKFLOW.md` available.
 - Defining or changing `NOTION_PUBLISH_DATABASE_URL` cannot override the caller-supplied destination.
 - Existing publication semantics continue to pass, changing setup only where it relied on the removed file/environment boundary.
+- Concurrent in-process calls for the same destination and Plan create at most one task; documentation states the remaining cross-process single-writer requirement.
+- A heading-less file-based Plan retains its filename-derived CLI title, while a heading-less direct core call requires a caller-supplied fallback title.
 - A caller with Plan content, an operator-resolved destination, and valid credentials can publish without a temporary file, `WORKFLOW.md`, Symphony, adapter configuration discovery, `NOTION_PUBLISH_DATABASE_URL`, a CLI process, or IPC.
 - CLI integration verifies its file-based input is read outside the core and forwarded as Plan content to the shared core with the same publication semantics.
 - Documentation distinguishes caller/operator authority and input acquisition from publisher-core publication semantics.

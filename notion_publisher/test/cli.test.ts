@@ -70,6 +70,15 @@ test("successful first publication removes its pending transaction state", async
   assert.deepEqual(client.finalized, ["page"]);
 });
 
+test("CLI preserves its filename title fallback for a heading-less Plan", async () => {
+  const { directory, config } = await inputs();
+  const namedPlan = join(directory, "2026-09-10-add-adapter.md");
+  await writeFile(namedPlan, "Implement the adapter contract.");
+  const client = new PublicationFake(null, 0);
+  await publishPlanFile(namedPlan, config, DATABASE_URL, client);
+  assert.equal(client.createdProperties.Title.title[0].text.content, "2026-09-10-add-adapter.md");
+});
+
 class StatefulRetryFake extends NotionClient {
   phase: "none" | "pending" | "complete" = "none";
   planAppendAttempts = 0;
@@ -91,6 +100,26 @@ test("failed publication is repaired by the next invocation and then becomes a d
   const repaired = await publishPlanFile(plan, config, DATABASE_URL, client);
   assert.equal(repaired.page_id, "page");
   await assert.rejects(publishPlanFile(plan, config, DATABASE_URL, client), /duplicate publication/);
+});
+
+class ConcurrentPublicationFake extends NotionClient {
+  phase: "none" | "complete" = "none";
+  created = 0;
+  override async ensureDatabase() { return "ds"; }
+  override async findPublication() { return this.phase === "none" ? null : { pageId: "page", complete: true }; }
+  override async createTask() { this.created += 1; return { id: "page", url: "https://notion.so/page" }; }
+  override async appendBlocks() {}
+  override async finalizePublication() { this.phase = "complete"; }
+}
+
+test("concurrent in-process publication calls create only one task", async () => {
+  const client = new ConcurrentPublicationFake("token");
+  const input = { plan: "# Concurrent Plan\ncontent", databaseUrl: DATABASE_URL, client, config: { policy: DEFAULT_POLICY } };
+  const results = await Promise.allSettled([publish(input), publish(input)]);
+  assert.equal(client.created, 1);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.match((results.find((result) => result.status === "rejected") as PromiseRejectedResult).reason.message, /duplicate publication/);
 });
 
 test("oversized plan title fails before Notion mutation", async () => {
@@ -136,6 +165,13 @@ test("publisher core publishes in-memory Plan content without environment or fil
     if (original === undefined) delete process.env.NOTION_PUBLISH_DATABASE_URL;
     else process.env.NOTION_PUBLISH_DATABASE_URL = original;
   }
+});
+
+test("heading-less in-memory Plans require a caller-resolved fallback title", async () => {
+  const client = new PublicationFake(null, 0);
+  await assert.rejects(publish({ plan: "Plain text Plan", databaseUrl: DATABASE_URL, client, config: { policy: DEFAULT_POLICY } }), /H1 or caller-supplied fallback title/);
+  await publish({ plan: "Plain text Plan", fallbackTitle: "Operator Plan", databaseUrl: DATABASE_URL, client, config: { policy: DEFAULT_POLICY } });
+  assert.equal(client.createdProperties.Title.title[0].text.content, "Operator Plan");
 });
 
 test("publisher core never lets an environment destination override its caller", async () => {

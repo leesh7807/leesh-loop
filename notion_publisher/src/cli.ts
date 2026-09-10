@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFile } from "node:fs/promises";
 import { loadConfig } from "./config.js";
@@ -9,7 +9,7 @@ import { publish, type PublishResult } from "./publisher.js";
 export async function publishPlanFile(planPath: string, configPath: string, databaseUrl: string, client: NotionClient): Promise<PublishResult> {
   const plan = await readFile(planPath, "utf8");
   const { config, policy } = await loadConfig(configPath);
-  return publish({ plan, databaseUrl, client, config: { policy, planSource: config.planSource } });
+  return publish({ plan, databaseUrl, fallbackTitle: basename(planPath), client, config: { policy, planSource: config.planSource } });
 }
 
 async function localEnvironment(): Promise<Record<string, string>> {

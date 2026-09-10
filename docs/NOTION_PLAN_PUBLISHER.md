@@ -1,16 +1,18 @@
 # Notion plan publisher
 
-The publisher core is an in-process capability. It receives the complete UTF-8 Plan content, a resolved Notion database URL, a Notion client, and resolved publication policy:
+The publisher core is an in-process capability. It receives the complete UTF-8 Plan content, a resolved Notion database URL, a Notion client, resolved publication policy, and (when the Plan has no Markdown H1) a caller-resolved fallback title:
 
 ```ts
-publish({ plan, databaseUrl, client, config })
+publish({ plan, databaseUrl, fallbackTitle, client, config })
 ```
 
-The core owns Notion publication semantics: identifier and title derivation, schema validation, duplicate detection, incomplete-publication repair, block append ordering, and finalization. It does not accept paths or discover a destination through `.env`, `process.env`, `WORKFLOW.md`, Symphony, or the Notion adapter.
+The core owns Notion publication semantics: identifier and title derivation, schema validation, duplicate detection, incomplete-publication repair, block append ordering, and finalization. A heading-less Plan must supply `fallbackTitle`; this preserves a meaningful title without making a path part of the core contract. It does not accept paths or discover a destination through `.env`, `process.env`, `WORKFLOW.md`, Symphony, or the Notion adapter.
 
 Authority and input acquisition belong to the caller. The upper operator owns the authoritative project-level Notion database binding and may separately materialize the matching Symphony tracker binding in `WORKFLOW.md`. Keeping those values synchronized is an operator/bootstrap responsibility, not a publisher responsibility.
 
-The CLI is one convenience caller. It reads a file and configuration, resolves the runtime credential, then forwards Plan content and the explicit destination to the same core:
+For a given `(database destination, Plan content)` pair, concurrent calls must be serialized by the operator across processes or hosts. Notion has no unique constraint or transaction spanning publication lookup and task creation. The core serializes concurrent calls within one process; it does not provide a distributed lock. Duplicate detection is deterministic only within this single-writer boundary.
+
+The CLI is one convenience caller. It reads a file and configuration, resolves the runtime credential, derives a filename fallback title only for heading-less Plans, then forwards those semantic values and the explicit destination to the same core:
 
 ```sh
 cd notion_publisher && npm install && npm run build
