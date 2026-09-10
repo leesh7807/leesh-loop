@@ -26,7 +26,7 @@ The code-owned default policy maps directly to Symphony's `Tracker.Issue`: `Iden
 `Description`, `State`, `Priority`, `Labels`, and self-relation `Blocked By`. Symphony dispatches
 only issues with a non-terminal configured state, required labels, and no unresolved blockers;
 the publisher therefore preserves those fields but does not run Symphony. `Plan` is the
-immutable completed artifact and `Workpad` is an empty local coordination surface, intentionally
+immutable accepted Plan snapshot and `Workpad` is an empty local coordination surface, intentionally
 outside the upstream issue body contract.
 
 The publisher uses `NOTION_TOKEN` and `NOTION_PUBLISH_DATABASE_URL`. Process environment values are

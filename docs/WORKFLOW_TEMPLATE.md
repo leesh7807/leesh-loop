@@ -6,7 +6,7 @@ This template defines reusable execution-contract semantics. A target repository
 
 Read the task and its accepted Plan before making changes. The normalized task description must begin with `Repository Plan Reference: <repository-relative path>`, the exact active path declared when that Plan was published. Open only that referenced file; do not scan `docs/plans/active/`, infer from a title, or choose a similarly named Plan. Treat the referenced repository Plan as the durable baseline for the accepted objective, boundaries, decisions, assumptions, constraints, and verification design. It is not an immutable prediction of implementation steps.
 
-The Plan declares the reference. Publisher validates the declaration and writes the fixed leading Description line; the tracker adapter transports that existing normalized Description as `issue.description` without parsing or interpreting a Plan. The concrete workflow must render `{{ issue.description }}`. If the line is absent or malformed, the path is not repository-relative, or it does not resolve to one active Plan, do not begin work or select another Plan. Record and surface the binding blocker for resolution.
+The Plan declares the reference. Publisher validates the declaration and writes the fixed leading Description line; the tracker adapter transports that existing normalized Description as `issue.description` without parsing or interpreting a Plan. The concrete workflow must render `{{ issue.description }}`. If the line is absent or malformed, the path is not repository-relative, or it does not resolve to one active Plan, do not begin work or select another Plan. Record and surface the binding blocker for resolution. Until the Publisher and adapter implement this carrier, a published task is not eligible for autonomous execution under this workflow.
 
 Follow the target repository's guidance and use its intended entry points. Keep repository-wide rules authoritative; this template supplies common execution semantics rather than replacing them.
 
@@ -34,7 +34,9 @@ Stop and surface the decision when new evidence requires changing the accepted o
 
 ## Verify and complete
 
-Verify the representative intended flow through the repository's direct practical interface. Record transient evidence and handoff state in the Workpad; preserve durable corrections in the repository Plan. Keep the bound Plan active through Pull Request review and any rework. Complete only when the accepted objective and verification evidence are satisfied, repository-specific delivery requirements have been met, and any required human decision has been surfaced rather than silently made. Then move the Plan to `completed/` and transition the task terminally as one completion operation. A reopened task must restore the Plan to its referenced active path before dispatch.
+Verify the representative intended flow through the repository's direct practical interface. Record transient evidence and handoff state in the Workpad; preserve durable corrections in the repository Plan. Keep the bound Plan active through Pull Request review and any rework. Complete only when the accepted objective and verification evidence are satisfied, repository-specific delivery requirements have been met, and any required human decision has been surfaced rather than silently made. Then move the Plan to `completed/` and transition the task terminally as one completion operation.
+
+A reopened terminal task is binding-blocked until the operator who reopens it restores the completed Plan to its original referenced active path and confirms that the reference resolves. The operator must not make the task dispatchable before that restoration. A worker that is dispatched despite a missing reference reports the same blocker and performs no Plan selection or mutation.
 
 ## Repository extension points
 

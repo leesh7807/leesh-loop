@@ -14,11 +14,8 @@
 ## Project Map
 
 * `README.md` — what this repository does and how its parts fit together
-* `PLAN.md` — how to plan work
+* `docs/PLAN.md` — how to plan work
 * `WORKFLOW.md` — how to execute work
-* `REVIEW.md` — how to review work
-
-# Global Agent Instructions
 
 ## Outcome Standard
 

@@ -97,6 +97,6 @@ export class NotionClient {
   async finalizePublication(pageId: string, policy: Policy) {
     const children = await this.listChildren(pageId);
     for (const block of children) if (isPendingPublicationBlock(block)) await this.request("PATCH", `/blocks/${block.id}`, { archived: true });
-    await this.request("PATCH", `/pages/${pageId}`, { properties: { [policy.state]: { select: { name: policy.defaultState } }, [policy.description]: { rich_text: [{ type: "text", text: { content: "Completed plan artifact; see Plan section." } }] } } });
+    await this.request("PATCH", `/pages/${pageId}`, { properties: { [policy.state]: { select: { name: policy.defaultState } }, [policy.description]: { rich_text: [{ type: "text", text: { content: "Accepted Plan snapshot; see Plan section." } }] } } });
   }
 }
