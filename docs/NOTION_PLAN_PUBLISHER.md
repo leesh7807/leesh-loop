@@ -1,48 +1,27 @@
 # Notion plan publisher
 
-Run from any directory after installing the publisher package:
+The publisher core is an in-process capability. It receives the complete UTF-8 Plan content, a resolved Notion database URL, a Notion client, and resolved publication policy:
+
+```ts
+publish({ plan, databaseUrl, client, config })
+```
+
+The core owns Notion publication semantics: identifier and title derivation, schema validation, duplicate detection, incomplete-publication repair, block append ordering, and finalization. It does not accept paths or discover a destination through `.env`, `process.env`, `WORKFLOW.md`, Symphony, or the Notion adapter.
+
+Authority and input acquisition belong to the caller. The upper operator owns the authoritative project-level Notion database binding and may separately materialize the matching Symphony tracker binding in `WORKFLOW.md`. Keeping those values synchronized is an operator/bootstrap responsibility, not a publisher responsibility.
+
+The CLI is one convenience caller. It reads a file and configuration, resolves the runtime credential, then forwards Plan content and the explicit destination to the same core:
 
 ```sh
 cd notion_publisher && npm install && npm run build
-node dist/src/cli.js --plan /path/to/plan.md --config /path/to/publisher-config.json
+node dist/src/cli.js \
+  --plan /path/to/plan.md \
+  --config /path/to/publisher-config.json \
+  --database-url https://www.notion.so/Tasks-3d28a26586258052b3ecccc9c33787e3
 ```
 
-The configuration path and plan path are explicit and are never resolved relative to the source
-checkout. The publish database is supplied only as `NOTION_PUBLISH_DATABASE_URL`; configuration has no
-publish-location setting. Optional policy settings are `state` (default `Ready`), `priority`
-(default `3`, or `null`), `labels` (default `[]`), `plan_source`,
-and `property_names` for the supported canonical names only. `plan_source`, when
-provided, must be an HTTP(S) URL because the canonical Notion property is a URL property; local
-filesystem paths are rejected rather than silently discarded. Unknown keys and
-wrong structural types fail before any Notion mutation. State text is open-ended; it is not
-rejected merely because it is not one of the bootstrap options.
+`--plan`, `--config`, and `--database-url` are explicit CLI inputs. The database URL is not read from `NOTION_PUBLISH_DATABASE_URL`; defining that environment variable cannot override the value supplied to the publisher. The CLI may load `NOTION_TOKEN` from the process environment or a local `.env` in its current directory as a runtime-secret convenience.
 
-v1 assumes a single writer for a given plan artifact and coordination target. Callers must not
-run concurrent publisher processes for the same target/artifact. Duplicate detection is
-deterministic within that operating model; Notion does not provide the transaction/unique
-constraint needed for cross-process concurrent publication locking, which is out of scope.
+Optional policy settings in the JSON configuration are `state` (default `Ready`), `priority` (default `3`, or `null`), `labels` (default `[]`), `plan_source`, and `property_names` for supported canonical names. `plan_source` must be an HTTP(S) URL because the corresponding Notion property is a URL. Unknown keys and invalid structural types fail before mutation; state text remains open-ended.
 
-The code-owned default policy maps directly to Symphony's `Tracker.Issue`: `Identifier`, `Title`,
-`Description`, `State`, `Priority`, `Labels`, and self-relation `Blocked By`. Symphony dispatches
-only issues with a non-terminal configured state, required labels, and no unresolved blockers;
-the publisher therefore preserves those fields but does not run Symphony. `Plan` is the
-immutable completed artifact and `Workpad` is an empty local coordination surface, intentionally
-outside the upstream issue body contract.
-
-The publisher uses `NOTION_TOKEN` and `NOTION_PUBLISH_DATABASE_URL`. Process environment values are
-authoritative. A local `.env` is read only from the process current directory as a convenience;
-artifact and configuration resolution never depends on that location. The supported database binding input
-is an HTTP(S) Notion database URL whose host is `notion.so`, a subdomain of
-`notion.so`, `app.notion.com`, or a subdomain of `notion.site`, and whose path contains the database id.
-Callers are responsible for supplying a URL in that supported form. The configured database is
-resolved and its schema is validated before the publisher performs a task mutation. The publisher
-does not inspect a parent page, discover a same-named database, or create a destination database.
-`NOTION_PUBLISH_TARGET_URL` is rejected when no database binding is configured; migrate it to the
-database URL.
-
-For example:
-
-```text
-NOTION_TOKEN=secret
-NOTION_PUBLISH_DATABASE_URL=https://www.notion.so/Tasks-3d28a26586258052b3ecccc9c33787e3
-```
+The configured database is resolved and its schema validated before a task mutation. The publisher does not inspect a parent page, discover a same-named database, or create a destination database. Its default policy maps to Symphony's tracker fields (`Identifier`, `Title`, `Description`, `State`, `Priority`, `Labels`, and self-relation `Blocked By`), but it neither reads `WORKFLOW.md` nor runs Symphony. `Plan` is the immutable completed artifact and `Workpad` is the empty local coordination surface.
