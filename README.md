@@ -1,187 +1,109 @@
-# Local Agent Coordination
+# Leesh Loop
 
-This repository organizes software work around three roles:
+Leesh Loop is a local agent execution loop for a single software repository.
 
-```text
-PLAN.md     -> plan the work
-WORKFLOW.md -> execute the work
-REVIEW.md   -> review the result
-```
-
-The roles share the same task records.
+It publishes plans written as plain text or Markdown to a Notion task surface, then uses [OpenAI Symphony](https://github.com/openai/symphony) to execute runnable tasks with agents.
 
 ```text
-             Task Records
-            /     |      \
-           /      |       \
-      Planner  Executor  Reviewer
-                  |
-               Symphony
-                  |
-            Isolated Workers
-```
-
-The task records show what work exists, what is ready, what is blocked, what changed, and what needs attention.
-
-Each role reads and updates those records. It does not need the hidden context of another role.
-
-## Task Records
-
-A task record may contain:
-
-```text
-- identifier
-- title
-- state
-- priority
-- dependencies
-- objective
-- verification
-- workpad
-- comments
-- result
-```
-
-The exact schema can change with the repository.
-
-Write down anything another actor needs to continue the work. Do not leave important context inside one agent session.
-
-The records may live in a tool such as Notion.
-
-## Role Documents
-
-Each role has its own instruction document.
-
-### `PLAN.md`
-
-Defines how work should be planned.
-
-It should capture the objective, important decisions, user-provided constraints, accepted tradeoffs, and the evidence that will show whether the work is complete.
-
-Plans should describe meaningful outcomes, not just implementation steps.
-
-A planned unit should have one clear responsibility and a result that can be understood and checked on its own.
-
-Do not split work only to make tasks smaller for an agent.
-
-If a planned unit is hard to state as clear work, check whether its scope or domain boundary is understood well enough.
-
-### `WORKFLOW.md`
-
-Defines how assigned work should be executed.
-
-The worker reads the task, inspects the repository, performs the work, verifies the result, and updates the task record.
-
-Execution may use Symphony.
-
-Symphony:
-
-```text
-Task A -> Workspace A -> Worker A
-Task B -> Workspace B -> Worker B
-Task C -> Workspace C -> Worker C
-```
-
-It finds runnable work, limits concurrency, creates isolated workspaces, starts workers, and reconciles their execution.
-
-Symphony does not plan the work or review the result.
-
-### `REVIEW.md`
-
-Defines how completed work should be reviewed.
-
-The reviewer reads the task, inspects the implementation, checks the evidence, and records the result.
-
-The reviewer should not depend on the executor's hidden context.
-
-If more work is needed, the review should leave clear feedback in the shared records.
-
-## Runtime Configuration
-
-Role documents may use front matter for runtime settings.
-
-```text
----
-model configuration
-runtime configuration
-external service configuration
----
-
-role instructions
-repository-specific rules
-user preferences
-verification expectations
-```
-
-Different roles may use different models or runtimes.
-
-Planning and review may need only one agent. Execution may use Symphony to run several workers in parallel.
-
-## Repository Artifacts
-
-Not every record belongs in the task system.
-
-Plans, specifications, validation artifacts, and other engineering documents may stay in the repository when they should be versioned with the code.
-
-Use task records for coordination.
-
-Use repository artifacts for engineering context that should live with the implementation.
-
-They may reference each other when useful.
-
-## How the Parts Connect
-
-```text
-Planner
-   |
-   v
-Task Records
-   |
-   v
+Plan
+  ↓
+Publisher
+  ↓
+Notion Tasks
+  ↓
 Symphony
-   |
-   v
-Execution Agents
-   |
-   v
-Task Records
-   |
-   v
-Reviewer
-   |
-   v
-Task Records
+  ↓
+Agent Work
+  ↓
+State / Result
 ```
 
-The planner does not need to know how Symphony runs workers.
+Leesh Loop does not live inside the target repository or wrap it.
 
-The executor does not need to know who created the task.
+Each repository has a separate loop directory dedicated to that repository.
 
-The reviewer does not need to know how execution was scheduled.
+```text
+foo/
+    source repository
+    WORKFLOW.md
+    ...
 
-They need the same records and clear role instructions.
+foo-loop/
+    publisher
+    Symphony
+    runtime state
+    browser UI
+```
 
-## Design Direction
+`foo-loop` accesses and operates `foo` from outside the repository.
 
-This repository does not define a universal development workflow.
+A different repository uses a different loop.
 
-It keeps repository-specific and user-specific working rules close to the code so that agents do not have to guess them.
+```text
+foo/       ← foo-loop
+bar/       ← bar-loop
+```
 
-The aim is to make it easier to:
+There is no separate central project manager for coordinating multiple repositories.
 
-* state intent;
-* preserve important decisions;
-* hand work between agents;
-* run independent work in parallel;
-* review results separately;
-* continue work without hidden conversational context.
+## How It Works
 
-Agents can inspect code and evidence. They cannot know an unstated preference, intention, or accepted tradeoff.
+The Publisher takes a plan written as plain text or Markdown, normalizes it into the Leesh Loop task model, and publishes it to Notion.
 
-Those must be written down.
+Notion acts as the durable execution surface for tasks and workflow state.
 
-## Symphony Runner
+Because the Publisher maps plans into a defined task structure and state vocabulary, it is more than a document copy tool. It turns a plan into the execution surface used by the rest of the loop.
 
-The implementation lives in [`symphony/`](symphony/). Its caller supplies the execution-input
-`WORKFLOW.md`, explicitly or from the caller's current directory. Symphony runs on Unix/Linux; on
-Windows, use WSL2. See [`symphony/README.md`](symphony/README.md) for runner setup and use.
+Symphony finds runnable tasks in Notion and runs agents in isolated workspaces.
+
+Agents work against the target repository according to its `WORKFLOW.md`, then write results and state back to Notion.
+
+## Repository Harness
+
+Leesh Loop assumes that the target repository already has a harness suitable for agent work. This follows from Symphony's model of running workers against the repository's existing development environment and rules.
+
+`WORKFLOW.md` is the execution contract that tells Symphony how work should be carried out in that repository.
+
+## Publisher
+
+The Publisher normalizes plan documents into the Notion execution surface.
+
+```text
+Plan
+  ↓
+Normalize
+  ↓
+Notion Tasks
+```
+
+Rather than copying plan content into free-form Notion pages, it creates or updates records according to the task schema, relations, and state vocabulary used by Leesh Loop.
+
+## Symphony
+
+Task execution uses OpenAI Symphony.
+
+Symphony finds runnable work from Notion task state, creates an isolated workspace for each task, and starts an agent worker.
+
+Repository-specific worker behavior is defined by `WORKFLOW.md`.
+
+## Browser UI
+
+Each loop provides a local browser UI for viewing and managing the execution state of the repository it operates.
+
+```text
+foo-loop
+    ↓
+local browser UI
+    ↓
+tasks / runs / state
+```
+
+The UI is scoped to one repository and its loop.
+
+## Example Workflow
+
+This repository may include an example workflow showing how Leesh Loop can be used in a real development process.
+
+The planned example uses [`chatgpt-shot`](https://github.com/leesh7807/chatgpt-shot) as an external utility for independent review.
+
+A concrete workflow and execution example can be added once that structure is implemented.
