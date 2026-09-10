@@ -35,6 +35,8 @@ Apply [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md) as the single com
 
 The `after_create` hook clones this repository into each fresh Symphony task workspace before the prompt runs. Do not modify `symphony/` unless the accepted task requires Symphony changes.
 
+When the future tracker binding is configured, designate provider-native non-dispatchable states for binding/recovery blockers and human judgment. Keep autonomous implementation and independent review in runnable states; use the human-judgment state only when a worker cannot decide the required product or contract question.
+
 Use the repository's direct practical verification surfaces for the changed capability: run applicable tests and checks, inspect the final Git diff and status, and review documentation or integration behavior through its intended path. Run `git diff --check` for every change. Record any unavailable real-flow verification precisely in the Workpad.
 
 ## Delivery and review
