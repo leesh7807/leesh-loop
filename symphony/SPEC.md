@@ -2118,6 +2118,10 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
   portable error mapping
 - Error mapping covers config, request, non-success response, malformed payload, pagination, and
   rate limiting, including documented category/message mappings for language-native errors
+- The Notion adapter consumes a Publisher-managed surface: it validates the fixed representation,
+  maps page ID to dispatch ID and the `Plan` section to description, and does not create, repair,
+  rename, or locally reinterpret that surface. `Workpad` is runtime output and is excluded from
+  the normalized description.
 
 ### 17.4 Orchestrator Dispatch, Reconciliation, and Retry
 

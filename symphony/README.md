@@ -272,6 +272,21 @@ codex:
   strips `ASANA_PAT` and configured token variables from the Codex child, while raw tool calls are
   not limited to the configured project.
 
+### Notion adapter
+
+- Config: use `tracker.kind: notion` with `tracker.provider.database_id` and optional `token`
+  (default `NOTION_TOKEN`, accepts `$VAR`) and `endpoint` (default `https://api.notion.com/v1`).
+  `active_states` and `terminal_states` are the Publisher-defined Notion state names.
+- Scope and compatibility: the adapter resolves the database's one data source and requires the
+  Publisher representation: fixed `Identifier`, `Title`, `State`, `Priority`, `Labels`, `Blocked
+  By`, `Description`, and `Plan Source` property types plus the `Blocked By` self-relation. It
+  never creates or repairs that schema.
+- Mapping: page ID is `issue.id`; `Identifier` remains `issue.identifier`; the page `Plan` H1
+  section becomes the description and ends at `Workpad`. State is passed through and the relation
+  is reported as `blocked_by` without adapter-local scheduling policy.
+- Tools: no Notion mutation tool is currently advertised. A future tool must be a documented
+  provider operation and must not mutate Publisher-owned schema or structure.
+
 ### GitLab adapter
 
 - Configure `tracker.kind: gitlab` with `tracker.provider.project_path`, optional `api_url`, and
