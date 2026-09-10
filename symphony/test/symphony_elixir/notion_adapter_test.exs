@@ -30,6 +30,7 @@ defmodule SymphonyElixir.Notion.AdapterTest do
       "POST", "/databases/#{@database}/query", _, _, _ -> {:ok, %{status: 200, body: %{"results" => [page("page-1")], "has_more" => true, "next_cursor" => "next"}}}
       "GET", "/blocks/page-1/children", _, nil, _ -> {:ok, %{status: 200, body: %{"results" => plan_blocks(), "has_more" => false}}}
       "GET", "/blocks/page-2/children", _, nil, _ -> {:ok, %{status: 200, body: %{"results" => plan_blocks(), "has_more" => false}}}
+      "GET", "/pages/page-0", _, nil, _ -> {:ok, %{status: 200, body: blocker_page()}}
     end
 
     assert {:ok, issues} = Client.fetch_issues_by_states_for_test(["Ready"], settings(), request)
@@ -51,6 +52,7 @@ defmodule SymphonyElixir.Notion.AdapterTest do
       "GET", "/pages/page-1", _, nil, _ -> {:ok, %{status: 200, body: page("page-1")}}
       "GET", "/pages/missing", _, nil, _ -> {:ok, %{status: 404, body: %{}}}
       "GET", "/blocks/page-1/children", _, nil, _ -> {:ok, %{status: 200, body: %{"results" => plan_blocks(), "has_more" => false}}}
+      "GET", "/pages/page-0", _, nil, _ -> {:ok, %{status: 200, body: blocker_page()}}
     end
 
     assert {:ok, [issue]} = Client.fetch_issues_by_ids_for_test(["page-1", "missing"], settings(), request)
@@ -100,6 +102,8 @@ defmodule SymphonyElixir.Notion.AdapterTest do
       }
     }
   end
+
+  defp blocker_page, do: %{"properties" => %{"State" => %{"type" => "select", "select" => %{"name" => "In Progress"}}}}
 
   defp plan_blocks do
     [

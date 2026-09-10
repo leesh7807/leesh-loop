@@ -131,8 +131,36 @@ defmodule SymphonyElixir.Notion.Client do
 
   defp normalize_page(page, settings, request_fun) do
     with {:ok, blocks} <- fetch_blocks(page["id"], nil, settings, request_fun, []),
-         {:ok, issue} <- normalize_issue(page, blocks) do
-      {:ok, issue}
+         {:ok, issue} <- normalize_issue(page, blocks),
+         {:ok, blockers} <- hydrate_blockers(issue.blocked_by, settings, request_fun) do
+      {:ok, %{issue | blocked_by: blockers}}
+    end
+  end
+
+  defp hydrate_blockers([], _settings, _request_fun), do: {:ok, []}
+
+  defp hydrate_blockers(blockers, settings, request_fun) when is_list(blockers) do
+    Enum.reduce_while(blockers, {:ok, []}, fn %{"id" => id}, {:ok, acc} ->
+      case api_request("GET", "/pages/#{id}", %{}, nil, settings, request_fun) do
+        {:ok, %{"properties" => properties}} when is_map(properties) ->
+          case select_property(properties, "State") do
+            {:ok, state} -> {:cont, {:ok, [%{"id" => id, "state" => state} | acc]}}
+            {:error, reason} -> {:halt, {:error, reason}}
+          end
+
+        {:ok, :not_found} ->
+          {:halt, {:error, {:notion_inaccessible_dependency, id}}}
+
+        {:ok, _} ->
+          {:halt, {:error, {:notion_inaccessible_dependency, id}}}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, hydrated} -> {:ok, Enum.reverse(hydrated)}
+      error -> error
     end
   end
 

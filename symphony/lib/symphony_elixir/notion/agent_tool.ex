@@ -9,7 +9,7 @@ defmodule SymphonyElixir.Notion.AgentTool do
   def tool_specs do
     [
       spec("notion_read_page", ["page_id"], "Read one Notion page."),
-      spec("notion_read_comments", ["page_id"], "Read comments for one Notion page."),
+      spec("notion_read_comments", ["page_id"], "Read one page of comments for a Notion page; pass next_cursor to continue."),
       spec("notion_update_page", ["page_id", "properties"], "Update represented values on one Notion page."),
       spec("notion_append_blocks", ["page_id", "children"], "Append content blocks to one Notion page.")
     ]
@@ -35,13 +35,23 @@ defmodule SymphonyElixir.Notion.AgentTool do
         "type" => "object",
         "additionalProperties" => false,
         "required" => required,
-        "properties" => %{"page_id" => %{"type" => "string"}, "properties" => %{"type" => "object"}, "children" => %{"type" => "array"}}
+        "properties" => %{"page_id" => %{"type" => "string"}, "next_cursor" => %{"type" => "string"}, "properties" => %{"type" => "object"}, "children" => %{"type" => "array"}}
       }
     }
   end
 
   defp operation("notion_read_page", %{"page_id" => id}) when is_binary(id), do: {:ok, "GET", "/pages/#{id}", %{}, nil}
-  defp operation("notion_read_comments", %{"page_id" => id}) when is_binary(id), do: {:ok, "GET", "/comments", %{"page_id" => id}, nil}
+
+  defp operation("notion_read_comments", %{"page_id" => id} = arguments) when is_binary(id) do
+    params = %{"page_id" => id, "page_size" => 100}
+
+    case Map.get(arguments, "next_cursor") do
+      nil -> {:ok, "GET", "/comments", params, nil}
+      cursor when is_binary(cursor) and cursor != "" -> {:ok, "GET", "/comments", Map.put(params, "start_cursor", cursor), nil}
+      _ -> {:error, :invalid_notion_comment_cursor}
+    end
+  end
+
   defp operation("notion_update_page", %{"page_id" => id, "properties" => properties}) when is_binary(id) and is_map(properties), do: {:ok, "PATCH", "/pages/#{id}", %{}, %{"properties" => properties}}
 
   defp operation("notion_append_blocks", %{"page_id" => id, "children" => children}) when is_binary(id) and is_list(children),
