@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Notion.Client do
   alias SymphonyElixir.Tracker.Issue
 
   @api_url "https://api.notion.com/v1"
-  @notion_version "2022-06-28"
+  @notion_version "2025-09-03"
   @page_size 100
   @required_properties %{
     "Identifier" => "rich_text",
@@ -69,8 +69,8 @@ defmodule SymphonyElixir.Notion.Client do
     requested_states = states |> Enum.filter(&present_string?/1) |> Enum.map(&String.trim/1) |> Enum.uniq()
 
     with {:ok, settings} <- settings(tracker_settings),
-         :ok <- validate_surface(settings, request_fun) do
-      fetch_state_pages(requested_states, settings, request_fun, [])
+         {:ok, data_source_id} <- validate_surface(settings, request_fun) do
+      fetch_state_pages(requested_states, Map.put(settings, :data_source_id, data_source_id), request_fun, [])
     end
   end
 
@@ -101,8 +101,8 @@ defmodule SymphonyElixir.Notion.Client do
     ids = ids |> Enum.filter(&present_string?/1) |> Enum.uniq()
 
     with {:ok, settings} <- settings(tracker_settings),
-         :ok <- validate_surface(settings, request_fun) do
-      fetch_id_pages(ids, settings, request_fun, [])
+         {:ok, data_source_id} <- validate_surface(settings, request_fun) do
+      fetch_id_pages(ids, Map.put(settings, :data_source_id, data_source_id), request_fun, [])
     end
   end
 
@@ -221,11 +221,12 @@ defmodule SymphonyElixir.Notion.Client do
   defp normalize_issue(_, _), do: {:error, :notion_malformed_task}
 
   defp validate_surface(settings, request_fun) do
-    with {:ok, %{"properties" => properties}} <- api_request("GET", "/databases/#{settings.database_id}", %{}, nil, settings, request_fun),
+    with {:ok, %{"data_sources" => [%{"id" => data_source_id}]}} <- api_request("GET", "/databases/#{settings.database_id}", %{}, nil, settings, request_fun),
+         {:ok, %{"properties" => properties}} <- api_request("GET", "/data_sources/#{data_source_id}", %{}, nil, settings, request_fun),
          true <- is_map(properties) or {:error, :notion_incompatible_schema},
          :ok <- validate_properties(properties),
-         :ok <- validate_blocked_by_relation(properties, settings.database_id) do
-      :ok
+         :ok <- validate_blocked_by_relation(properties, data_source_id) do
+      {:ok, data_source_id}
     else
       {:ok, _} -> {:error, :notion_incompatible_schema}
       error -> error
@@ -390,7 +391,7 @@ defmodule SymphonyElixir.Notion.Client do
   defp present_string?(value), do: is_binary(value) and String.trim(value) != ""
   defp env_reference_names("$" <> name), do: if(String.match?(name, ~r/^[A-Za-z_][A-Za-z0-9_]*$/), do: [name], else: [])
   defp env_reference_names(_), do: []
-  defp database_query_path(settings), do: "/databases/#{settings.database_id}/query"
+  defp database_query_path(settings), do: "/data_sources/#{settings.data_source_id}/query"
   defp request_method("GET"), do: :get
   defp request_method("POST"), do: :post
   defp request_method("PATCH"), do: :patch

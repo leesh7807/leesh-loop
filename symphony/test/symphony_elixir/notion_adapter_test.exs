@@ -4,6 +4,7 @@ defmodule SymphonyElixir.Notion.AdapterTest do
   alias SymphonyElixir.Notion.{Adapter, AgentTool, Client}
 
   @database "053a3243-bd88-4f0f-bf34-abbff6fccf2a"
+  @data_source "153a3243-bd88-4f0f-bf34-abbff6fccf2a"
 
   test "normalizes the Publisher surface without interpreting state or dependencies" do
     assert {:ok, issue} = Client.normalize_issue_for_test(page("page-1"), plan_blocks())
@@ -25,9 +26,10 @@ defmodule SymphonyElixir.Notion.AdapterTest do
 
   test "state fetch pages completely and schema/provider failures remain errors" do
     request = fn
-      "GET", "/databases/#{@database}", _, nil, _ -> {:ok, %{status: 200, body: schema()}}
-      "POST", "/databases/#{@database}/query", _, %{"start_cursor" => "next"}, _ -> {:ok, %{status: 200, body: %{"results" => [page("page-2")], "has_more" => false}}}
-      "POST", "/databases/#{@database}/query", _, _, _ -> {:ok, %{status: 200, body: %{"results" => [page("page-1")], "has_more" => true, "next_cursor" => "next"}}}
+      "GET", "/databases/#{@database}", _, nil, _ -> {:ok, %{status: 200, body: database()}}
+      "GET", "/data_sources/#{@data_source}", _, nil, _ -> {:ok, %{status: 200, body: schema()}}
+      "POST", "/data_sources/#{@data_source}/query", _, %{"start_cursor" => "next"}, _ -> {:ok, %{status: 200, body: %{"results" => [page("page-2")], "has_more" => false}}}
+      "POST", "/data_sources/#{@data_source}/query", _, _, _ -> {:ok, %{status: 200, body: %{"results" => [page("page-1")], "has_more" => true, "next_cursor" => "next"}}}
       "GET", "/blocks/page-1/children", _, nil, _ -> {:ok, %{status: 200, body: %{"results" => plan_blocks(), "has_more" => false}}}
       "GET", "/blocks/page-2/children", _, nil, _ -> {:ok, %{status: 200, body: %{"results" => plan_blocks(), "has_more" => false}}}
       "GET", "/pages/page-0", _, nil, _ -> {:ok, %{status: 200, body: blocker_page()}}
@@ -40,15 +42,20 @@ defmodule SymphonyElixir.Notion.AdapterTest do
              Client.fetch_issues_by_states_for_test(["Ready"], settings(), fn _, _, _, _, _ -> {:ok, %{status: 401, body: %{}}} end)
 
     assert {:error, {:notion_incompatible_schema, "State"}} =
-             Client.fetch_issues_by_states_for_test(["Ready"], settings(), fn _, _, _, _, _ ->
-               invalid_schema = Map.put(schema(), "properties", Map.delete(schema()["properties"], "State"))
-               {:ok, %{status: 200, body: invalid_schema}}
+             Client.fetch_issues_by_states_for_test(["Ready"], settings(), fn
+               "GET", "/databases/#{@database}", _, _, _ ->
+                 {:ok, %{status: 200, body: database()}}
+
+               "GET", "/data_sources/#{@data_source}", _, _, _ ->
+                 invalid_schema = Map.put(schema(), "properties", Map.delete(schema()["properties"], "State"))
+                 {:ok, %{status: 200, body: invalid_schema}}
              end)
   end
 
   test "ID refresh uses page identities and tools only expose represented page operations" do
     request = fn
-      "GET", "/databases/#{@database}", _, nil, _ -> {:ok, %{status: 200, body: schema()}}
+      "GET", "/databases/#{@database}", _, nil, _ -> {:ok, %{status: 200, body: database()}}
+      "GET", "/data_sources/#{@data_source}", _, nil, _ -> {:ok, %{status: 200, body: schema()}}
       "GET", "/pages/page-1", _, nil, _ -> {:ok, %{status: 200, body: page("page-1")}}
       "GET", "/pages/missing", _, nil, _ -> {:ok, %{status: 404, body: %{}}}
       "GET", "/blocks/page-1/children", _, nil, _ -> {:ok, %{status: 200, body: %{"results" => plan_blocks(), "has_more" => false}}}
@@ -79,11 +86,13 @@ defmodule SymphonyElixir.Notion.AdapterTest do
         "State" => %{"type" => "select"},
         "Priority" => %{"type" => "number"},
         "Labels" => %{"type" => "multi_select"},
-        "Blocked By" => %{"type" => "relation", "relation" => %{"data_source_id" => @database, "single_property" => %{}, "dual_property" => nil}},
+        "Blocked By" => %{"type" => "relation", "relation" => %{"data_source_id" => @data_source, "single_property" => %{}, "dual_property" => nil}},
         "Description" => %{"type" => "rich_text"}
       }
     }
   end
+
+  defp database, do: %{"data_sources" => [%{"id" => @data_source}]}
 
   defp page(id) do
     %{
