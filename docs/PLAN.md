@@ -6,8 +6,8 @@ Create and maintain a Plan that keeps work aligned with its accepted objective a
 - Use confirmed product intent, repository conventions, and available evidence to settle decisions that could materially change the objective or its boundaries before execution begins.
 - Record only the decisions, assumptions, and defaults needed to keep implementation aligned with the objective. When the user explains an important choice, preserve the relevant rationale, constraints, alternatives, or accepted tradeoffs; do not invent them.
 - Define verification in terms of observable evidence through the intended path. Fix terminology before planning: use one term for one meaning.
-- Give every Plan that will be dispatched an explicit, stable repository Plan reference: the exact repository-relative active Plan path at publication. The Publisher must preserve that reference as task input, and the adapter must expose it mechanically to the worker. A worker must not locate its Plan by scanning, title matching, or inferring from `docs/plans/active/`.
-- Keep active Plans under `docs/plans/active/`. Before making a Pull Request, move the Plan to `docs/plans/completed/`.
+- Give every Plan that will be dispatched an explicit repository Plan reference: the exact repository-relative active Plan path at publication. Publisher must validate the declaration and carry it in the normalized task description; the adapter must pass that description unchanged to the worker. A worker must not locate its Plan by scanning, title matching, or inferring from `docs/plans/active/`.
+- Keep a non-terminal task's Plan under `docs/plans/active/`, including while its Pull Request is under review and during any resulting rework. Move it to `docs/plans/completed/` only as part of terminal completion, after all required review and delivery work is done.
 
 ## Execution relationship
 
@@ -27,9 +27,11 @@ The intended Leesh Loop path for a valid follow-up is a new follow-up Plan artif
 
 ## Dispatch binding
 
-Publication and execution use separate responsibilities for one binding. The repository Plan declares its exact active repository-relative path at publication in its `Repository Plan Reference` section. Publisher parsing preserves that declared path as the task's repository Plan reference; the tracker adapter only transports the already-normalized reference into the worker's task input. The reference identifies the one writable repository Plan for durable corrections. The published Plan snapshot remains the accepted starting-state record and is not synchronized after execution.
+Publication and execution use separate responsibilities for one binding. The repository Plan declares its exact active repository-relative path at publication in its `Repository Plan Reference` section. Publisher validates that declaration and makes the normalized `Description` begin with the exact line `Repository Plan Reference: <repository-relative path>`. The tracker adapter copies that Description unchanged into Symphony's existing `Issue.description`; the workflow renders `{{ issue.description }}`. The adapter does not parse or interpret the Plan, and no new Symphony `Issue` field is required. The reference identifies the one writable repository Plan for durable corrections. The published Plan snapshot remains the accepted starting-state record and is not synchronized after execution.
 
-Until the Publisher and adapter expose this reference, a published task may exist but is not eligible for autonomous execution under this workflow. A worker that receives a missing, non-repository-relative, absent, or non-matching reference must not select another Plan; it records the blocker and returns it for resolution.
+Until the Publisher and adapter expose this carrier, a published task may exist but is not eligible for autonomous execution under this workflow. A worker that receives a missing, malformed, non-repository-relative, or unresolved reference must not select another Plan; it records the blocker and returns it for resolution.
+
+The referenced active path remains live through implementation, Pull Request review, and rework. At terminal completion, after required review and delivery are complete, move the Plan to `completed/` and transition the task to its terminal state as the same completion operation. If a terminal task is reopened, restore its Plan to the original referenced active path before it becomes dispatchable again. The old reference is then historical provenance only while terminal; it must resolve again before another worker can start.
 
 When reviewing the plan, check that each planned unit describes a coherent outcome in the problem domain rather than merely an implementation step.
 
@@ -54,7 +56,7 @@ The final plan should be complete enough for implementation to begin without unr
 
 ## Repository Plan Reference
 
-Record the exact repository-relative active path at publication, for example `docs/plans/active/date-summary.md`. This is the task's deterministic binding to its writable repository Plan. It remains historical provenance after the Plan moves to `completed/`.
+Record the exact repository-relative active path at publication, for example `docs/plans/active/date-summary.md`. This is the task's deterministic binding to its writable repository Plan. Keep it active until terminal completion; it becomes historical provenance only after the Plan moves to `completed/` as part of terminal completion.
 
 ## Objective
 
