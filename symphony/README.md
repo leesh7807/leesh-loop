@@ -289,7 +289,9 @@ codex:
 - The Publisher-owned schema requires `Identifier`, `Title`, `State`, `Priority`, `Labels`,
   `Blocked By`, and `Description`. `issue.id` is the Notion page id, while `issue.identifier` is
   the `Identifier` property. The adapter reads the `Plan` section as description and excludes the
-  `Workpad` section, preserves State, and reports `Blocked By` relations without interpreting them.
+  `Workpad` section, preserves State, and resolves `Blocked By` states into the provider-specific
+  `dispatchable` fact. The generic scheduler then applies its common state, label, claim, retry,
+  and capacity policy.
 - The adapter validates schema compatibility and returns provider/schema failures as tracker
   failures. It does not repair properties or create a Notion-specific lifecycle or dispatch rule.
 - Bound tools are `notion_read_page`, `notion_read_comments`, `notion_update_page`, and

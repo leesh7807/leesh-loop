@@ -79,7 +79,7 @@ defmodule SymphonyElixir.Notion.AdapterTest do
         "State" => %{"type" => "select"},
         "Priority" => %{"type" => "number"},
         "Labels" => %{"type" => "multi_select"},
-        "Blocked By" => %{"type" => "relation"},
+        "Blocked By" => %{"type" => "relation", "relation" => %{"data_source_id" => @database, "single_property" => %{}, "dual_property" => nil}},
         "Description" => %{"type" => "rich_text"}
       }
     }

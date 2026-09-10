@@ -52,7 +52,9 @@ defmodule SymphonyElixir.Notion.AgentTool do
     end
   end
 
-  defp operation("notion_update_page", %{"page_id" => id, "properties" => properties}) when is_binary(id) and is_map(properties), do: {:ok, "PATCH", "/pages/#{id}", %{}, %{"properties" => properties}}
+  defp operation("notion_update_page", %{"page_id" => id, "properties" => properties}) when is_binary(id) and is_map(properties) do
+    if Map.has_key?(properties, "Identifier"), do: {:error, :immutable_notion_identifier}, else: {:ok, "PATCH", "/pages/#{id}", %{}, %{"properties" => properties}}
+  end
 
   defp operation("notion_append_blocks", %{"page_id" => id, "children" => children}) when is_binary(id) and is_list(children),
     do: {:ok, "PATCH", "/blocks/#{id}/children", %{}, %{"children" => children}}

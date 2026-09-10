@@ -223,7 +223,8 @@ defmodule SymphonyElixir.Notion.Client do
   defp validate_surface(settings, request_fun) do
     with {:ok, %{"properties" => properties}} <- api_request("GET", "/databases/#{settings.database_id}", %{}, nil, settings, request_fun),
          true <- is_map(properties) or {:error, :notion_incompatible_schema},
-         :ok <- validate_properties(properties) do
+         :ok <- validate_properties(properties),
+         :ok <- validate_blocked_by_relation(properties, settings.database_id) do
       :ok
     else
       {:ok, _} -> {:error, :notion_incompatible_schema}
@@ -239,6 +240,12 @@ defmodule SymphonyElixir.Notion.Client do
       end
     end)
   end
+
+  defp validate_blocked_by_relation(%{"Blocked By" => %{"relation" => relation}}, database_id) when is_map(relation) do
+    if relation["data_source_id"] == database_id and is_map(relation["single_property"]) and is_nil(relation["dual_property"]), do: :ok, else: {:error, {:notion_incompatible_schema, "Blocked By"}}
+  end
+
+  defp validate_blocked_by_relation(_, _), do: {:error, {:notion_incompatible_schema, "Blocked By"}}
 
   defp property_text(properties, name, type) do
     case properties do
@@ -280,6 +287,9 @@ defmodule SymphonyElixir.Notion.Client do
 
   defp relation_property(properties) do
     case properties do
+      %{"Blocked By" => %{"type" => "relation", "has_more" => true}} ->
+        {:error, :notion_incomplete_relation}
+
       %{"Blocked By" => %{"type" => "relation", "relation" => values}} when is_list(values) ->
         {:ok,
          Enum.map(values, fn
@@ -305,7 +315,7 @@ defmodule SymphonyElixir.Notion.Client do
          |> Enum.slice(plan + 1, workpad - plan - 1)
          |> Enum.map(&block_text/1)
          |> Enum.reject(&(&1 == ""))
-         |> Enum.join("\n")}
+         |> Enum.join("")}
 
       _ ->
         {:error, :notion_incompatible_page_structure}

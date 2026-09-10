@@ -11,8 +11,9 @@ selected Notion database; the Publisher and adapter consume that same resolved
 
 - Publisher creates and normalizes the schema, properties, state vocabulary,
   `Blocked By` relation, and Plan/Workpad page convention.
-- Adapter validates and consumes that representation. It does not repair
-  schema, invent state translation, dependency policy, or dispatch policy.
+- Adapter validates and consumes that representation. It does not repair schema,
+  invent state translation or lifecycle policy; it may derive the existing
+  provider-specific `dispatchable` fact from represented blocker state.
 - Page id is `Issue.id`; `Identifier` is `Issue.identifier`; Plan is worker
   input and Workpad is excluded.
 - Client owns Notion API reads, pagination, blocks, and provider requests.
