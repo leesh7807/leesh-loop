@@ -1,5 +1,9 @@
 # 2026-09-10-workflow-contracts
 
+## Repository Plan Reference
+
+`docs/plans/active/2026-09-10-workflow-contracts.md` at publication. This is historical provenance after the Plan's required move to `docs/plans/completed/` before Pull Request creation.
+
 ## Objective
 
 Define Leesh Loop planning and execution contracts so repository agents can execute published Plans autonomously without treating the original Plan as an immutable prediction of every implementation step. This work changes documentation and execution contracts only. It does not implement the Notion tracker adapter, change Symphony runtime behavior, or change Publisher behavior.
@@ -13,6 +17,7 @@ Define Leesh Loop planning and execution contracts so repository agents can exec
 - **Follow-up work**: meaningful work discovered during execution that is not required for the current accepted objective. It is separated rather than absorbed into the current task.
 - **Workflow template**: a reusable Leesh Loop execution-contract template with no repository-specific commands, paths, tools, or delivery details.
 - **Repository workflow**: a target repository's concrete `WORKFLOW.md`, combining Symphony runtime configuration with its repository-specific execution prompt and applying common Leesh Loop workflow semantics.
+- **Repository Plan reference**: the exact repository-relative active Plan path declared by a Plan at publication, preserved as normalized task input by Publisher and mechanically exposed to the worker by the tracker adapter. It identifies the one repository Plan that the worker may read and update.
 
 ## Decisions
 
@@ -38,6 +43,8 @@ The intended path is execution discovery → follow-up Plan artifact → Publish
 
 The Plan published to Notion represents the accepted planning state that started the task. The repository Plan may later be corrected with durable planning knowledge. The Workpad records execution history between those points. Do not add Plan synchronization to Publisher.
 
+Each execution-eligible Plan declares its exact active repository-relative Plan path at publication in its `Repository Plan Reference` section. Publisher preserves it as the task's repository Plan reference, and the future tracker adapter only carries the already-normalized reference into task input. The worker opens and may update only that exact referenced file; it must not scan or infer from `docs/plans/active/`. Missing, invalid, unresolved, or references that disagree with the published snapshot block execution and are surfaced for resolution. Until Publisher and the adapter expose this reference, publication may occur but autonomous execution under this workflow cannot begin.
+
 ### Template and repository workflow
 
 Add `docs/WORKFLOW_TEMPLATE.md` for reusable semantics: reading accepted tasks, evidence-led execution, Plan-versus-Workpad updates, follow-up work, human-judgment boundaries, verification, completion, and repository-delivery extension points. It must not contain repository commands, tests, GitHub URLs, `chatgpt-shot` details, or fixed tracker-provider configuration.
@@ -48,7 +55,7 @@ Keep it structurally compatible with Symphony: YAML front matter is runtime conf
 
 ### Component boundaries
 
-The future Notion adapter translates Notion coordination into Symphony's tracker interface, including candidate reads, issue normalization, refresh/state data, blocker semantics, and agent-side mutation surface. It does not plan or parse Plans. Publisher takes a Plan artifact, normalizes it into Leesh Loop task structure, and publishes it to the configured Notion surface; it does not plan, execute, synchronize later Plan edits, or make workflow decisions.
+The future Notion adapter translates Notion coordination into Symphony's tracker interface, including candidate reads, issue normalization, refresh/state data, blocker semantics, the already-normalized repository Plan reference, and agent-side mutation surface. It does not plan or parse Plans. Publisher takes a Plan artifact, normalizes it into Leesh Loop task structure (including the declared repository Plan reference for execution-eligible work), and publishes it to the configured Notion surface; it does not plan, execute, synchronize later Plan edits, or make workflow decisions.
 
 ## Verification
 
@@ -59,6 +66,7 @@ Repository document review and scenario walkthrough must establish one coherent 
 - A new product, compatibility, architecture-contract, or scope decision not already accepted returns to human judgment.
 - Necessary but unlisted implementation work stays in the current task.
 - Meaningful unnecessary work becomes a separate follow-up Plan on the normal Publisher path; speculative improvements are not automatically published.
+- A task with two active Plans or a Plan published from an arbitrary external path still opens only its explicit repository Plan reference; absent or invalid references block rather than permitting scanning or inference.
 - The reusable template has only common semantics and extension points; the root workflow has this repository's concrete behavior without duplicating `AGENTS.md`.
 - Documentation does not imply that Publisher executes Symphony or synchronizes final Plan edits, that the adapter plans or parses Plans, or that the adapter must exist before the workflow contract.
 - The concrete workflow has YAML runtime configuration and a Markdown prompt body and invents no unsupported Notion adapter fields.

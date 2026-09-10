@@ -80,7 +80,7 @@ Notion Tasks
 
 Rather than copying plan content into free-form Notion pages, it creates or updates records according to the task schema, relations, and state vocabulary used by Leesh Loop.
 
-The Publisher does not plan or execute work, synchronize later repository Plan corrections back to Notion, or decide workflow behavior. The published Plan is the accepted starting state; mutable execution history belongs in the Workpad, while durable corrections remain in the repository Plan.
+The Publisher does not plan or execute work, synchronize later repository Plan corrections back to Notion, or decide workflow behavior. The publication/execution contract requires it to preserve an execution-eligible Plan's declared repository-relative Plan reference as normalized task input; the adapter later transports that reference without parsing or interpreting the Plan. This binds each task to one writable repository Plan without making the published snapshot mutable. The published Plan is the accepted starting state; mutable execution history belongs in the Workpad, while durable corrections remain in the repository Plan. Until the binding is implemented, a publication can exist but is not eligible for autonomous execution under this workflow.
 
 ## Symphony
 

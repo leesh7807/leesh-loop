@@ -4,7 +4,9 @@ This template defines reusable execution-contract semantics. A target repository
 
 ## Read the accepted task
 
-Read the task and its accepted Plan before making changes. Treat the Plan as the durable baseline for the accepted objective, boundaries, decisions, assumptions, constraints, and verification design. It is not an immutable prediction of implementation steps.
+Read the task and its accepted Plan before making changes. The task must include a repository Plan reference: the exact repository-relative path that was declared when that Plan was published. Open only that referenced file; do not scan `docs/plans/active/`, infer from a title, or choose a similarly named Plan. Treat the referenced repository Plan as the durable baseline for the accepted objective, boundaries, decisions, assumptions, constraints, and verification design. It is not an immutable prediction of implementation steps.
+
+Publisher establishes the reference while normalizing the Plan, and the tracker adapter transports it mechanically as task input; neither responsibility asks the adapter to parse or interpret a Plan. If the reference is absent, is not repository-relative, does not resolve to one active Plan, or disagrees with the path declared in the task's published Plan snapshot, do not begin work or select another Plan. Record and surface the binding blocker for resolution.
 
 Follow the target repository's guidance and use its intended entry points. Keep repository-wide rules authoritative; this template supplies common execution semantics rather than replacing them.
 
@@ -24,7 +26,7 @@ Use the mutable Workpad for transient state: progress, attempts, command output,
 
 When concrete evidence reveals meaningful work not required for the current accepted objective, do not expand the current task. Define separate follow-up work only when its outcome is independently understandable, completion is independently judgeable, and defining it does not require a new material product or contract decision. Do not create speculative follow-ups for optional improvements.
 
-The intended follow-up route is: execution discovery → follow-up Plan artifact → Publisher → normal tracked task. This contract does not require or describe the agent's Publisher invocation, tracker mutation mechanics, or relation writing.
+The intended follow-up route is: execution discovery → follow-up Plan artifact (including its repository Plan reference) → Publisher → normal tracked task. This contract does not require or describe the agent's Publisher invocation, tracker mutation mechanics, or relation writing.
 
 ## Return to human judgment
 

@@ -17,11 +17,13 @@ Read and follow the repository's `AGENTS.md` before beginning. Its repository-wi
 
 ## Plan and execution
 
-For each accepted task, read its Plan from `docs/plans/active/`. Treat it as the accepted durable baseline for objective, boundaries, decisions, assumptions, constraints, and verification—not as an immutable implementation script. Apply the common semantics in [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md): adapt to evidence autonomously, retain required additional work in the current task, write durable planning knowledge back to the Plan, and keep transient state in the Workpad.
+For each accepted task, use the task's explicit repository Plan reference to open its one Plan. Do not scan `docs/plans/active/`, infer from a title, or select a Plan by similarity. The reference must be the repository-relative active Plan path established at publication; it is how a published task binds to its writable repository artifact. If it is absent, invalid, does not resolve to one active Plan, or disagrees with the path declared in the task's published Plan snapshot, do not begin work or modify another Plan: record and surface the binding blocker.
+
+Treat that referenced Plan as the accepted durable baseline for objective, boundaries, decisions, assumptions, constraints, and verification—not as an immutable implementation script. Apply the common semantics in [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md): adapt to evidence autonomously, retain required additional work in the current task, write durable planning knowledge back to the referenced Plan, and keep transient state in the Workpad.
 
 Do not modify `symphony/` unless the accepted task requires Symphony changes. Do not treat a changed implementation path, a failed attempt, or needed verification refinement as a reason to seek human approval. Return to human judgment only at the template's material decision boundary.
 
-When concrete evidence identifies meaningful work outside the accepted objective, keep it separate. Create a follow-up Plan artifact only when it is independently understandable and judgeable and needs no unresolved material decision. Its future path is normal Plan publication through the Publisher; do not assume that this repository currently provides an agent-to-Publisher call, tracker relation mutation, or a Notion adapter.
+When concrete evidence identifies meaningful work outside the accepted objective, keep it separate. Create a follow-up Plan artifact only when it is independently understandable and judgeable and needs no unresolved material decision. Its future path is normal Plan publication through the Publisher, which establishes the follow-up's repository Plan reference; do not assume that this repository currently provides an agent-to-Publisher call, tracker relation mutation, or a Notion adapter.
 
 ## Plan lifecycle and verification
 

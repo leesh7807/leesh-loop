@@ -6,6 +6,7 @@ Create and maintain a Plan that keeps work aligned with its accepted objective a
 - Use confirmed product intent, repository conventions, and available evidence to settle decisions that could materially change the objective or its boundaries before execution begins.
 - Record only the decisions, assumptions, and defaults needed to keep implementation aligned with the objective. When the user explains an important choice, preserve the relevant rationale, constraints, alternatives, or accepted tradeoffs; do not invent them.
 - Define verification in terms of observable evidence through the intended path. Fix terminology before planning: use one term for one meaning.
+- Give every Plan that will be dispatched an explicit, stable repository Plan reference: the exact repository-relative active Plan path at publication. The Publisher must preserve that reference as task input, and the adapter must expose it mechanically to the worker. A worker must not locate its Plan by scanning, title matching, or inferring from `docs/plans/active/`.
 - Keep active Plans under `docs/plans/active/`. Before making a Pull Request, move the Plan to `docs/plans/completed/`.
 
 ## Execution relationship
@@ -23,6 +24,12 @@ Return to human judgment when evidence would require changing the accepted objec
 Do not absorb meaningful work discovered during execution when it is not required to complete the current accepted objective. Create a separate follow-up only when concrete evidence supports the need, its outcome and completion are independently understandable and judgeable, and defining it does not invent a material product or contract decision. Do not publish speculative improvements merely because they could be made. If a follow-up depends on a material undecided choice, return that choice to human judgment instead.
 
 The intended Leesh Loop path for a valid follow-up is a new follow-up Plan artifact, then the normal Publisher path to a Notion task. The current Plan does not implement or assume an agent-to-Publisher invocation, tracker relation writing, or adapter tooling.
+
+## Dispatch binding
+
+Publication and execution use separate responsibilities for one binding. The repository Plan declares its exact active repository-relative path at publication in its `Repository Plan Reference` section. Publisher parsing preserves that declared path as the task's repository Plan reference; the tracker adapter only transports the already-normalized reference into the worker's task input. The reference identifies the one writable repository Plan for durable corrections. The published Plan snapshot remains the accepted starting-state record and is not synchronized after execution.
+
+Until the Publisher and adapter expose this reference, a published task may exist but is not eligible for autonomous execution under this workflow. A worker that receives a missing, non-repository-relative, absent, or non-matching reference must not select another Plan; it records the blocker and returns it for resolution.
 
 When reviewing the plan, check that each planned unit describes a coherent outcome in the problem domain rather than merely an implementation step.
 
@@ -44,6 +51,10 @@ The final plan should be complete enough for implementation to begin without unr
 
 ```text
 # date-summary
+
+## Repository Plan Reference
+
+Record the exact repository-relative active path at publication, for example `docs/plans/active/date-summary.md`. This is the task's deterministic binding to its writable repository Plan. It remains historical provenance after the Plan moves to `completed/`.
 
 ## Objective
 
