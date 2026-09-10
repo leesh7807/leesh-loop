@@ -30,39 +30,41 @@ async function inputs() {
   const directory = await mkdtemp(join(tmpdir(), "publisher-cli-"));
   const plan = join(directory, "plan.md");
   const config = join(directory, "config.json");
+  const workflow = join(directory, "WORKFLOW.md");
   await writeFile(plan, "# Plan\ncontent");
   await writeFile(config, JSON.stringify({ state: "Ready" }));
-  return { directory, plan, config };
+  await writeFile(workflow, `---\ntracker:\n  kind: notion\n  provider:\n    database_url: ${DATABASE_URL}\n    token: $NOTION_TOKEN\n---\n`);
+  return { directory, plan, config, workflow };
 }
 
 test("task creation followed by Plan append failure preserves retryable state", async () => {
-  const { plan, config } = await inputs();
+  const { plan, config, workflow } = await inputs();
   const client = new PublicationFake();
-  await assert.rejects(publishPlan(plan, config, DATABASE_URL, client), /authentication failure/);
+  await assert.rejects(publishPlan(plan, config, workflow, client), /authentication failure/);
   assert.deepEqual(client.finalized, []);
 });
 
 test("first marker failure leaves an owned task marker", async () => {
-  const { plan, config } = await inputs();
+  const { plan, config, workflow } = await inputs();
   const client = new PublicationFake(null, 1);
-  await assert.rejects(publishPlan(plan, config, DATABASE_URL, client), /authentication failure/);
+  await assert.rejects(publishPlan(plan, config, workflow, client), /authentication failure/);
   assert.equal(client.createdProperties.Description.rich_text[0].text.content, PENDING_PUBLICATION_MARKER);
   assert.deepEqual(client.finalized, []);
 });
 
 test("a later invocation repairs the incomplete publication", async () => {
-  const { plan, config } = await inputs();
+  const { plan, config, workflow } = await inputs();
   const client = new PublicationFake({ pageId: "page", complete: false });
-  const result = await publishPlan(plan, config, DATABASE_URL, client);
+  const result = await publishPlan(plan, config, workflow, client);
   assert.equal(result.page_id, "page");
   assert.equal(client.ensuredDatabase, "3d28a265-8625-8052-b3ec-ccc9c33787e3");
   assert.deepEqual(client.repaired, ["page"]);
 });
 
 test("successful first publication removes its pending transaction state", async () => {
-  const { plan, config } = await inputs();
+  const { plan, config, workflow } = await inputs();
   const client = new PublicationFake(null, 0);
-  const result = await publishPlan(plan, config, DATABASE_URL, client);
+  const result = await publishPlan(plan, config, workflow, client);
   assert.equal(result.page_id, "page");
   assert.equal(client.createdProperties.State.select.name, PUBLISHER_PENDING_STATE);
   assert.deepEqual(client.finalized, ["page"]);
@@ -83,48 +85,46 @@ class StatefulRetryFake extends NotionClient {
 }
 
 test("failed publication is repaired by the next invocation and then becomes a duplicate", async () => {
-  const { plan, config } = await inputs();
+  const { plan, config, workflow } = await inputs();
   const client = new StatefulRetryFake("token");
-  await assert.rejects(publishPlan(plan, config, DATABASE_URL, client), /Plan append/);
-  const repaired = await publishPlan(plan, config, DATABASE_URL, client);
+  await assert.rejects(publishPlan(plan, config, workflow, client), /Plan append/);
+  const repaired = await publishPlan(plan, config, workflow, client);
   assert.equal(repaired.page_id, "page");
-  await assert.rejects(publishPlan(plan, config, DATABASE_URL, client), /duplicate publication/);
+  await assert.rejects(publishPlan(plan, config, workflow, client), /duplicate publication/);
 });
 
 test("oversized plan title fails before Notion mutation", async () => {
-  const { plan, config } = await inputs();
+  const { plan, config, workflow } = await inputs();
   await writeFile(plan, `# ${"x".repeat(1901)}\ncontent`);
   const client = new PublicationFake();
-  await assert.rejects(publishPlan(plan, config, DATABASE_URL, client), /title exceeds/);
+  await assert.rejects(publishPlan(plan, config, workflow, client), /title exceeds/);
   assert.deepEqual(client.finalized, []);
 });
 
-test("missing or invalid database binding fails before any Notion mutation", async () => {
-  const { plan, config } = await inputs();
-  for (const target of [undefined, "https://example.com/notion-database"]) {
-    const client = new PublicationFake(null, 0);
-    await assert.rejects(publishPlan(plan, config, target, client), /NOTION_PUBLISH_DATABASE_URL|invalid database URL/);
-    assert.equal(client.appendCalls, 0);
-    assert.equal(client.createdProperties, undefined);
-  }
+test("missing or invalid workflow tracker binding fails before any Notion mutation", async () => {
+  const { plan, config, workflow } = await inputs();
+  await writeFile(workflow, "---\ntracker:\n  kind: notion\n  provider:\n    database_url: https://example.com/notion-database\n---\n");
+  const client = new PublicationFake(null, 0);
+  await assert.rejects(publishPlan(plan, config, workflow, client), /invalid database URL/);
+  assert.equal(client.appendCalls, 0);
+  assert.equal(client.createdProperties, undefined);
 });
 
-test("normal CLI loads its database binding from current-directory .env and honors process overrides", async () => {
+test("normal CLI requires an explicit WORKFLOW.md selection", async () => {
   const { plan, config, directory } = await inputs();
-  await writeFile(join(directory, ".env"), ["NOTION_TOKEN=local-token", `NOTION_PUBLISH_DATABASE_URL=${DATABASE_URL}`].join("\n"));
   const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url));
   const result = spawnSync(process.execPath, [cli, "--plan", plan, "--config", config], {
     cwd: directory,
-    env: { ...process.env, NOTION_TOKEN: "process-token", NOTION_PUBLISH_DATABASE_URL: "https://example.com/notion-database" },
+    env: { ...process.env, NOTION_TOKEN: "process-token" },
     encoding: "utf8",
   });
   assert.equal(result.status, 2);
-  assert.match(result.stderr, /invalid database URL/);
+  assert.match(result.stderr, /--workflow/);
 });
 
-test("legacy-only environment is rejected without Notion mutation", async () => {
-  const { plan, config } = await inputs();
+test("publisher does not use a legacy environment database target", async () => {
+  const { plan, config, workflow } = await inputs();
   const client = new PublicationFake(null, 0);
-  await assert.rejects(publishPlan(plan, config, undefined, client, DATABASE_URL), /no longer supported; migrate/);
-  assert.equal(client.createdProperties, undefined);
+  const result = await publishPlan(plan, config, workflow, client);
+  assert.equal(result.page_id, "page");
 });

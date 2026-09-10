@@ -280,6 +280,21 @@ codex:
 - `gitlab_api` forwards raw GitLab REST requests with host-side auth and keeps configured tracker
   credentials and provider authentication aliases out of the Codex child.
 
+### Notion adapter
+
+- Configure `tracker.kind: notion`, `tracker.provider.database_url`, and `tracker.provider.token`
+  (both accept `$VAR` references). `WORKFLOW.md` selects the one Publisher and adapter execution
+  surface; no Publisher-specific database environment variable is used. Set explicit represented
+  `active_states` and `terminal_states`.
+- The Publisher-owned schema requires `Identifier`, `Title`, `State`, `Priority`, `Labels`,
+  `Blocked By`, and `Description`. `issue.id` is the Notion page id, while `issue.identifier` is
+  the `Identifier` property. The adapter reads the `Plan` section as description and excludes the
+  `Workpad` section, preserves State, and reports `Blocked By` relations without interpreting them.
+- The adapter validates schema compatibility and returns provider/schema failures as tracker
+  failures. It does not repair properties or create a Notion-specific lifecycle or dispatch rule.
+- Bound tools are `notion_read_page`, `notion_read_comments`, `notion_update_page`, and
+  `notion_append_blocks`; none can change database schema.
+
 ## Web dashboard
 
 The observability UI now runs on a minimal Phoenix stack:

@@ -1,13 +1,14 @@
 import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFile } from "node:fs/promises";
-import { buildPageBlocks, buildTaskProperties, deriveIdentifier, extractPlanTitle, loadConfig, PublicationError, PUBLISHER_PENDING_STATE, resolvePublishDatabase, validatePlanTitle } from "./core.js";
+import { buildPageBlocks, buildTaskProperties, deriveIdentifier, extractPlanTitle, loadConfig, PublicationError, PUBLISHER_PENDING_STATE, validatePlanTitle } from "./core.js";
 import { NotionClient, pendingPublicationBlock, PENDING_PUBLICATION_MARKER } from "./notion.js";
+import { resolveNotionTrackerSurface } from "./workflow.js";
 
-export async function publishPlan(planPath: string, configPath: string, databaseUrl: string | undefined, client: NotionClient, legacyTargetUrl?: string): Promise<{ identifier: string; page_id: string; url?: string }> {
+export async function publishPlan(planPath: string, configPath: string, workflowPath: string, client: NotionClient): Promise<{ identifier: string; page_id: string; url?: string }> {
   const plan = await readFile(planPath, "utf8");
   const { config, policy } = await loadConfig(configPath);
-  const database = resolvePublishDatabase(databaseUrl, legacyTargetUrl);
+  const database = await resolveNotionTrackerSurface(workflowPath);
   const title = extractPlanTitle(plan, planPath);
   validatePlanTitle(title);
   const dataSource = await client.ensureDatabase(database.databaseId, policy);
@@ -47,14 +48,14 @@ function environmentValue(name: string, local: Record<string, string>): string |
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const get = (name: string) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined; };
-  const planArg = get("--plan"), configArg = get("--config");
-  if (!planArg || !configArg) throw new PublicationError("usage: notion-plan-publisher --plan PATH --config PATH");
+  const planArg = get("--plan"), configArg = get("--config"), workflowArg = get("--workflow");
+  if (!planArg || !configArg || !workflowArg) throw new PublicationError("usage: notion-plan-publisher --plan PATH --config PATH --workflow PATH");
   const local = await localEnvironment();
   const token = environmentValue("NOTION_TOKEN", local);
-  const databaseUrl = environmentValue("NOTION_PUBLISH_DATABASE_URL", local);
-  const legacyTargetUrl = environmentValue("NOTION_PUBLISH_TARGET_URL", local);
-  if (!token) throw new PublicationError("missing NOTION_TOKEN");
-  console.log(JSON.stringify(await publishPlan(resolve(planArg), resolve(configArg), databaseUrl, new NotionClient(token), legacyTargetUrl)));
+  const surface = await resolveNotionTrackerSurface(resolve(workflowArg));
+  const configuredToken = surface.token || token;
+  if (!configuredToken) throw new PublicationError("missing tracker.provider.token / NOTION_TOKEN");
+  console.log(JSON.stringify(await publishPlan(resolve(planArg), resolve(configArg), resolve(workflowArg), new NotionClient(configuredToken))));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

@@ -68,6 +68,10 @@ Leesh Loop assumes that the target repository already has a harness suitable for
 
 The Publisher normalizes plan documents into the Notion execution surface.
 
+The loop's `WORKFLOW.md` selects that surface through `tracker.kind: notion`
+and `tracker.provider.database_url`. Publisher and Symphony consume this same
+resolved setting: there is no separate Publisher database target.
+
 ```text
 Plan
   ↓

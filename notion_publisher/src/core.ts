@@ -14,13 +14,6 @@ const keys = new Set(["state","priority","labels","plan_source","property_names"
 const propKeys = new Set(["identifier","title","state","priority","labels","blocked_by","description","source"]);
 export const resolvePath = (value:string, base:string=process.cwd()) => isAbsolute(value) ? resolve(value) : resolve(base, value);
 export function notionId(value:string):string { let raw:string; try { const u=new URL(value); const host=u.hostname.toLowerCase().replace(/\.$/,""); const notionHost=host==="notion.so"||host.endsWith(".notion.so")||host==="app.notion.com"||host.endsWith(".notion.site"); if (!["http:","https:"].includes(u.protocol)||!notionHost) throw new Error(); raw=u.pathname.split("/").pop()??""; } catch { throw new PublicationError("invalid database URL: expected an HTTP(S) Notion database URL"); } const match=raw.match(/([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}|[\da-f]{32})$/i); if(!match) throw new PublicationError("invalid database URL: expected a Notion database URL ending in a 32-character database id"); const compact=match[1].replace(/-/g,""); return `${compact.slice(0,8)}-${compact.slice(8,12)}-${compact.slice(12,16)}-${compact.slice(16,20)}-${compact.slice(20)}`; }
-export function resolvePublishDatabase(databaseUrl:string|undefined, legacyTargetUrl?:string):{databaseId:string;databaseUrl:string} {
- if(!databaseUrl?.trim()) {
-  if(legacyTargetUrl?.trim()) throw new PublicationError("NOTION_PUBLISH_TARGET_URL is no longer supported; migrate to NOTION_PUBLISH_DATABASE_URL");
-  throw new PublicationError("missing NOTION_PUBLISH_DATABASE_URL");
- }
- return {databaseId:notionId(databaseUrl),databaseUrl};
-}
 export async function loadConfig(file:string, base?:string, policy=DEFAULT_POLICY):Promise<{config:{planSource?:string};policy:Policy}> {
  const path=resolvePath(file,base); let raw:unknown; try { raw=JSON.parse(await readFile(path,"utf8")); } catch { throw new PublicationError(`missing or invalid configuration: ${path}`); }
  if(!raw || typeof raw!=="object" || Array.isArray(raw)) throw new PublicationError("configuration must be an object"); const r=raw as Record<string,unknown>;
