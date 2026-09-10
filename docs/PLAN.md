@@ -7,11 +7,10 @@ Create and maintain a Plan that keeps work aligned with its accepted objective a
 - Record only the decisions, assumptions, and defaults needed to keep implementation aligned with the objective. When the user explains an important choice, preserve the relevant rationale, constraints, alternatives, or accepted tradeoffs; do not invent them.
 - Define verification in terms of observable evidence through the intended path. Fix terminology before planning: use one term for one meaning.
 - Give every Plan that will be dispatched an explicit repository Plan reference: the exact repository-relative active Plan path at publication.
-- Keep a non-terminal task's Plan under `docs/plans/active/`, including while its Pull Request is under review and during any resulting rework. Move it to `docs/plans/completed/` only as part of terminal completion, after all required review and delivery work is done.
 
 ## Execution relationship
 
-The accepted Plan is the planning baseline, not an immutable implementation script. An executor may autonomously adapt the technical approach, touch additional files or components, add necessary tests or verification, replace disproved technical assumptions, and refine an invalid or insufficient verification method when evidence requires it. Additional work required to achieve the accepted objective remains in the current task even when the Plan did not enumerate it. Execution-path divergence alone does not require human approval.
+The accepted Plan is the durable planning baseline, not an immutable implementation script. The reusable workflow defines how a worker adapts execution from this baseline.
 
 Update the repository Plan when execution reveals **durable planning knowledge**: information that should remain part of the correct understanding of the completed work. This includes material corrections to assumptions, responsibility boundaries, constraints, accepted implementation requirements, verification methods, and repository or integration behavior relevant to maintenance or review. A Plan update itself does not require approval.
 
@@ -40,7 +39,7 @@ The final plan should be complete enough for implementation to begin without unr
 
 ## Repository Plan Reference
 
-Record the exact repository-relative active path at publication, for example `docs/plans/active/date-summary.md`. This is the task's deterministic binding to its writable repository Plan. Keep it active until terminal completion; it becomes historical provenance only after the Plan moves to `completed/` as part of terminal completion.
+Record the exact repository-relative active path at publication, for example `docs/plans/active/date-summary.md`. The reusable workflow defines the publication commit binding, task carrier, and lifecycle for this declaration.
 
 ## Objective
 

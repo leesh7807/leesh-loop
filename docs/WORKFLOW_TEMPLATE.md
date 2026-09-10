@@ -4,9 +4,18 @@ This template defines reusable execution-contract semantics. A target repository
 
 ## Read the accepted task
 
-Read the task and its accepted Plan before making changes. The normalized task description must begin with `Repository Plan Reference: <repository-relative path>`, the exact active path declared when that Plan was published. Open only that referenced file; do not scan `docs/plans/active/`, infer from a title, or choose a similarly named Plan. Treat the referenced repository Plan as the durable baseline for the accepted objective, boundaries, decisions, assumptions, constraints, and verification design. It is not an immutable prediction of implementation steps.
+Read the task and its accepted Plan before making changes. The normalized task description must begin with these exact lines:
 
-The Plan declares the reference. Publisher validates the declaration and writes the fixed leading Description line; the tracker adapter transports that existing normalized Description as `issue.description` without parsing or interpreting a Plan. The concrete workflow must render `{{ issue.description }}`. If the line is absent or malformed, the path is not repository-relative, or it does not resolve to one active Plan, do not begin work or select another Plan. Record and surface the binding blocker for resolution. Until the Publisher and adapter implement this carrier, a published task is not eligible for autonomous execution under this workflow.
+```text
+Repository Plan Reference: <repository-relative path>
+Repository Commit: <full Git commit SHA>
+```
+
+The Plan declares the path. At publication, Publisher validates that the Plan bytes exist at that path in the stated commit and that the commit is reachable from the configured workspace-clone remote; it then writes both lines. The tracker adapter transports Description unchanged as `issue.description` without parsing or interpreting a Plan. No new Symphony `Issue` field is required.
+
+Before resolving the path, fetch the stated commit from the configured repository remote, verify it, and check out that exact commit in the task workspace. Then open only the referenced file; do not scan `docs/plans/active/`, infer from a title, or choose a similarly named Plan. Treat that file as the durable baseline for objective, boundaries, decisions, assumptions, constraints, and verification design. It is not an immutable prediction of implementation steps.
+
+The concrete workflow must render `{{ issue.description }}`. If either line is absent or malformed, the path is not repository-relative, the commit is unavailable or does not contain that file, or the checked-out file does not match the published Plan snapshot, do not begin work or select another Plan. Record and surface the binding blocker for resolution. Until the Publisher and adapter implement this carrier, a published task is not eligible for autonomous execution under this workflow.
 
 Follow the target repository's guidance and use its intended entry points. Keep repository-wide rules authoritative; this template supplies common execution semantics rather than replacing them.
 
@@ -20,23 +29,31 @@ Do not ask for approval solely because the actual implementation path differs fr
 
 Update the repository Plan when execution reveals durable planning knowledge: a material correction to an assumption, responsibility boundary, constraint, accepted implementation requirement, verification method, or repository/integration behavior that remains relevant after the task ends. Updating the Plan for such a discovery does not itself require human approval.
 
-Use the mutable Workpad for transient state: progress, attempts, command output, temporary failures, investigation notes, intermediate evidence, blockers, and handoff state. Do not turn the Plan into an execution log. A resolved command failure belongs in the Workpad; proof that a material Plan assumption was false belongs in the Plan as durable knowledge.
+Use the mutable Workpad for transient state: progress, attempts, command output, temporary failures, investigation notes, intermediate evidence, blockers, completion checkpoints, and handoff state. Do not turn the Plan into an execution log. A resolved command failure belongs in the Workpad; proof that a material Plan assumption was false belongs in the Plan as durable knowledge.
+
+A compliant Leesh Loop adapter must provide a separate, authenticated agent-side mutation surface in addition to tracker reads. It must let the worker read and append Workpad entries, record a decision or binding blocker, and transition task state with authoritative readback. These operations must be idempotent by task and operation key. This surface is not part of Symphony `Issue`, does not require the adapter to parse Plans, and must remain separate from tracker-adapter reads. Until it exists, a task is not eligible for autonomous execution under this workflow.
 
 ## Separate follow-up work
 
 When concrete evidence reveals meaningful work not required for the current accepted objective, do not expand the current task. Define separate follow-up work only when its outcome is independently understandable, completion is independently judgeable, and defining it does not require a new material product or contract decision. Do not create speculative follow-ups for optional improvements.
 
-The intended follow-up route is: execution discovery → follow-up Plan artifact (declaring its repository Plan reference) → Publisher validation and normalized Description → normal tracked task. This contract does not require or describe the agent's Publisher invocation, tracker mutation mechanics, or relation writing.
+The intended follow-up route is: execution discovery → follow-up Plan artifact (declaring its repository Plan reference) → Publisher validation and normalized Description → normal tracked task. This contract does not prescribe the agent-to-Publisher invocation or relation-writing mechanism.
 
 ## Return to human judgment
 
-Stop and surface the decision when new evidence requires changing the accepted objective, a material product decision, a material external contract or compatibility decision, an accepted boundary into a materially different capability, or choosing among materially consequential alternatives not already settled. Do not escalate ordinary implementation discovery, failed approaches, required additional work, or verification refinement.
+Stop and surface the decision when new evidence requires changing the accepted objective, a material product decision, a material external contract or compatibility decision, an accepted boundary into a materially different capability, or choosing among materially consequential alternatives not already settled. Do not escalate ordinary implementation discovery, failed approaches, required additional work, or verification refinement. Use the agent-side mutation surface to record the decision request and blocker on the tracked task even when no Pull Request exists; add it to an existing Pull Request as well when one exists.
 
 ## Verify and complete
 
-Verify the representative intended flow through the repository's direct practical interface. Record transient evidence and handoff state in the Workpad; preserve durable corrections in the repository Plan. Keep the bound Plan active through Pull Request review and any rework. Complete only when the accepted objective and verification evidence are satisfied, repository-specific delivery requirements have been met, and any required human decision has been surfaced rather than silently made. Then move the Plan to `completed/` and transition the task terminally as one completion operation.
+Verify the representative intended flow through the repository's direct practical interface. Record transient evidence and handoff state in the Workpad; preserve durable corrections in the repository Plan. Keep the bound Plan active through Pull Request review and any rework. Complete only when the accepted objective and verification evidence are satisfied, repository-specific delivery requirements have been met, and any required human decision has been surfaced rather than silently made.
 
-A reopened terminal task is binding-blocked until the operator who reopens it restores the completed Plan to its original referenced active path and confirms that the reference resolves. The operator must not make the task dispatchable before that restoration. A worker that is dispatched despite a missing reference reports the same blocker and performs no Plan selection or mutation.
+Complete through this idempotent protocol; do not describe cross-system effects as atomic.
+
+1. Append a Workpad `completion-intent` checkpoint with a unique operation key, active and completed paths, and the delivery commit/PR identity. Read it back.
+2. Move the Plan to `completed/`, commit and push that repository change, then append a `repository-finalized` checkpoint with its commit identity and read it back.
+3. Transition the task terminally through the mutation surface and confirm the tracker readback.
+
+If interrupted, the next worker or operator reads the checkpoint and repository state. With `completion-intent` only, it inspects both paths and the recorded delivery identity: if the Plan is still active, it either finishes the move or clears the intent; if the Plan is already completed, it records the discovered final repository commit as `repository-finalized` and resumes. With `repository-finalized`, it fetches that recorded commit as needed and retries the idempotent terminal transition; if delivery must resume instead, it restores the Plan to the referenced active path, records the recovery, and returns the task to an eligible non-terminal state. A reopened terminal task is binding-blocked until the operator who reopens it restores the completed Plan to its original referenced active path, records recovery, and only then makes the task dispatchable. A worker that is dispatched despite a missing reference reports the same blocker and performs no ordinary Plan selection or mutation.
 
 ## Repository extension points
 

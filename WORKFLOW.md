@@ -23,7 +23,7 @@ You are working on this accepted task:
 - State: {{ issue.state }}
 - URL: {{ issue.url }}
 
-Normalized task description (its first line must be the repository Plan reference):
+Normalized task description (its first two lines bind the repository Plan path and commit):
 
 {{ issue.description }}
 
@@ -41,4 +41,4 @@ Use the repository's direct practical verification surfaces for the changed capa
 
 Work in an isolated worktree and task branch. Inspect the final diff and repository status, commit only task-related changes, push the branch, and open a Pull Request targeting `main`; do not merge directly to `main`.
 
-Where the accepted task or repository guidance requires independent review, obtain it after implementation and address material findings before declaring completion. For an open Pull Request, record material verification verdicts, decisions, root causes, and contract or artifact changes as PR comments in accordance with `AGENTS.md`. Surface any required human decision or unresolved material verification limit in the Pull Request rather than silently deciding it.
+Where the accepted task or repository guidance requires independent review, obtain it after implementation and address material findings before declaring completion. The reusable workflow defines the tracked-task surface for a material decision before a Pull Request exists. For an open Pull Request, also record material verification verdicts, decisions, root causes, and contract or artifact changes as PR comments in accordance with `AGENTS.md`.
