@@ -22,7 +22,8 @@ tracker:
 provide values and secrets only; `NOTION_PUBLISH_DATABASE_URL` and
 `NOTION_PUBLISH_TARGET_URL` are not Publisher inputs. The optional JSON policy
 config controls Publisher-owned representation defaults (`state`, `priority`,
-`labels`, `plan_source`, and canonical `property_names`), not destination.
+`labels`, and `plan_source`), not destination. Property names are canonical and
+fixed so Publisher and adapter always consume the same representation.
 
 Publisher-created pages use `Identifier`, `Title`, `State`, `Priority`,
 `Labels`, `Blocked By`, and `Description`, with a `Plan` section followed by a

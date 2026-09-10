@@ -133,7 +133,7 @@ defmodule SymphonyElixir.Notion.Client do
     with {:ok, blocks} <- fetch_blocks(page["id"], nil, settings, request_fun, []),
          {:ok, issue} <- normalize_issue(page, blocks),
          {:ok, blockers} <- hydrate_blockers(issue.blocked_by, settings, request_fun) do
-      {:ok, %{issue | blocked_by: blockers}}
+      {:ok, %{issue | blocked_by: blockers, dispatchable: blockers_terminal?(blockers, settings.terminal_states)}}
     end
   end
 
@@ -162,6 +162,17 @@ defmodule SymphonyElixir.Notion.Client do
       {:ok, hydrated} -> {:ok, Enum.reverse(hydrated)}
       error -> error
     end
+  end
+
+  defp blockers_terminal?([], _terminal_states), do: true
+
+  defp blockers_terminal?(blockers, terminal_states) when is_list(blockers) do
+    terminal_states = MapSet.new(terminal_states, &(String.trim(&1) |> String.downcase()))
+
+    Enum.all?(blockers, fn
+      %{"state" => state} when is_binary(state) -> MapSet.member?(terminal_states, String.trim(state) |> String.downcase())
+      _ -> false
+    end)
   end
 
   defp fetch_blocks(page_id, cursor, settings, request_fun, acc) when is_binary(page_id) do
@@ -344,7 +355,7 @@ defmodule SymphonyElixir.Notion.Client do
     token = resolve(p["token"] || System.get_env("NOTION_TOKEN"))
 
     with true <- present_string?(url) or {:error, :missing_notion_database_url}, {:ok, database_id} <- database_id(url), true <- present_string?(token) or {:error, :missing_notion_token} do
-      {:ok, %{database_id: database_id, token: token}}
+      {:ok, %{database_id: database_id, token: token, terminal_states: tracker_settings.terminal_states || []}}
     end
   end
 

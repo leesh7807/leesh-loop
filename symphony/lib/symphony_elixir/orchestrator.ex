@@ -862,30 +862,14 @@ defmodule SymphonyElixir.Orchestrator do
        )
        when is_binary(id) and is_binary(identifier) and is_binary(title) and is_binary(state_name) do
     Enum.all?([id, identifier, title, state_name], &present_string?/1) and
-      issue_routable?(issue, terminal_states) and
+      issue_routable?(issue) and
       active_issue_state?(state_name, active_states) and
       !terminal_issue_state?(state_name, terminal_states)
   end
 
   defp candidate_issue?(_issue, _active_states, _terminal_states), do: false
 
-  defp issue_routable?(%Issue{} = issue, terminal_states) do
-    Issue.routable?(issue, Config.settings!().tracker.required_labels) and blockers_terminal?(issue.blocked_by, terminal_states)
-  end
-
-  defp issue_routable?(%Issue{} = issue), do: issue_routable?(issue, terminal_state_set())
-
-  defp blockers_terminal?([], _terminal_states), do: true
-
-  defp blockers_terminal?(blockers, terminal_states) when is_list(blockers) do
-    Enum.all?(blockers, fn
-      %{state: state} when is_binary(state) -> terminal_issue_state?(state, terminal_states)
-      %{"state" => state} when is_binary(state) -> terminal_issue_state?(state, terminal_states)
-      _ -> false
-    end)
-  end
-
-  defp blockers_terminal?(_, _terminal_states), do: false
+  defp issue_routable?(%Issue{} = issue), do: Issue.routable?(issue, Config.settings!().tracker.required_labels)
 
   defp terminal_issue_state?(state_name, terminal_states) when is_binary(state_name) do
     MapSet.member?(terminal_states, normalize_issue_state(state_name))

@@ -43,7 +43,7 @@ defmodule SymphonyElixir.Notion.AgentTool do
   defp operation("notion_read_page", %{"page_id" => id}) when is_binary(id), do: {:ok, "GET", "/pages/#{id}", %{}, nil}
 
   defp operation("notion_read_comments", %{"page_id" => id} = arguments) when is_binary(id) do
-    params = %{"page_id" => id, "page_size" => 100}
+    params = %{"block_id" => id, "page_size" => 100}
 
     case Map.get(arguments, "next_cursor") do
       nil -> {:ok, "GET", "/comments", params, nil}
