@@ -23,7 +23,7 @@ You are working on this accepted task:
 - State: {{ issue.state }}
 - URL: {{ issue.url }}
 
-Normalized task description (its first two lines bind the repository Plan path and commit):
+Normalized task description (its first two lines bind the repository Plan materialization path and base commit):
 
 {{ issue.description }}
 

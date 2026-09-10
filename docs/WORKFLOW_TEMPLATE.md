@@ -8,14 +8,14 @@ Read the task and its accepted Plan before making changes. The normalized task d
 
 ```text
 Repository Plan Reference: <repository-relative path>
-Repository Commit: <full Git commit SHA>
+Repository Base Commit: <full Git commit SHA>
 ```
 
-The Plan declares the path. At publication, Publisher validates that the Plan bytes exist at that path in the stated commit and that the commit is reachable from the configured workspace-clone remote; it then writes both lines. The tracker adapter transports Description unchanged as `issue.description` without parsing or interpreting a Plan. No new Symphony `Issue` field is required.
+The Plan declares the path. At publication, Publisher captures the current target-repository base commit and writes both lines. The immutable accepted Plan snapshot is the published task's Plan content, not a Git blob. The tracker adapter transports Description unchanged as `issue.description` without parsing or interpreting a Plan. No new Symphony `Issue` field is required.
 
-Before resolving the path, fetch the stated commit from the configured repository remote, verify it, and check out that exact commit in the task workspace. Then open only the referenced file; do not scan `docs/plans/active/`, infer from a title, or choose a similarly named Plan. Treat that file as the durable baseline for objective, boundaries, decisions, assumptions, constraints, and verification design. It is not an immutable prediction of implementation steps.
+Before resolving the path, fetch the stated base commit from the configured repository remote, verify it, and check out that exact commit in the task workspace. Use the required agent-side task surface to read the immutable accepted Plan snapshot, then materialize that snapshot at the referenced active path and verify the resulting bytes. Only then open that file; do not scan `docs/plans/active/`, infer from a title, or choose a similarly named Plan. Treat it as the durable baseline for objective, boundaries, decisions, assumptions, constraints, and verification design. It is not an immutable prediction of implementation steps.
 
-The concrete workflow must render `{{ issue.description }}`. If either line is absent or malformed, the path is not repository-relative, the commit is unavailable or does not contain that file, or the checked-out file does not match the published Plan snapshot, do not begin work or select another Plan. Record and surface the binding blocker for resolution. Until the Publisher and adapter implement this carrier, a published task is not eligible for autonomous execution under this workflow.
+The concrete workflow must render `{{ issue.description }}`. If either line is absent or malformed, the path is not repository-relative, the base commit is unavailable, the accepted Plan snapshot cannot be read, or materialization does not match that snapshot, do not begin work or select another Plan. Record and surface the binding blocker for resolution. Until the Publisher and adapter implement this carrier and snapshot read, a published task is not eligible for autonomous execution under this workflow.
 
 Follow the target repository's guidance and use its intended entry points. Keep repository-wide rules authoritative; this template supplies common execution semantics rather than replacing them.
 
@@ -31,7 +31,7 @@ Update the repository Plan when execution reveals durable planning knowledge: a 
 
 Use the mutable Workpad for transient state: progress, attempts, command output, temporary failures, investigation notes, intermediate evidence, blockers, completion checkpoints, and handoff state. Do not turn the Plan into an execution log. A resolved command failure belongs in the Workpad; proof that a material Plan assumption was false belongs in the Plan as durable knowledge.
 
-A compliant Leesh Loop adapter must provide a separate, authenticated agent-side mutation surface in addition to tracker reads. It must let the worker read and append Workpad entries, record a decision or binding blocker, and transition task state with authoritative readback. These operations must be idempotent by task and operation key. This surface is not part of Symphony `Issue`, does not require the adapter to parse Plans, and must remain separate from tracker-adapter reads. Until it exists, a task is not eligible for autonomous execution under this workflow.
+A compliant Leesh Loop adapter must provide a separate, authenticated agent-side task surface in addition to tracker reads. It must let the worker read the immutable accepted Plan snapshot; read and append Workpad entries; record a decision or binding blocker; and transition task state with authoritative readback. Mutable operations must be idempotent by task and operation key. This surface is not part of Symphony `Issue`, does not require the adapter to parse Plans, and must remain separate from tracker-adapter reads. Until it exists, a task is not eligible for autonomous execution under this workflow.
 
 ## Separate follow-up work
 

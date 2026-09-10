@@ -39,7 +39,7 @@ The final plan should be complete enough for implementation to begin without unr
 
 ## Repository Plan Reference
 
-Record the exact repository-relative active path at publication, for example `docs/plans/active/date-summary.md`. The reusable workflow defines the publication commit binding, task carrier, and lifecycle for this declaration.
+Record the exact repository-relative active path at publication, for example `docs/plans/active/date-summary.md`. The reusable workflow binds this materialization path separately from the repository base commit and carries the immutable accepted Plan snapshot independently of Git.
 
 ## Objective
 

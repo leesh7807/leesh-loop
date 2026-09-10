@@ -11,9 +11,9 @@ Define Leesh Loop planning and execution contracts so repository agents can exec
 ## Decisions
 
 - `docs/PLAN.md` owns Plan content and durable-update guidance. `docs/WORKFLOW_TEMPLATE.md` is the single normative home for reusable worker execution semantics. Root `WORKFLOW.md` supplies only this repository's Symphony configuration, task prompt, and delivery/verification extensions. README explains architecture and links to the contract.
-- The Plan declares its repository-relative active path. Future Publisher validation derives the exact remote-reachable commit containing that Plan, verifies the Plan bytes at `commit:path`, and writes both values into normalized Description. The future adapter copies Description unchanged to Symphony `Issue.description`; the workflow renders that existing field and checks out the commit before reading the Plan. No new Symphony issue field and no Plan parsing in the adapter are required.
-- Each Symphony workspace clones this repository in `hooks.after_create` before the worker prompt starts; the worker checks out the published commit before resolving the Plan path.
-- A compliant Leesh Loop adapter provides a separate authenticated agent-side mutation surface for idempotent Workpad read/append, decision/blocker recording, and task-state transitions with readback. It remains separate from adapter reads.
+- The Plan declares its repository-relative active materialization path. Future Publisher publication captures the target repository's current base commit and writes both values into normalized Description while preserving the accepted Plan snapshot independently as task content. The future adapter copies Description unchanged to Symphony `Issue.description`; the workflow renders it, checks out the base commit, reads the immutable accepted snapshot through the task surface, and materializes it before reading the Plan. No new Symphony issue field and no Plan parsing in the adapter are required.
+- Each Symphony workspace clones this repository in `hooks.after_create` before the worker prompt starts; the worker checks out the published base commit and materializes the accepted Plan snapshot before resolving the Plan path.
+- A compliant Leesh Loop adapter provides a separate authenticated agent-side task surface for immutable Plan snapshot read, idempotent Workpad read/append, decision/blocker recording, and task-state transitions with readback. It remains separate from adapter reads.
 - Completion uses Workpad intent and repository-finalized checkpoints before the idempotent terminal task transition. A reopened terminal task is binding-blocked until the operator who reopens it restores the Plan to its referenced active path, records recovery, and only then makes the task dispatchable.
 - Publisher does not plan, execute, synchronize later repository Plan changes, or make workflow decisions. The published Plan is an immutable accepted starting snapshot, not a completed task artifact.
 - `AGENTS.md` is corrected because its project map was an authoritative navigation entry point with stale paths and a duplicate top-level heading.
@@ -21,7 +21,7 @@ Define Leesh Loop planning and execution contracts so repository agents can exec
 ## Verification
 
 - Review the template, root workflow, Plan instructions, README, Publisher documentation, and `AGENTS.md` for one owner per rule and no contradictory lifecycle language.
-- Confirm the root workflow has Symphony YAML front matter, an `after_create` repository checkout, and Liquid task context including `issue.description`; confirm the template pins checkout to the published commit before Plan resolution.
+- Confirm the root workflow has Symphony YAML front matter, an `after_create` repository checkout, and Liquid task context including `issue.description`; confirm the template pins checkout to the published base commit and materializes the immutable Plan snapshot before Plan resolution.
 - Confirm the template requires the separate agent-side mutation surface and defines checkpointed, recoverable completion and reopen recovery.
 - Confirm Publisher text calls the Plan an accepted snapshot rather than a completed artifact, without changing publication mechanics.
 
