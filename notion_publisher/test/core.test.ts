@@ -1,14 +1,43 @@
-import test from "node:test";import assert from "node:assert/strict";import { mkdtemp, writeFile } from "node:fs/promises";import { tmpdir } from "node:os";import { join } from "node:path";import { loadConfig } from "../src/config.js";import { buildPageBlocks, buildTaskProperties, chunkText, DEFAULT_POLICY, extractPlanTitle, notionId, PublicationError, resolvePublishDatabase, validatePlanTitle } from "../src/core.js";
-test("typed config, open state, and chunked separated surfaces",async()=>{const d=await mkdtemp(join(tmpdir(),"publisher-")),f=join(d,"c.json");await writeFile(f,JSON.stringify({state:"Unlisted",labels:[" symphony "]}));const {policy}=await loadConfig(f);assert.equal(policy.defaultState,"Unlisted");assert.deepEqual(policy.defaultLabels,["symphony"]);const blocks=buildPageBlocks(DEFAULT_POLICY,"x".repeat(4000));assert.equal(blocks.at(-1)?.type,"heading_1");assert.equal((blocks.at(-1) as any).heading_1.rich_text[0].text.content,"Workpad");assert.equal(blocks.slice(1,-1).map((x:any)=>x.paragraph.rich_text[0].text.content).join(""),"x".repeat(4000));});
-test("malformed and retired routing config are rejected",async()=>{const d=await mkdtemp(join(tmpdir(),"publisher-")),f=join(d,"c.json");await writeFile(f,JSON.stringify({labels:"not-list"}));await assert.rejects(loadConfig(f),PublicationError);await writeFile(f,JSON.stringify({surface_name:"Symphony Tasks"}));await assert.rejects(loadConfig(f),/unknown configuration key/);});
-test("null priority and supported property override are preserved",async()=>{const d=await mkdtemp(join(tmpdir(),"publisher-")),f=join(d,"c.json");await writeFile(f,JSON.stringify({priority:null,plan_source:"https://example.com/plan.md",property_names:{blocked_by:"Dependencies"}}));const {policy}=await loadConfig(f);assert.equal(policy.defaultPriority,null);assert.equal(policy.blockedBy,"Dependencies");});
-test("validated uppercase plan sources are preserved in page properties",async()=>{const d=await mkdtemp(join(tmpdir(),"publisher-")),f=join(d,"c.json");await writeFile(f,JSON.stringify({plan_source:"HTTPS://example.com/plan.md"}));const {config,policy}=await loadConfig(f);assert.equal((buildTaskProperties(policy,"PLAN-X","Title",config.planSource)[policy.source] as any).url,"HTTPS://example.com/plan.md");});
-test("slugged Notion URLs extract only the trailing page id",()=>{assert.equal(notionId("https://www.notion.so/Avocado-d093f1d200464ce78b36e58a3f0d8043?x=1"),"d093f1d2-0046-4ce7-8b36-e58a3f0d8043");});
-test("resolved property name collisions are rejected",async()=>{const d=await mkdtemp(join(tmpdir(),"publisher-")),f=join(d,"c.json");await writeFile(f,JSON.stringify({property_names:{identifier:"Task",title:"Task"}}));await assert.rejects(loadConfig(f),/unique property names/);});
-test("local plan sources are rejected instead of discarded",async()=>{const d=await mkdtemp(join(tmpdir(),"publisher-")),f=join(d,"c.json");await writeFile(f,JSON.stringify({plan_source:"/tmp/plan.md"}));await assert.rejects(loadConfig(f),/plan_source must be an HTTP\(S\) URL/);});
-test("alternate policy values are used by page construction",()=>{const policy={...DEFAULT_POLICY,workpadHeading:"Execution Notes"};const blocks=buildPageBlocks(policy,"plan");assert.equal((blocks.at(-1) as any).heading_1.rich_text[0].text.content,"Execution Notes");});
-test("plan title extraction requires a caller-resolved fallback when Plan content has no H1",()=>{const title=extractPlanTitle("# "+"x".repeat(1901));assert.throws(()=>validatePlanTitle(title),/title exceeds/);assert.equal(extractPlanTitle("body","2026-09-10-plan.md"),"2026-09-10-plan.md");assert.throws(()=>extractPlanTitle("body"),/H1 or caller-supplied fallback title/);});
-test("non-URL identifiers are rejected",()=>{assert.throws(()=>notionId("d093f1d200464ce78b36e58a3f0d8043"),/HTTP\(S\)/);});
-test("publication database binding is caller-supplied and resolved separately from policy",()=>{assert.throws(()=>resolvePublishDatabase(undefined),/missing publication database URL/);assert.equal(resolvePublishDatabase("https://notion.so/3d28a26586258052b3ecccc9c33787e3").databaseId,"3d28a265-8625-8052-b3ec-ccc9c33787e3");assert.throws(()=>resolvePublishDatabase("https://example.com/not-a-database"),/invalid database URL/);});
-test("Notion host variants are accepted and unrelated hosts are rejected",()=>{assert.equal(notionId("https://www.notion.so/Avocado-d093f1d200464ce78b36e58a3f0d8043"),"d093f1d2-0046-4ce7-8b36-e58a3f0d8043");assert.equal(notionId("https://workspace.notion.site/Avocado-d093f1d200464ce78b36e58a3f0d8043"),"d093f1d2-0046-4ce7-8b36-e58a3f0d8043");assert.equal(notionId("https://app.notion.com/p/studyleesh/3d28a26586258052b3ecccc9c33787e3"),"3d28a265-8625-8052-b3ec-ccc9c33787e3");assert.throws(()=>notionId("https://example.com/d093f1d200464ce78b36e58a3f0d8043"),/HTTP\(S\)/);});
-test("chunking preserves non-BMP characters at the provider boundary",()=>{const plan="x".repeat(1899)+"😀"+"tail";const chunks=chunkText(plan);assert.equal(chunks.join(""),plan);assert.ok(chunks.every(chunk=>chunk.length<=1900));assert.equal(chunks[0].at(-1),"x");});
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadConfig } from "../src/config.js";
+import { buildPlanBlocks, buildTaskProperties, chunkText, DEFAULT_POLICY, extractPlanTitle, notionId, PublicationError, resolvePublishDatabase, validatePlanTitle } from "../src/core.js";
+
+test("six-property task metadata and chunked Plan content are canonical", () => {
+  const properties = buildTaskProperties(DEFAULT_POLICY, "PLAN-X", "Title");
+  assert.deepEqual(Object.keys(properties).sort(), ["Blocked By", "Identifier", "Labels", "Priority", "State", "Title"]);
+  assert.equal("Description" in properties, false);
+  assert.equal("Plan Source" in properties, false);
+  assert.equal("branch_name" in properties, false);
+  const blocks = buildPlanBlocks("x".repeat(4000));
+  assert.equal(blocks.every((block: any) => block.type === "paragraph"), true);
+  assert.equal(blocks.map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "x".repeat(4000));
+});
+
+test("typed config keeps only durable task policy", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "publisher-")); const file = join(directory, "c.json");
+  await writeFile(file, JSON.stringify({ state: "Unlisted", labels: [" symphony "], priority: null, property_names: { blocked_by: "Dependencies" } }));
+  const { policy } = await loadConfig(file);
+  assert.equal(policy.defaultState, "Unlisted"); assert.equal(policy.defaultPriority, null); assert.deepEqual(policy.defaultLabels, ["symphony"]); assert.equal(policy.blockedBy, "Dependencies");
+  await writeFile(file, JSON.stringify({ plan_source: "https://example.com" }));
+  await assert.rejects(loadConfig(file), /unknown configuration key/);
+});
+
+test("property name collisions and malformed config are rejected", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "publisher-")); const file = join(directory, "c.json");
+  await writeFile(file, JSON.stringify({ property_names: { identifier: "Task", title: "Task" } }));
+  await assert.rejects(loadConfig(file), /unique property names/);
+  await writeFile(file, JSON.stringify({ labels: "not-list" }));
+  await assert.rejects(loadConfig(file), PublicationError);
+});
+
+test("title, destination, and rich text boundaries are validated", () => {
+  const title = extractPlanTitle("# " + "x".repeat(1901)); assert.throws(() => validatePlanTitle(title), /title exceeds/);
+  assert.equal(extractPlanTitle("body", "fallback"), "fallback"); assert.throws(() => extractPlanTitle("body"), /H1 or caller-supplied fallback/);
+  assert.equal(notionId("https://www.notion.so/Avocado-d093f1d200464ce78b36e58a3f0d8043?x=1"), "d093f1d2-0046-4ce7-8b36-e58a3f0d8043");
+  assert.throws(() => resolvePublishDatabase(undefined), /missing publication database URL/);
+  const plan = "x".repeat(1899) + "😀tail"; const chunks = chunkText(plan); assert.equal(chunks.join(""), plan); assert.ok(chunks.every((chunk) => chunk.length <= 1900));
+});
