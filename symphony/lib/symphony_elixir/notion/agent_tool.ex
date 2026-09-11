@@ -85,12 +85,30 @@ defmodule SymphonyElixir.Notion.AgentTool do
   end
 
   defp workpad(id, settings, client) do
-    with {:ok, payload} <- client.("GET", "/blocks/#{id}/children", %{}, nil, settings),
-         %{"results" => blocks} <- payload,
+    with {:ok, blocks} <- task_children(id, settings, client, nil, []),
          [block] <- Enum.filter(blocks, &(get_in(&1, ["child_page", "title"]) == "Workpad")) do
       {:ok, block["id"]}
     else
       _ -> {:error, :notion_malformed_task_representation}
+    end
+  end
+
+  defp task_children(id, settings, client, cursor, acc) do
+    with {:ok, %{"results" => results, "has_more" => more} = payload} <-
+           client.("GET", "/blocks/#{id}/children", cursor_query(id, cursor), nil, settings) do
+      cond do
+        more and is_binary(payload["next_cursor"]) ->
+          task_children(id, settings, client, payload["next_cursor"], acc ++ results)
+
+        more ->
+          {:error, :notion_pagination_integrity_failure}
+
+        true ->
+          {:ok, acc ++ results}
+      end
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :notion_malformed_provider_response}
     end
   end
 
@@ -111,7 +129,7 @@ defmodule SymphonyElixir.Notion.AgentTool do
   end
 
   defp string_arg(_, _), do: {:error, :invalid_notion_tool_arguments}
-  defp cursor_query(id, nil), do: %{"block_id" => id, "page_size" => 100}
+  defp cursor_query(_id, nil), do: %{"page_size" => 100}
   defp cursor_query(id, cursor), do: Map.put(cursor_query(id, nil), "start_cursor", cursor)
   defp respond({:ok, body}), do: output(true, body)
   defp respond({:error, reason}), do: failure(reason)

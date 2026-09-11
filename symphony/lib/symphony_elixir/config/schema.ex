@@ -430,7 +430,14 @@ defmodule SymphonyElixir.Config.Schema do
           resolved_token =
             resolve_secret_setting(notion_provider["token"], System.get_env("NOTION_TOKEN"))
 
-          {resolved_token, settings.tracker.assignee, notion_provider, ["NOTION_TOKEN" | env_reference_names([notion_provider["token"]])]}
+          resolved_database_url = resolve_env_value(notion_provider["database_url"], nil)
+
+          resolved_provider =
+            notion_provider
+            |> Map.put("token", resolved_token)
+            |> Map.put("database_url", resolved_database_url)
+
+          {resolved_token, settings.tracker.assignee, resolved_provider, ["NOTION_TOKEN" | env_reference_names([notion_provider["token"]])]}
 
         _ ->
           {settings.tracker.api_key, settings.tracker.assignee, provider, []}

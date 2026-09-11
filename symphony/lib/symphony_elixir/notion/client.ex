@@ -9,7 +9,7 @@ defmodule SymphonyElixir.Notion.Client do
   @required %{
     "Identifier" => ["rich_text", "title"],
     "Title" => ["title"],
-    "State" => ["status", "select"],
+    "State" => ["status"],
     "Priority" => ["number", "select"],
     "Labels" => ["multi_select"],
     "Blocked By" => ["relation"]
@@ -223,7 +223,7 @@ defmodule SymphonyElixir.Notion.Client do
 
   defp all_children(id, settings, fun, cursor, acc) do
     with {:ok, response} <- fun.("GET", "/blocks/#{id}/children", maybe_cursor(%{}, cursor), nil, settings), {:ok, results, next} <- pagination(response) do
-      if next, do: all_children(id, settings, fun, next, results ++ acc), else: {:ok, Enum.reverse(results ++ acc)}
+      if next, do: all_children(id, settings, fun, next, acc ++ results), else: {:ok, acc ++ results}
     end
   end
 
@@ -260,8 +260,8 @@ defmodule SymphonyElixir.Notion.Client do
 
   defp text_property(_, _), do: {:error, :invalid_property}
 
-  defp state_property(%{"type" => type} = p) when type in ["status", "select"] do
-    case get_in(p, [type, "name"]) do
+  defp state_property(%{"type" => "status"} = p) do
+    case get_in(p, ["status", "name"]) do
       v when is_binary(v) and v != "" -> {:ok, v}
       _ -> {:error, :invalid_state}
     end
@@ -281,7 +281,7 @@ defmodule SymphonyElixir.Notion.Client do
        end)}
 
   defp labels_property(_), do: {:error, :invalid_labels}
-  defp value_state(%{"type" => type} = p) when type in ["status", "select"], do: get_in(p, [type, "name"])
+  defp value_state(%{"type" => "status"} = p), do: get_in(p, ["status", "name"])
   defp value_state(_), do: nil
   defp child_title(%{"type" => "child_page", "child_page" => %{"title" => t}}), do: t
   defp child_title(_), do: nil
