@@ -32,7 +32,7 @@ defmodule SymphonyElixir.Notion.Adapter do
   def bind_session(binding, %Issue{id: id}) when is_binary(id) do
     case Client.resolve_task_data_source(binding.tracker_settings) do
       {:ok, source_id} -> Map.merge(binding, %{notion_data_source_id: source_id, notion_issue_id: id})
-      {:error, reason} -> Map.put(binding, :notion_binding_error, reason)
+      {:error, reason} -> {:error, reason}
     end
   end
 

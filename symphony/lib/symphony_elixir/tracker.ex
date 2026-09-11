@@ -59,7 +59,10 @@ defmodule SymphonyElixir.Tracker do
     }
 
     if Code.ensure_loaded?(adapter) and function_exported?(adapter, :bind_session, 2) do
-      adapter.bind_session(binding, Keyword.get(opts, :issue))
+      case adapter.bind_session(binding, Keyword.get(opts, :issue)) do
+        {:error, reason} -> raise ArgumentError, "Unable to bind tracker tools: #{inspect(reason)}"
+        bound when is_map(bound) -> bound
+      end
     else
       binding
     end
