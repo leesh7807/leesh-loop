@@ -40,9 +40,9 @@ class StructureFake extends NotionClient {
   children = new Map<string, any[]>([["task", []]]); created: string[] = [];
   override async listChildren(id: string) { return this.children.get(id) ?? []; }
   override async request(method: string, path: string, body?: any) {
-    if (method === "PATCH" && path === "/blocks/task/children") {
-      const title = body.children[0].child_page.title; const id = title.toLowerCase(); const page = { id, type: "child_page", child_page: { title } };
-      this.children.get("task")!.push(page); this.children.set(id, []); this.created.push(title); return { results: [page] };
+    if (method === "POST" && path === "/pages") {
+      const title = body.properties.title.title[0].text.content; const id = title.toLowerCase(); const page = { id, type: "child_page", child_page: { title } };
+      this.children.get(body.parent.page_id)!.push(page); this.children.set(id, []); this.created.push(title); return { id };
     }
     throw new Error(`unexpected ${method} ${path}`);
   }

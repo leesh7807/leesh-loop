@@ -421,6 +421,24 @@ defmodule SymphonyElixir.Config.Schema do
             ["LINEAR_API_KEY" | env_reference_names([linear_provider["api_key"]])]
           }
 
+        "notion" ->
+          notion_provider =
+            provider
+            |> Map.put_new("database_url", settings.tracker.endpoint)
+            |> Map.put_new("token", settings.tracker.api_key)
+
+          resolved_token =
+            resolve_secret_setting(notion_provider["token"], System.get_env("NOTION_TOKEN"))
+
+          resolved_database_url = resolve_env_value(notion_provider["database_url"], nil)
+
+          resolved_provider =
+            notion_provider
+            |> Map.put("token", resolved_token)
+            |> Map.put("database_url", resolved_database_url)
+
+          {resolved_token, settings.tracker.assignee, resolved_provider, ["NOTION_TOKEN" | env_reference_names([notion_provider["token"]])]}
+
         _ ->
           {settings.tracker.api_key, settings.tracker.assignee, provider, []}
       end
@@ -432,6 +450,9 @@ defmodule SymphonyElixir.Config.Schema do
             settings.tracker.active_states || @linear_active_states,
             settings.tracker.terminal_states || @linear_terminal_states
           }
+
+        "notion" ->
+          {settings.tracker.active_states, settings.tracker.terminal_states}
 
         _ ->
           {settings.tracker.active_states, settings.tracker.terminal_states}
