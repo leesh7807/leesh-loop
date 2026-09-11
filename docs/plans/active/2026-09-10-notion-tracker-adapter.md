@@ -35,3 +35,11 @@ task representation through the existing tracker boundary.
   the accepted contract does not impose; related blocker state is deliberately the defined source.
 - Applied commit: none.
 - Verification: no code change; prior full local verification remains applicable.
+- Reviewed HEAD: `eb1e113e30b3e3216bfde977ea6d975885495953`.
+- Verdict: FINDINGS.
+- Accepted: `Priority` select was admitted despite lacking a portable numeric normalization rule;
+  canonical compatibility now requires number rather than silently dropping the durable value.
+- Applied commit: `31cd83c3677903b9c37524a60759fb9b127d01e0`.
+- Verification: `mix format`, `mix compile`, and `mix specs.check` passed. `mix test` is blocked by
+  two existing `CoreTest` retry due-time lower-bound assertions (observed 487–489ms vs 500ms, and
+  39487–39492ms vs 39500ms); this adapter does not touch retry timing.
