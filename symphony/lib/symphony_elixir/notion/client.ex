@@ -21,9 +21,9 @@ defmodule SymphonyElixir.Notion.Client do
   end
 
   @spec secret_environment_names(map()) :: [String.t()]
-  def secret_environment_names(settings) do
-    ["NOTION_TOKEN" | env_refs([settings.provider["token"]])]
-  end
+  def secret_environment_names(%{secret_environment_names: names}) when is_list(names), do: names
+
+  def secret_environment_names(settings), do: ["NOTION_TOKEN" | env_refs([settings.provider["token"]])]
 
   @spec resolve_task_data_source(map()) :: {:ok, String.t()} | {:error, term()}
   def resolve_task_data_source(tracker_settings) do
