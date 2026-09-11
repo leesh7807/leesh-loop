@@ -61,6 +61,17 @@ task representation through the existing tracker boundary.
 - Findings: none.
 - Applied commit: none.
 - Verification: no change after the clean review.
+
+## Live E2E
+
+- Rebased onto Publisher merge `8af45f8` and aligned canonical `State` with Publisher's select
+  property and mutation/query payloads.
+- Publisher bootstrapped the supplied database's existing title property into `Title`, then
+  published disposable task `PLAN-D36707CAC2B1` (`3d88a265-8625-8115-8d36-ed178e071ded`).
+- Symphony loaded `WORKFLOW.md`, resolved the published data source, normalized the direct `Plan`,
+  and read the task as `Ready`, priority `3`, dispatchable `true`.
+- Bound tools changed State to `In Progress` and appended a Korean Workpad record; direct Notion API
+  readback confirmed exactly one Plan/Workpad child page and the appended record.
 - Reviewed HEAD: `5fa68e7cf043322e2940380b993e66b69bf0bbc9`.
 - Verdict: FINDINGS.
 - Accepted: valid decimal Notion number priority is rounded into Symphony's portable integer rank.

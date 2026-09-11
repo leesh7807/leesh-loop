@@ -43,7 +43,7 @@ defmodule SymphonyElixir.Notion.AgentTool do
                    "/pages/#{id}",
                    %{},
                    %{
-                     "properties" => %{"State" => %{"status" => %{"name" => state}}}
+                     "properties" => %{"State" => %{"select" => %{"name" => state}}}
                    },
                    settings
                  )

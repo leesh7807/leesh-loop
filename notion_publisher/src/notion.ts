@@ -43,6 +43,14 @@ export class NotionClient {
   private async ensureSchema(data: any, dataSource: string, policy: Policy) {
     const definitions: Record<string, any> = { ...this.baseSchema(policy), [policy.blockedBy]: { relation: { data_source_id: dataSource, single_property: {} } } };
     const missing: Record<string, unknown> = {};
+    const titleEntry = (Object.entries(data.properties ?? {}) as [string, any][]).find(([, property]) => property.type === "title");
+
+    if (!data.properties?.[policy.title] && titleEntry) {
+      const [name, property] = titleEntry;
+      missing[property.id ?? name] = { title: {}, name: policy.title };
+      data = { ...data, properties: { ...data.properties, [policy.title]: { ...property, name: policy.title } } };
+    }
+
     for (const [name, definition] of Object.entries(definitions)) {
       const existing = data.properties?.[name];
       if (!existing) { missing[name] = definition; continue; }
@@ -71,8 +79,10 @@ export class NotionClient {
   createTask(dataSource: string, properties: Record<string, unknown>) { return this.request("POST", "/pages", { parent: { type: "data_source_id", data_source_id: dataSource }, properties }); }
   async appendBlocks(pageId: string, blocks: Record<string, unknown>[]) { for (let i = 0; i < blocks.length; i += NOTION_APPEND_BATCH_SIZE) await this.request("PATCH", `/blocks/${pageId}/children`, { children: blocks.slice(i, i + NOTION_APPEND_BATCH_SIZE) }); }
   private async createChildPage(parentId: string, title: string): Promise<string> {
-    const result = await this.request("PATCH", `/blocks/${parentId}/children`, { children: [{ object: "block", type: "child_page", child_page: { title } }] });
-    const page = result.results?.[0];
+    const page = await this.request("POST", "/pages", {
+      parent: { type: "page_id", page_id: parentId },
+      properties: { title: { title: [{ type: "text", text: { content: title } }] } }
+    });
     if (!page?.id) throw new PublicationError(`provider/API failure: creating ${title} child page returned no page id`);
     return page.id;
   }
