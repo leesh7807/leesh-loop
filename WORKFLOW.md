@@ -80,6 +80,9 @@ PR <PR_URL>의 HEAD <HEAD_SHA>를 코드 리뷰하라.
 
 지정 HEAD의 실제 원문을 확인한 뒤에만 finding을 확정하라. 영향도와 재현 가능성을 기준으로 실제 결함만 보고하라. 개선 가능성, 스타일, 추측, 의도된 동작은 finding이 아니다.
 
+[Additional review criteria:
+<criteria explicitly specified by the Accepted Plan>]
+
 각 finding에는 severity, 제목, 파일:줄, 실제 코드 근거, 재현 경로, 영향, 결함인 이유, confidence를 포함하라. 모든 결과는 하나의 Markdown 문서로 출력하라.
 
 형식:
@@ -95,8 +98,10 @@ PASS | FINDINGS
   - Why defect:
   - Confidence:
 
-finding이 없으면 `None.`만 출력하라.
+finding이 없으면 `# Findings`는 `None.`으로 출력하라.
 ```
+
+The bracketed block is optional. Include it only when the Accepted Plan explicitly specifies additional review criteria. Do not invent or infer criteria; otherwise omit the block.
 
 Give the request enough Accepted Plan and changed-result context to judge the objective, as well as the PR and HEAD identity. Record each review target, result, finding, evidence-based acceptance or rejection, fix, post-fix verification, and re-review result in the Korean Workpad. Do not copy the full transcript into the Repository Plan.
 
