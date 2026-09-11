@@ -16,7 +16,7 @@ Create and maintain a plan that keeps the work aligned with the objective and ma
 
 - Do not use the plan as an execution log.
 
-- Keep active plans under `docs/plans/active/`. Move a plan to `docs/plans/completed/` only when the repository workflow's full lifecycle is terminal; do not move it merely because a Pull Request or a non-terminal human handoff exists.
+- Keep active plans under `docs/plans/active/`. After the final Repository Plan comparison and before opening its Pull Request, move the delivered Plan to `docs/plans/completed/`. This repository-artifact move does not itself make the tracker task terminal; human review, merge, or rework may still follow.
 
 When reviewing the plan, check that each planned unit describes a coherent outcome in the problem domain rather than merely an implementation step.
 
@@ -75,3 +75,11 @@ List the tools or mechanisms that can produce or observe the required evidence, 
 ## chatgpt-shot review log
 
 Append a compact summary after every independent-review round when a repository workflow requires `chatgpt-shot`: reviewed HEAD, verdict, each finding's evidence-based acceptance or rejection, any applied commit, and post-change verification. This is a review ledger, not a substitute for the task Workpad or Repository Plan.
+
+### 2026-09-11 round 1
+
+- HEAD: `be9ba538d506b8c07b1544530b07d7a6484b42eb`; verdict: `FINDINGS`.
+- Rejected P1: current embedded Symphony has no Notion adapter, but the Accepted Plan expressly treats normal Publisher/adapter/Notion delivery as an execution premise and forbids proactively changing Publisher. The root workflow declares that external adapter contract; replacing it with an unrelated supported tracker or implementing a new adapter would change the accepted scope. The limitation is recorded in the PR verification comment.
+- Accepted P1 (fresh Plan): the template incorrectly made a missing local Plan an automatic blocker although a valid Accepted Plan can originate from an uncommitted local file. It now materializes only the deterministic missing path from the Accepted Plan and preserves any existing corrected Repository Plan.
+- Accepted P2 (Plan move): moving only after a terminal tracker transition conflicted with the non-terminal Human Review flow. The delivered Plan now moves to `completed/` after final comparison and before its PR; that artifact move is explicitly separate from task terminal state.
+- Applied commit: pending; post-fix verification: pending.

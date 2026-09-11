@@ -15,11 +15,12 @@ Workers trust normally published tasks and execute the accepted objective. Symph
 ## Decisions
 
 - The reusable template contains only common Plan-based execution policy; it excludes repository setup, tracker vocabulary, delivery, language, and review commands.
-- The Accepted Plan H1 `# <date-summary>` determines only `docs/plans/active/<date-summary>.md`. A worker never searches for or guesses another Plan; an unusable expected path is an ordinary blocker.
+- The Accepted Plan H1 `# <date-summary>` determines only `docs/plans/active/<date-summary>.md`. A worker never searches for or guesses another Plan; an unidentifiable H1 is an ordinary blocker. A missing deterministic path in a fresh workspace is initialized from the immutable Accepted Plan without overwriting an existing Repository Plan.
 - Workpad records execution history. Before handoff, update the Repository Plan only for material durable contract corrections caused by the actual result.
 - The root workflow uses Symphony `after_create` to clone this repository and install Node and Elixir dependencies for a fresh workspace. Continuations reuse Symphony's workspace without a reset.
 - This repository uses `Ready`, `In Progress`, and `Rework` as active states; `Human Handoff` and `Human Review` as non-terminal handoffs; and `Done`/`Cancelled` as terminal states.
 - The root workflow requires Korean Workpad entries and a `chatgpt-shot submit` review/fix/re-review gate. An unsuccessful invocation hands off to `Human Handoff`, not a terminal state.
+- After final Plan comparison and before its PR, a delivered Repository Plan moves to `completed/`; that artifact move does not terminalize the tracker task.
 - No Publisher change, Symphony source change, publication/binding recovery protocol, completion checkpoint protocol, terminal reopen protocol, or Leesh Loop-specific human-decision taxonomy is introduced.
 
 ## Verification

@@ -14,7 +14,7 @@ Read the Accepted Plan and derive its required H1 identity. A valid identity is 
 docs/plans/active/<date-summary>.md
 ```
 
-Do not search for, select, or guess another Plan. If the H1 cannot provide that identity or the expected Repository Plan cannot be used, treat it as an ordinary execution blocker: record the facts in the Workpad and follow the concrete repository workflow's blocker handoff.
+Do not search for, select, or guess another Plan. If the H1 cannot provide that identity, treat it as an ordinary execution blocker: record the facts in the Workpad and follow the concrete repository workflow's blocker handoff. When the determined Repository Plan is absent in a fresh workspace, create that exact path from the immutable Accepted Plan as its initial durable artifact. Do not overwrite an existing Repository Plan with the Accepted Plan; it may contain a prior material correction.
 
 ## Execute the accepted objective
 

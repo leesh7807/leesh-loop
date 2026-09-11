@@ -67,7 +67,7 @@ The repository state vocabulary is:
 - `Human Review` is the non-active, non-terminal state after a validated PR and successful independent-review gate, awaiting human review or merge.
 - `Done` and `Cancelled` are terminal states. Move to `Done` only after the full repository lifecycle, including required human review/merge, has actually ended. Never use terminal state merely because implementation, verification, or independent review finished.
 
-Create a task branch, make only task-related commits, push it, and open a PR against `main`; never merge directly to `main`. Before handoff, inspect the final diff and status, run applicable repository checks and `git diff --check`, and compare the actual result with the Repository Plan as required by the reusable template. Record material verification, contract decisions, root causes, and artifact changes as PR comments when a PR exists.
+Create a task branch, make only task-related commits, push it, and open a PR against `main`; never merge directly to `main`. Before opening the PR, inspect the final diff and status, run applicable repository checks and `git diff --check`, compare the actual result with the Repository Plan as required by the reusable template, apply any needed durable correction, and move the delivered Plan to `docs/plans/completed/`. That move does not make the task terminal. Record material verification, contract decisions, root causes, and artifact changes as PR comments when a PR exists.
 
 ## Independent `chatgpt-shot` review gate
 
