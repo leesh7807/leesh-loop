@@ -10,7 +10,7 @@ defmodule SymphonyElixir.Notion.Client do
     "Identifier" => ["rich_text", "title"],
     "Title" => ["title"],
     "State" => ["status"],
-    "Priority" => ["number", "select"],
+    "Priority" => ["number"],
     "Labels" => ["multi_select"],
     "Blocked By" => ["relation"]
   }
@@ -269,7 +269,6 @@ defmodule SymphonyElixir.Notion.Client do
 
   defp state_property(_), do: {:error, :invalid_state}
   defp priority_property(%{"type" => "number", "number" => n}) when is_integer(n), do: {:ok, n}
-  defp priority_property(%{"type" => "select", "select" => %{"name" => n}}) when is_binary(n), do: {:ok, nil}
   defp priority_property(_), do: {:error, :invalid_priority}
 
   defp labels_property(%{"type" => "multi_select", "multi_select" => values}) when is_list(values),
