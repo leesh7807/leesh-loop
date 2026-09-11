@@ -16,7 +16,7 @@ Create and maintain a plan that keeps the work aligned with the objective and ma
 
 - Do not use the plan as an execution log.
 
-- Keep active plans under `docs/plans/active/`. Before making a Pull Request, move the plan to `docs/plans/completed/`.
+- Keep active plans under `docs/plans/active/`. Move a plan to `docs/plans/completed/` only when the repository workflow's full lifecycle is terminal; do not move it merely because a Pull Request or a non-terminal human handoff exists.
 
 When reviewing the plan, check that each planned unit describes a coherent outcome in the problem domain rather than merely an implementation step.
 
@@ -71,3 +71,7 @@ Describe the observable evidence that will show whether the objective has been a
 
 List the tools or mechanisms that can produce or observe the required evidence, and state briefly what each one can verify.
 ```
+
+## chatgpt-shot review log
+
+Append a compact summary after every independent-review round when a repository workflow requires `chatgpt-shot`: reviewed HEAD, verdict, each finding's evidence-based acceptance or rejection, any applied commit, and post-change verification. This is a review ledger, not a substitute for the task Workpad or Repository Plan.

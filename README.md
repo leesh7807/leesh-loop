@@ -62,7 +62,7 @@ Agents work against the target repository according to its `WORKFLOW.md`, then w
 
 Leesh Loop assumes that the target repository already has a harness suitable for agent work. This follows from Symphony's model of running workers against the repository's existing development environment and rules.
 
-`WORKFLOW.md` is the execution contract that tells Symphony how work should be carried out in that repository.
+`WORKFLOW.md` is the execution contract that tells Symphony how work should be carried out in that repository. This repository's concrete contract is paired with the reusable [workflow template](docs/WORKFLOW_TEMPLATE.md): the template sets only Plan-based worker policy, while the root workflow supplies runtime setup, state handoff, and independent-review rules.
 
 ## Publisher
 
@@ -84,7 +84,7 @@ Task execution uses OpenAI Symphony.
 
 Symphony finds runnable work from Notion task state, creates an isolated workspace for each task, and starts an agent worker.
 
-Repository-specific worker behavior is defined by `WORKFLOW.md`.
+Repository-specific worker behavior is defined by `WORKFLOW.md`; Symphony continues to own dispatch, retry, reconciliation, and workspace/session lifecycle.
 
 ## Browser UI
 
