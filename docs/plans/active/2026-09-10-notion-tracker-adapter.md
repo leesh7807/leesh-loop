@@ -50,3 +50,9 @@ task representation through the existing tracker boundary.
 - Applied commit: `8678a89eb8edf9222c3e15f7de8a01c03fab7627`.
 - Verification: `mix format`, `mix compile`, and `mix specs.check` passed; the known unrelated
   retry-timing test instability remains recorded above.
+- Reviewed HEAD: `8e1ebbb0415bebb869b0dea689626c36fc3fe64a`.
+- Verdict: FINDINGS.
+- Accepted: paginated relation items need `relation.id`, and comment pagination must preserve
+  provider order.
+- Applied commit: `1c1750a87ec7659166660b3626cc4006aa375d0d`.
+- Verification: `mix format`, `mix compile`, and `mix specs.check` passed.
