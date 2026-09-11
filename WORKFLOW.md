@@ -103,3 +103,5 @@ Treat findings as review input, not automatic edit commands. Independently valid
 If `chatgpt-shot` does not complete normally, it has not passed this gate. Record the failure reason and current implementation/verification state in the Korean Workpad, move the task to `Human Handoff`, confirm readback, and stop. Do not create an automatic recovery or failure-code retry policy. For `SUBMISSION_UNCERTAIN`, `INVOCATION_CANCELLED`, or `EXECUTION_TIMEOUT`, inspect the Notion Invocation before any resubmission.
 
 After a passing review gate, move the task to `Human Review` with authoritative readback. A human may return it to `Rework`; then perform the required verification and independent review again before returning it to `Human Review`.
+
+When a task returns from `Human Review` to `Rework`, restore only its deterministic `docs/plans/completed/<date-summary>.md` artifact to `docs/plans/active/<date-summary>.md` before implementation. This is the same task's non-terminal rework, not a terminal reopen; do not search for a different Plan. Before the next PR handoff, apply the normal final comparison and move it back to `completed/`.

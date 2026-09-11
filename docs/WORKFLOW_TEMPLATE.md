@@ -20,7 +20,7 @@ Do not search for, select, or guess another Plan. If the H1 cannot provide that 
 
 Use repository evidence and normal engineering judgment to complete the Accepted Plan. Solve ordinary implementation problems autonomously; the actual implementation path may differ from an anticipated one when that is necessary to deliver the accepted objective. Do not absorb meaningful work outside that objective into the task.
 
-Use the repository's intended entry points and its authoritative repository guidance. On a retry or continuation, continue from the workspace Symphony preserved. Do not introduce a separate fresh-workspace or terminal-reopen lifecycle.
+Use the repository's intended entry points and its authoritative repository guidance. On a retry or continuation, continue from the workspace Symphony preserved. A concrete repository workflow may restore the same deterministic completed Repository Plan to its active path for a non-terminal rework; do not search for another Plan or introduce a terminal-reopen lifecycle.
 
 ## Keep the two task records distinct
 
