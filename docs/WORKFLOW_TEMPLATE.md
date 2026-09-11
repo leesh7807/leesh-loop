@@ -26,7 +26,7 @@ Use the repository's intended entry points and its authoritative repository guid
 
 The Workpad is mutable execution history. Record progress, investigation, temporary failures, command output, evidence, blockers, review results, fixes, verification, and handoff there.
 
-The Repository Plan is a durable project artifact, not a running log. Before repository handoff, compare it with the actual result. Update it only when the result materially changes the objective, intent, boundary, accepted requirement, important assumption, constraint, or verification method. Do not copy routine history, transient failures, command output, or review transcripts into it.
+The Repository Plan is a durable project artifact, not a running log. Before repository handoff, compare it with the actual result. Update it only when the result materially changes the objective, intent, boundary, accepted requirement, important assumption, constraint, or verification method. Do not copy routine history, transient failures, command output, or review transcripts into it. A repository may require a compact, finding-by-finding independent-review ledger in that task's own Repository Plan; it must contain only the reviewed identity, verdict, disposition, applied commit, and verification summary, never the transcript or general execution history.
 
 ## Verify and hand off
 

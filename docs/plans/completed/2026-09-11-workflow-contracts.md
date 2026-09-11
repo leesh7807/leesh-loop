@@ -48,3 +48,9 @@ Workers trust normally published tasks and execute the accepted objective. Symph
 
 - HEAD `fa25906052c27f138c2291b0b863b86cfb6d25a8`: `FINDINGS`.
 - Accepted deterministic Plan restoration for `Human Review` → `Rework` and moved this delivery Plan to `completed/`. Applied `037eafc`; `git diff --check` passed. Re-review required for the new HEAD.
+
+### 2026-09-11 round 3
+
+- HEAD `f93df4a70fe2cb1df67bbb2573c6d0ad97aa492f`: `FINDINGS`.
+- Accepted the unavailable-task-surface correction: only an available surface can perform the required `Human Handoff`; total surface/auth loss is reported as an external integration blocker without claiming an impossible mutation.
+- Accepted the review-ledger correction: the compact per-finding ledger in this Repository Plan is now an explicit repository extension, while transcripts and ordinary execution history remain Workpad-only.

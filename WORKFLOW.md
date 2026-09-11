@@ -56,7 +56,9 @@ Read `AGENTS.md`, then apply [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLAT
 
 The `after_create` hook clones this repository and installs its worker dependencies before the agent starts. Work only in the Symphony-provided workspace. Do not modify `symphony/` unless the Accepted Plan specifically requires it.
 
-Use the Notion task surface for the Accepted Plan, Workpad, and state changes. Write the Workpad in Korean; preserve code, commands, identifiers, paths, API names, and quotations verbatim where accuracy requires it. If that task surface or required authentication is unavailable, record the cause and current repository/verification state in Korean, move the task to `Human Handoff`, confirm the state readback, and stop. `Human Handoff` is non-active and non-terminal; it becomes runnable again only when a human returns it to an active state.
+Use the Notion task surface for the Accepted Plan, Workpad, and state changes. Write the Workpad in Korean; preserve code, commands, identifiers, paths, API names, and quotations verbatim where accuracy requires it. If independent review fails while this surface remains available, record the cause and current repository/verification state in Korean, move the task to `Human Handoff`, confirm the state readback, and stop. `Human Handoff` is non-active and non-terminal; it becomes runnable again only when a human returns it to an active state.
+
+If the task surface itself or its authentication is unavailable, it cannot record a Workpad entry or transition its own state. Do not claim that a same-surface handoff occurred and do not invent a fallback mutation channel. End with the concrete external-access blocker in the worker result; the operator must restore access or perform the provider-side handoff. This is an integration/access failure outside normal worker execution, not a repository-defined recovery lifecycle.
 
 ## Repository state and delivery
 
