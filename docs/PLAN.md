@@ -4,19 +4,15 @@ Create and maintain a plan that keeps the work aligned with the objective and ma
 
 - Name each plan document using the format `date-summary`.
 
-- Use the confirmed objective, repository conventions, and available evidence to settle decisions that could change the outcome.
+- Use the confirmed objective, intent, repository conventions, and available evidence to settle decisions that could change the outcome.
 
-- Record only the decisions, assumptions, and defaults needed to keep implementation aligned with the objective.
-
-- When the user explains an important choice, record that explanation if a later reviewer will need it. This can include stated constraints, alternatives, rationale, and accepted tradeoffs.
-
-- Do not invent reasons, tradeoffs, or justifications for the user. If the user did not explain a choice, record the choice without adding a reason.
+- Do not invent reasons, tradeoffs, or justifications for the user.
 
 - Define verification in terms of observable evidence. The plan must make clear how to tell whether the intended result works through the intended path.
 
 - Fix terminology before planning. Use one term for one meaning.
 
-- Update the plan during execution only when new evidence changes an important assumption, decision, boundary, or verification method.
+- Update the plan during execution only when new evidence changes an important assumption, decision, boundary, intent, or verification method.
 
 - Do not use the plan as an execution log.
 
@@ -40,7 +36,7 @@ The final plan should be complete enough for implementation to begin without unr
 
 ## Plan format
 
-```text
+```markdown
 # date-summary
 
 ## Objective
@@ -51,13 +47,21 @@ Describe the intended outcome and what the plan must stay aligned with.
 
 Define terms that are specific to the domain or repository, or that could reasonably be misunderstood.
 
+## Intent
+
+Record the problem, motivation, or desired direction that explains why the objective exists and helps interpret it when implementation choices arise.
+
+Preserve user-provided context when losing it could lead to a materially different implementation.
+
+Do not repeat decisions or implementation requirements here.
+
 ## Decisions
 
 Record the decisions, assumptions, and defaults that define the objective or its boundaries.
 
-When the user has explained an important choice, include the relevant rationale, constraints, alternatives, or accepted tradeoffs.
+Include rationale, constraints, alternatives, or accepted tradeoffs only when they are needed to understand a recorded decision.
 
-Do not invent explanations the user did not provide.
+Do not repeat background already captured in Intent.
 
 ## Verification
 
