@@ -76,8 +76,8 @@ defmodule SymphonyElixir.Notion.AgentTool do
   defp comments(id, settings, client, cursor, acc) do
     with {:ok, payload} <- client.("GET", "/comments", comment_query(id, cursor), nil, settings), %{"results" => results, "has_more" => more} <- payload do
       if more and is_binary(payload["next_cursor"]),
-        do: comments(id, settings, client, payload["next_cursor"], results ++ acc),
-        else: if(more, do: {:error, :notion_pagination_integrity_failure}, else: {:ok, Enum.reverse(results ++ acc)})
+        do: comments(id, settings, client, payload["next_cursor"], acc ++ results),
+        else: if(more, do: {:error, :notion_pagination_integrity_failure}, else: {:ok, acc ++ results})
     else
       {:error, _} = e -> e
       _ -> {:error, :notion_malformed_provider_response}

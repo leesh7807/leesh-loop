@@ -232,7 +232,9 @@ defmodule SymphonyElixir.Notion.Client do
 
     with {:ok, refs} <- refs do
       {:ok,
-       Enum.map(refs, fn %{"id" => id} ->
+       Enum.map(refs, fn reference ->
+         id = relation_page_id(reference)
+
          case fun.("GET", "/pages/#{id}", %{}, nil, settings) do
            {:ok, page} -> %{"id" => id, "state" => value_state(get_in(page, ["properties", "State"])), "terminal" => value_state(get_in(page, ["properties", "State"])) in settings.terminal_states}
            _ -> %{"id" => id, "state" => nil, "terminal" => false}
@@ -242,6 +244,10 @@ defmodule SymphonyElixir.Notion.Client do
   end
 
   defp blockers(_, _, _, _), do: {:error, :invalid_blocked_by}
+
+  defp relation_page_id(%{"relation" => %{"id" => id}}) when is_binary(id), do: id
+  defp relation_page_id(%{"id" => id}) when is_binary(id), do: id
+  defp relation_page_id(_), do: nil
   defp property_refs(page, prop, settings, fun), do: property_refs(page, prop, settings, fun, nil, [])
 
   defp property_refs(page, prop, settings, fun, cursor, acc) do
