@@ -16,7 +16,7 @@ Create and maintain a plan that keeps the work aligned with the objective and ma
 
 - Do not use the plan as an execution log.
 
-- Keep active plans under `docs/plans/active/`. Before making a Pull Request, move the plan to `docs/plans/completed/`.
+- Keep active plans under `docs/plans/active/`. After the final Repository Plan comparison and before opening its Pull Request, move the delivered Plan to `docs/plans/completed/`. This repository-artifact move does not itself make the tracker task terminal; human review, merge, or rework may still follow.
 
 When reviewing the plan, check that each planned unit describes a coherent outcome in the problem domain rather than merely an implementation step.
 
