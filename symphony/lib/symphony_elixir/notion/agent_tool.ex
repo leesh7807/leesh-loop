@@ -116,7 +116,13 @@ defmodule SymphonyElixir.Notion.AgentTool do
   defp issue_id(_), do: nil
 
   defp scoped(id, %{notion_data_source_id: source}, settings, client, fun) do
-    with {:ok, %{"parent" => %{"type" => "data_source_id", "data_source_id" => ^source}}} <- client.("GET", "/pages/#{id}", %{}, nil, settings), do: fun.()
+    with {:ok, %{"parent" => %{"type" => "data_source_id", "data_source_id" => ^source}}} <-
+           client.("GET", "/pages/#{id}", %{}, nil, settings) do
+      fun.()
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :notion_out_of_scope_task}
+    end
   end
 
   defp scoped(_, _, _, _, _), do: {:error, :notion_unbound_task}
