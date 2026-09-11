@@ -74,7 +74,7 @@ defmodule SymphonyElixir.Notion.AgentTool do
   end
 
   defp comments(id, settings, client, cursor, acc) do
-    with {:ok, payload} <- client.("GET", "/comments", cursor_query(id, cursor), nil, settings), %{"results" => results, "has_more" => more} <- payload do
+    with {:ok, payload} <- client.("GET", "/comments", comment_query(id, cursor), nil, settings), %{"results" => results, "has_more" => more} <- payload do
       if more and is_binary(payload["next_cursor"]),
         do: comments(id, settings, client, payload["next_cursor"], results ++ acc),
         else: if(more, do: {:error, :notion_pagination_integrity_failure}, else: {:ok, Enum.reverse(results ++ acc)})
@@ -131,6 +131,8 @@ defmodule SymphonyElixir.Notion.AgentTool do
   defp string_arg(_, _), do: {:error, :invalid_notion_tool_arguments}
   defp cursor_query(_id, nil), do: %{"page_size" => 100}
   defp cursor_query(id, cursor), do: Map.put(cursor_query(id, nil), "start_cursor", cursor)
+  defp comment_query(id, nil), do: %{"block_id" => id, "page_size" => 100}
+  defp comment_query(id, cursor), do: Map.put(comment_query(id, nil), "start_cursor", cursor)
   defp respond({:ok, body}), do: output(true, body)
   defp respond({:error, reason}), do: failure(reason)
   defp failure(reason), do: output(false, %{"error" => %{"message" => inspect(reason)}})
