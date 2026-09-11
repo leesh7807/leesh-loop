@@ -43,3 +43,10 @@ task representation through the existing tracker boundary.
 - Verification: `mix format`, `mix compile`, and `mix specs.check` passed. `mix test` is blocked by
   two existing `CoreTest` retry due-time lower-bound assertions (observed 487–489ms vs 500ms, and
   39487–39492ms vs 39500ms); this adapter does not touch retry timing.
+- Reviewed HEAD: `9fd44ce24f25d6880d53df91a3e2b1c69b3bd6be`.
+- Verdict: FINDINGS.
+- Accepted: the comments capability omitted Notion's required `block_id`; comments now use a
+  separate page-scoped query from block-child pagination.
+- Applied commit: `8678a89eb8edf9222c3e15f7de8a01c03fab7627`.
+- Verification: `mix format`, `mix compile`, and `mix specs.check` passed; the known unrelated
+  retry-timing test instability remains recorded above.
