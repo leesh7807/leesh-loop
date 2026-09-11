@@ -274,7 +274,7 @@ defmodule SymphonyElixir.Notion.Client do
   end
 
   defp state_property(_), do: {:error, :invalid_state}
-  defp priority_property(%{"type" => "number", "number" => n}) when is_integer(n), do: {:ok, n}
+  defp priority_property(%{"type" => "number", "number" => n}) when is_number(n), do: {:ok, round(n)}
   defp priority_property(_), do: {:error, :invalid_priority}
 
   defp labels_property(%{"type" => "multi_select", "multi_select" => values}) when is_list(values),

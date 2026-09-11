@@ -21,7 +21,8 @@ chooses exactly one whose schema has `Identifier` (rich text or title), `Title` 
 enumeration order is never a tie breaker. The selected data source is the configured tracker scope.
 
 Each task is normalized structurally: page ID becomes `Issue.id`, Identifier becomes
-`Issue.identifier`, page URL/timestamps are copied, and unavailable Symphony-only fields are null
+`Issue.identifier`, page URL/timestamps are copied, and number Priority is rounded to Symphony's
+portable integer priority. Unavailable Symphony-only fields are null
 (`branch_name`, `assignee_id`, `native_ref`). Labels default to their property values and
 `Blocked By` is read with property pagination. `dispatchable` is true only when every related
 blocker has a represented state in `terminal_states`; unavailable blocker state is false.
