@@ -28,10 +28,23 @@ Workers trust normally published tasks and execute the accepted objective. Symph
 - Review `WORKFLOW.md`, the reusable template, `docs/PLAN.md`, and README against Symphony SPEC for clear ownership and no duplicated orchestration lifecycle.
 - Parse the root workflow through Symphony's workflow loader and verify the fresh-workspace hook is present.
 - Confirm the Publisher remains unchanged; run its tests and `git diff --check`.
-- Create a PR, submit the requested independent review with the current PR/HEAD identity, validate any findings, and log each review round in `docs/PLAN.md`.
+- Create a PR, submit the requested independent review with the current PR/HEAD identity, validate any findings, and log each review round below in this Repository Plan.
 
 ## Verification Tools
 
 - Symphony SPEC and workflow loader verify runtime-contract and template syntax boundaries.
 - Git history and Publisher tests confirm the merged Publisher baseline remains unchanged.
 - `chatgpt-shot submit`, PR readback, Git status, and `git diff --check` provide delivery and independent-review evidence.
+
+## chatgpt-shot review log
+
+### 2026-09-11 round 1
+
+- HEAD `be9ba538d506b8c07b1544530b07d7a6484b42eb`: `FINDINGS`.
+- Rejected the unsupported Notion tracker finding because a functioning Notion adapter/task surface is an Accepted Plan premise; replacing it or building one changes scope.
+- Accepted the missing fresh-workspace Plan materialization and Plan-completion timing findings. Applied `2e0eb00`; `npm test` (34), workflow parse/render, Symphony workspace/config tests (54), and `git diff --check` passed.
+
+### 2026-09-11 round 2
+
+- HEAD `fa25906052c27f138c2291b0b863b86cfb6d25a8`: `FINDINGS`.
+- Accepted deterministic Plan restoration for `Human Review` → `Rework` and moved this delivery Plan to `completed/`. Applied `037eafc`; `git diff --check` passed. Re-review required for the new HEAD.

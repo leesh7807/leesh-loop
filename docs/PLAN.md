@@ -71,22 +71,3 @@ Describe the observable evidence that will show whether the objective has been a
 
 List the tools or mechanisms that can produce or observe the required evidence, and state briefly what each one can verify.
 ```
-
-## chatgpt-shot review log
-
-Append a compact summary after every independent-review round when a repository workflow requires `chatgpt-shot`: reviewed HEAD, verdict, each finding's evidence-based acceptance or rejection, any applied commit, and post-change verification. This is a review ledger, not a substitute for the task Workpad or Repository Plan.
-
-### 2026-09-11 round 1
-
-- HEAD: `be9ba538d506b8c07b1544530b07d7a6484b42eb`; verdict: `FINDINGS`.
-- Rejected P1: current embedded Symphony has no Notion adapter, but the Accepted Plan expressly treats normal Publisher/adapter/Notion delivery as an execution premise and forbids proactively changing Publisher. The root workflow declares that external adapter contract; replacing it with an unrelated supported tracker or implementing a new adapter would change the accepted scope. The limitation is recorded in the PR verification comment.
-- Accepted P1 (fresh Plan): the template incorrectly made a missing local Plan an automatic blocker although a valid Accepted Plan can originate from an uncommitted local file. It now materializes only the deterministic missing path from the Accepted Plan and preserves any existing corrected Repository Plan.
-- Accepted P2 (Plan move): moving only after a terminal tracker transition conflicted with the non-terminal Human Review flow. The delivered Plan now moves to `completed/` after final comparison and before its PR; that artifact move is explicitly separate from task terminal state.
-- Applied commit: `2e0eb00d21842fba490e58ed6a5b60ee27da596d`; post-fix verification: `npm test` (34/34), strict Symphony workflow parse/render, `workspace_and_config_test.exs` (54/54), and `git diff --check` passed.
-
-### 2026-09-11 round 2
-
-- HEAD: `fa25906052c27f138c2291b0b863b86cfb6d25a8`; verdict: `FINDINGS`.
-- Accepted P1: Human Review to Rework lacked the deterministic completed-to-active Plan restoration required before continued work. The concrete workflow now defines that non-terminal restore without Plan search.
-- Accepted P2: this delivery Plan had not followed the new pre-PR artifact rule. It is now at `docs/plans/completed/2026-09-11-workflow-contracts.md`.
-- Applied commit: `037eafc`; verification: `git diff --check` passed. A new HEAD requires re-review.
