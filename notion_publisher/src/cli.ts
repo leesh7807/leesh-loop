@@ -8,8 +8,8 @@ import { publish, type PublishResult } from "./publisher.js";
 
 export async function publishPlanFile(planPath: string, configPath: string, databaseUrl: string, client: NotionClient): Promise<PublishResult> {
   const plan = await readFile(planPath, "utf8");
-  const { config, policy } = await loadConfig(configPath);
-  return publish({ plan, databaseUrl, fallbackTitle: basename(planPath), client, config: { policy, planSource: config.planSource } });
+  const { policy } = await loadConfig(configPath);
+  return publish({ plan, databaseUrl, fallbackTitle: basename(planPath), client, config: { policy } });
 }
 
 async function localEnvironment(): Promise<Record<string, string>> {

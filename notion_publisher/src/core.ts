@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { URL } from "node:url";
 
 export class PublicationError extends Error {}
-export type Policy = { identifier:string; title:string; state:string; priority:string; labels:string; blockedBy:string; description:string; source:string; planHeading:string; workpadHeading:string; defaultState:string; defaultPriority:number|null; defaultLabels:string[]; bootstrapStates:string[] };
-export const DEFAULT_POLICY: Policy = {identifier:"Identifier",title:"Title",state:"State",priority:"Priority",labels:"Labels",blockedBy:"Blocked By",description:"Description",source:"Plan Source",planHeading:"Plan",workpadHeading:"Workpad",defaultState:"Ready",defaultPriority:3,defaultLabels:[],bootstrapStates:["Backlog","Ready","In Progress","Blocked","Done"]};
+export type Policy = { identifier:string; title:string; state:string; priority:string; labels:string; blockedBy:string; defaultState:string; defaultPriority:number|null; defaultLabels:string[]; bootstrapStates:string[] };
+export const DEFAULT_POLICY: Policy = {identifier:"Identifier",title:"Title",state:"State",priority:"Priority",labels:"Labels",blockedBy:"Blocked By",defaultState:"Ready",defaultPriority:3,defaultLabels:[],bootstrapStates:["Backlog","Ready","In Progress","Blocked","Done"]};
 export const NOTION_RICH_TEXT_SAFE_LIMIT=1900;
 export const NOTION_TITLE_SAFE_LIMIT=1900;
 export const NOTION_APPEND_BATCH_SIZE=50;
@@ -20,5 +20,5 @@ export function chunkText(text:string,limit=NOTION_RICH_TEXT_SAFE_LIMIT):string[
 export function extractPlanTitle(plan:string,fallbackTitle?:string):string { const heading=plan.split(/\r?\n/).find((line)=>line.startsWith("# "))?.slice(2).trim(); if(heading)return heading; if(fallbackTitle?.trim())return fallbackTitle.trim(); throw new PublicationError("Plan title requires a Markdown H1 or caller-supplied fallback title"); }
 export function validatePlanTitle(title:string):void { if(title.length>NOTION_TITLE_SAFE_LIMIT) throw new PublicationError(`plan title exceeds the ${NOTION_TITLE_SAFE_LIMIT}-character Notion title limit`); }
 const text=(content:string)=>({type:"text",text:{content}});
-export function buildTaskProperties(p:Policy,id:string,title:string,source?:string,state=p.defaultState):Record<string,unknown>{return {[p.identifier]:{rich_text:[text(id)]},[p.title]:{title:[text(title)]},[p.state]:{select:{name:state}},[p.priority]:{number:p.defaultPriority},[p.labels]:{multi_select:p.defaultLabels.map(name=>({name}))},[p.description]:{rich_text:[text("Completed plan artifact; see Plan section.")]},[p.source]:{url:source??null}};}
-export function buildPageBlocks(p:Policy,plan:string):Record<string,unknown>[] { return [{object:"block",type:"heading_1",heading_1:{rich_text:[text(p.planHeading)]}},...chunkText(plan).map(part=>({object:"block",type:"paragraph",paragraph:{rich_text:[text(part)]}})),{object:"block",type:"heading_1",heading_1:{rich_text:[text(p.workpadHeading)]}}]; }
+export function buildTaskProperties(p:Policy,id:string,title:string,state=p.defaultState):Record<string,unknown>{return {[p.identifier]:{rich_text:[text(id)]},[p.title]:{title:[text(title)]},[p.state]:{select:{name:state}},[p.priority]:{number:p.defaultPriority},[p.labels]:{multi_select:p.defaultLabels.map(name=>({name}))},[p.blockedBy]:{relation:[]}};}
+export function buildPlanBlocks(plan:string):Record<string,unknown>[] { return chunkText(plan).map(part=>({object:"block",type:"paragraph",paragraph:{rich_text:[text(part)]}})); }

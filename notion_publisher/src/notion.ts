@@ -1,20 +1,9 @@
-import { NOTION_APPEND_BATCH_SIZE, Policy, PublicationError, PUBLISHER_PENDING_STATE } from "./core.js";
+import { NOTION_APPEND_BATCH_SIZE, Policy, PublicationError, PUBLISHER_PENDING_STATE, buildPlanBlocks } from "./core.js";
 
-export const PENDING_PUBLICATION_MARKER = "Publisher: publication pending";
-const blockText = (block: any) => {
-  const heading = block?.heading_1 ?? block?.heading_2;
-  return heading?.rich_text?.map((rich: any) => rich.plain_text ?? rich.text?.content ?? "").join("");
-};
-const propertyText = (property: any) => property?.rich_text?.map((rich: any) => rich.plain_text ?? rich.text?.content ?? "").join("") ?? "";
-export function isPendingPublication(children: any[]): boolean {
-  return children.some((block) => block.type === "heading_2" && blockText(block) === PENDING_PUBLICATION_MARKER);
-}
-function isPendingPublicationBlock(block: any): boolean {
-  return block?.type === "heading_2" && blockText(block) === PENDING_PUBLICATION_MARKER;
-}
-export function pendingPublicationBlock(): Record<string, unknown> {
-  return { object: "block", type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: PENDING_PUBLICATION_MARKER } }] } };
-}
+const PLAN_PAGE = "Plan";
+const WORKPAD_PAGE = "Workpad";
+const richText = (value: any) => value?.map((part: any) => part.plain_text ?? part.text?.content ?? "").join("") ?? "";
+const selectName = (property: any) => property?.select?.name ?? "";
 
 export class NotionClient {
   static readonly version = "2025-09-03";
@@ -22,12 +11,8 @@ export class NotionClient {
 
   async request(method: string, path: string, body?: unknown): Promise<any> {
     let response: Response;
-    try {
-      response = await this.fetcher(`https://api.notion.com/v1${path}`, { method, headers: { Authorization: `Bearer ${this.token}`, "Notion-Version": NotionClient.version, "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "unknown transport error";
-      throw new PublicationError(`provider/API transport failure: ${detail}`);
-    }
+    try { response = await this.fetcher(`https://api.notion.com/v1${path}`, { method, headers: { Authorization: `Bearer ${this.token}`, "Notion-Version": NotionClient.version, "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) }); }
+    catch (error) { throw new PublicationError(`provider/API transport failure: ${error instanceof Error ? error.message : "unknown transport error"}`); }
     if (!response.ok) {
       if (response.status === 401) throw new PublicationError("authentication failure: NOTION_TOKEN was rejected");
       if (response.status === 403 || response.status === 404) throw new PublicationError("configured database is inaccessible to the integration: share the database and grant read/insert access");
@@ -42,16 +27,15 @@ export class NotionClient {
     const dataSources = database.data_sources ?? [];
     if (dataSources.length !== 1 || !dataSources[0]?.id) throw new PublicationError("incompatible database: configured database must expose exactly one usable data source");
     const dataSource = dataSources[0].id;
-    const schema = await this.request("GET", `/data_sources/${dataSource}`);
-    await this.ensureSchema(schema, dataSource, policy);
+    await this.ensureSchema(await this.request("GET", `/data_sources/${dataSource}`), dataSource, policy);
     return dataSource;
   }
 
   private baseSchema(policy: Policy): Record<string, unknown> {
-    return { [policy.identifier]: { rich_text: {} }, [policy.title]: { title: {} }, [policy.state]: { select: { options: [...new Set([...policy.bootstrapStates, PUBLISHER_PENDING_STATE])].map((name) => ({ name })) } }, [policy.priority]: { number: {} }, [policy.labels]: { multi_select: {} }, [policy.description]: { rich_text: {} }, [policy.source]: { url: {} } };
+    return { [policy.identifier]: { rich_text: {} }, [policy.title]: { title: {} }, [policy.state]: { select: { options: [...new Set([...policy.bootstrapStates, PUBLISHER_PENDING_STATE])].map((name) => ({ name })) } }, [policy.priority]: { number: {} }, [policy.labels]: { multi_select: {} } };
   }
   validateSchema(data: any, policy: Policy, dataSource?: string): void {
-    const expected: Record<string, string> = { [policy.identifier]: "rich_text", [policy.title]: "title", [policy.state]: "select", [policy.priority]: "number", [policy.labels]: "multi_select", [policy.blockedBy]: "relation", [policy.description]: "rich_text", [policy.source]: "url" };
+    const expected: Record<string, string> = { [policy.identifier]: "rich_text", [policy.title]: "title", [policy.state]: "select", [policy.priority]: "number", [policy.labels]: "multi_select", [policy.blockedBy]: "relation" };
     for (const [name, type] of Object.entries(expected)) if (data.properties?.[name]?.type !== type) throw new PublicationError(`incompatible schema: property ${name} must be ${type}`);
     const relation = data.properties[policy.blockedBy].relation ?? {};
     if (dataSource && (relation.data_source_id !== dataSource || !relation.single_property || relation.dual_property)) throw new PublicationError(`incompatible schema: property ${policy.blockedBy} must be a self-relation with single_property shape`);
@@ -68,35 +52,60 @@ export class NotionClient {
     }
     if (Object.keys(missing).length) await this.request("PATCH", `/data_sources/${dataSource}`, { properties: missing });
   }
-  async duplicate(dataSource: string, policy: Policy, identifier: string) { const result = await this.request("POST", `/data_sources/${dataSource}/query`, { filter: { property: policy.identifier, rich_text: { equals: identifier } } }); return (result.results ?? []).length > 0; }
-  async listChildren(parentId: string): Promise<any[]> { const all: any[] = []; let cursor: string | undefined; do { const page = await this.request("GET", `/blocks/${parentId}/children?page_size=100${cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : ""}`); all.push(...(page.results ?? [])); cursor = page.has_more ? page.next_cursor : undefined; if (page.has_more && !cursor) throw new PublicationError("provider/API failure: paginated children response omitted next_cursor"); } while (cursor); return all; }
-  async findPublication(dataSource: string, policy: Policy, identifier: string): Promise<{ pageId: string; url?: string; complete: boolean } | null> {
-    const rows: any[] = [];
-    let cursor: string | undefined;
-    do {
-      const result = await this.request("POST", `/data_sources/${dataSource}/query`, { page_size: 100, start_cursor: cursor, filter: { property: policy.identifier, rich_text: { equals: identifier } } });
-      rows.push(...(result.results ?? []));
-      if (result.has_more && !result.next_cursor) throw new PublicationError("provider/API failure: publication query response omitted next_cursor");
-      cursor = result.has_more ? result.next_cursor : undefined;
-    } while (cursor);
-    if (!rows.length) return null;
-    const matches = [];
-    for (const row of rows) {
-      const children = await this.listChildren(row.id);
-      const pending = isPendingPublication(children) || propertyText(row.properties?.[policy.description]) === PENDING_PUBLICATION_MARKER;
-      matches.push({ row, pending });
-    }
-    const completed = matches.find((match) => !match.pending);
-    if (completed) return { pageId: completed.row.id, url: completed.row.url, complete: true };
-    if (matches.length > 1) throw new PublicationError(`duplicate publication: multiple pending records exist for ${identifier}`);
-    return { pageId: matches[0].row.id, url: matches[0].row.url, complete: false };
+
+  async listChildren(parentId: string): Promise<any[]> {
+    const all: any[] = []; let cursor: string | undefined;
+    do { const page = await this.request("GET", `/blocks/${parentId}/children?page_size=100${cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : ""}`); all.push(...(page.results ?? [])); cursor = page.has_more ? page.next_cursor : undefined; if (page.has_more && !cursor) throw new PublicationError("provider/API failure: paginated children response omitted next_cursor"); } while (cursor);
+    return all;
   }
+
+  async findPublication(dataSource: string, policy: Policy, identifier: string): Promise<{ pageId: string; url?: string; complete: boolean } | null> {
+    const rows: any[] = []; let cursor: string | undefined;
+    do { const result = await this.request("POST", `/data_sources/${dataSource}/query`, { page_size: 100, ...(cursor ? { start_cursor: cursor } : {}), filter: { property: policy.identifier, rich_text: { equals: identifier } } }); rows.push(...(result.results ?? [])); if (result.has_more && !result.next_cursor) throw new PublicationError("provider/API failure: publication query response omitted next_cursor"); cursor = result.has_more ? result.next_cursor : undefined; } while (cursor);
+    if (!rows.length) return null;
+    if (rows.length > 1) throw new PublicationError(`Identifier invariant violation: ${identifier} matches ${rows.length} task pages`);
+    const row = rows[0];
+    return { pageId: row.id, url: row.url, complete: selectName(row.properties?.[policy.state]) !== PUBLISHER_PENDING_STATE };
+  }
+
   createTask(dataSource: string, properties: Record<string, unknown>) { return this.request("POST", "/pages", { parent: { type: "data_source_id", data_source_id: dataSource }, properties }); }
   async appendBlocks(pageId: string, blocks: Record<string, unknown>[]) { for (let i = 0; i < blocks.length; i += NOTION_APPEND_BATCH_SIZE) await this.request("PATCH", `/blocks/${pageId}/children`, { children: blocks.slice(i, i + NOTION_APPEND_BATCH_SIZE) }); }
-  async repairIncomplete(pageId: string, blocks: Record<string, unknown>[], policy?: Policy) { const children = await this.listChildren(pageId); const pending = children.find(isPendingPublicationBlock); for (const block of children) if (block !== pending) await this.request("PATCH", `/blocks/${block.id}`, { archived: true }); await this.appendBlocks(pageId, blocks); if (pending) await this.request("PATCH", `/blocks/${pending.id}`, { archived: true }); if (policy) await this.finalizePublication(pageId, policy); }
-  async finalizePublication(pageId: string, policy: Policy) {
-    const children = await this.listChildren(pageId);
-    for (const block of children) if (isPendingPublicationBlock(block)) await this.request("PATCH", `/blocks/${block.id}`, { archived: true });
-    await this.request("PATCH", `/pages/${pageId}`, { properties: { [policy.state]: { select: { name: policy.defaultState } }, [policy.description]: { rich_text: [{ type: "text", text: { content: "Completed plan artifact; see Plan section." } }] } } });
+  private async createChildPage(parentId: string, title: string): Promise<string> {
+    const result = await this.request("PATCH", `/blocks/${parentId}/children`, { children: [{ object: "block", type: "child_page", child_page: { title } }] });
+    const page = result.results?.[0];
+    if (!page?.id) throw new PublicationError(`provider/API failure: creating ${title} child page returned no page id`);
+    return page.id;
   }
+  private namedChildPages(children: any[], title: string): any[] { return children.filter((child) => child.type === "child_page" && child.child_page?.title === title); }
+  private async ensureChildPage(parentId: string, title: string): Promise<string> {
+    const matches = this.namedChildPages(await this.listChildren(parentId), title);
+    if (matches.length > 1) throw new PublicationError(`incomplete publication has multiple ${title} child pages`);
+    return matches[0]?.id ?? this.createChildPage(parentId, title);
+  }
+  private async ensurePlanContent(planId: string, plan: string): Promise<void> {
+    const expected = buildPlanBlocks(plan) as any[];
+    const existing = await this.listChildren(planId);
+    const existingText = existing.map((block) => block.type === "paragraph" ? richText(block.paragraph?.rich_text) : undefined);
+    if (existingText.some((value) => value === undefined) || existingText.length > expected.length || existingText.some((value, index) => value !== richText(expected[index].paragraph.rich_text))) throw new PublicationError("incomplete publication Plan content differs from the accepted Plan");
+    if (existingText.length < expected.length) await this.appendBlocks(planId, expected.slice(existingText.length));
+  }
+  async ensureCanonicalRepresentation(pageId: string, plan: string): Promise<void> {
+    if (!plan.trim()) throw new PublicationError("Plan content must be non-empty");
+    const planId = await this.ensureChildPage(pageId, PLAN_PAGE);
+    await this.ensurePlanContent(planId, plan);
+    await this.ensureChildPage(pageId, WORKPAD_PAGE);
+    await this.validateCanonicalRepresentation(pageId, plan);
+  }
+  async validateCanonicalRepresentation(pageId: string, plan: string): Promise<void> {
+    const children = await this.listChildren(pageId);
+    const plans = this.namedChildPages(children, PLAN_PAGE);
+    const workpads = this.namedChildPages(children, WORKPAD_PAGE);
+    if (plans.length !== 1 || workpads.length !== 1) throw new PublicationError("canonical representation requires exactly one Plan and one Workpad child page");
+    const content = await this.listChildren(plans[0].id);
+    const actual = content.map((block) => block.type === "paragraph" ? richText(block.paragraph?.rich_text) : undefined);
+    const expected = buildPlanBlocks(plan) as any[];
+    if (!plan.trim() || actual.length !== expected.length || actual.some((value, index) => value === undefined || value !== richText(expected[index].paragraph.rich_text))) throw new PublicationError("canonical Plan child page does not contain the complete accepted Plan");
+  }
+  async repairIncomplete(pageId: string, plan: string): Promise<void> { await this.ensureCanonicalRepresentation(pageId, plan); }
+  async finalizePublication(pageId: string, policy: Policy) { await this.request("PATCH", `/pages/${pageId}`, { properties: { [policy.state]: { select: { name: policy.defaultState } } } }); }
 }
