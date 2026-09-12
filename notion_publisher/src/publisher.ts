@@ -1,4 +1,4 @@
-import { buildTaskProperties, deriveIdentifier, extractPlanTitle, type Policy, PublicationError, PUBLISHER_PENDING_STATE, resolvePublishDatabase, validatePlanTitle } from "./core.js";
+import { buildTaskProperties, deriveIdentifier, extractPlanTitle, type Policy, PublicationError, resolvePublishDatabase, validatePlanTitle } from "./core.js";
 import { type NotionClient } from "./notion.js";
 
 export type PublisherConfig = { policy: Policy };
@@ -33,7 +33,7 @@ export async function publish({ plan, databaseUrl, fallbackTitle, client, config
       return { identifier, page_id: existing.pageId, url: existing.url };
     }
 
-    const properties = buildTaskProperties(config.policy, identifier, title, PUBLISHER_PENDING_STATE);
+    const properties = buildTaskProperties(config.policy, identifier, title);
     const page = await client.createTask(dataSource, properties);
     try { await client.ensureCanonicalRepresentation(page.id, plan); await client.finalizePublication(page.id, config.policy); }
     catch (error) { if (error instanceof PublicationError) throw error; throw new PublicationError("provider/API failure while publishing Plan; pending task remains retryable"); }

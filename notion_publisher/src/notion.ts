@@ -1,9 +1,8 @@
-import { NOTION_APPEND_BATCH_SIZE, Policy, PublicationError, PUBLISHER_PENDING_STATE, buildPlanBlocks } from "./core.js";
+import { NOTION_APPEND_BATCH_SIZE, Policy, PublicationError, PUBLISHER_PENDING_STATE, PUBLISHER_READY_STATE, buildPlanBlocks } from "./core.js";
 
 const PLAN_PAGE = "Plan";
 const WORKPAD_PAGE = "Workpad";
-const richText = (value: any) => value?.map((part: any) => part.plain_text ?? part.text?.content ?? "").join("") ?? "";
-const selectName = (property: any) => property?.select?.name ?? "";
+const richText = (value: any) => Array.isArray(value) ? value.map((part: any) => part.plain_text ?? part.text?.content ?? "").join("") : "";
 
 export class NotionClient {
   static readonly version = "2025-09-03";
@@ -32,10 +31,10 @@ export class NotionClient {
   }
 
   private baseSchema(policy: Policy): Record<string, unknown> {
-    return { [policy.identifier]: { rich_text: {} }, [policy.title]: { title: {} }, [policy.state]: { select: { options: [...new Set([...policy.bootstrapStates, PUBLISHER_PENDING_STATE])].map((name) => ({ name })) } }, [policy.priority]: { number: {} }, [policy.labels]: { multi_select: {} } };
+    return { [policy.identifier]: { rich_text: {} }, [policy.title]: { title: {} }, [policy.state]: { rich_text: {} }, [policy.priority]: { number: {} }, [policy.labels]: { multi_select: {} } };
   }
   validateSchema(data: any, policy: Policy, dataSource?: string): void {
-    const expected: Record<string, string> = { [policy.identifier]: "rich_text", [policy.title]: "title", [policy.state]: "select", [policy.priority]: "number", [policy.labels]: "multi_select", [policy.blockedBy]: "relation" };
+    const expected: Record<string, string> = { [policy.identifier]: "rich_text", [policy.title]: "title", [policy.state]: "rich_text", [policy.priority]: "number", [policy.labels]: "multi_select", [policy.blockedBy]: "relation" };
     for (const [name, type] of Object.entries(expected)) if (data.properties?.[name]?.type !== type) throw new PublicationError(`incompatible schema: property ${name} must be ${type}`);
     const relation = data.properties[policy.blockedBy].relation ?? {};
     if (dataSource && (relation.data_source_id !== dataSource || !relation.single_property || relation.dual_property)) throw new PublicationError(`incompatible schema: property ${policy.blockedBy} must be a self-relation with single_property shape`);
@@ -73,7 +72,7 @@ export class NotionClient {
     if (!rows.length) return null;
     if (rows.length > 1) throw new PublicationError(`Identifier invariant violation: ${identifier} matches ${rows.length} task pages`);
     const row = rows[0];
-    return { pageId: row.id, url: row.url, complete: selectName(row.properties?.[policy.state]) !== PUBLISHER_PENDING_STATE };
+    return { pageId: row.id, url: row.url, complete: richText(row.properties?.[policy.state]?.rich_text) !== PUBLISHER_PENDING_STATE };
   }
 
   createTask(dataSource: string, properties: Record<string, unknown>) { return this.request("POST", "/pages", { parent: { type: "data_source_id", data_source_id: dataSource }, properties }); }
@@ -117,5 +116,5 @@ export class NotionClient {
     if (!plan.trim() || actual.length !== expected.length || actual.some((value, index) => value === undefined || value !== richText(expected[index].paragraph.rich_text))) throw new PublicationError("canonical Plan child page does not contain the complete accepted Plan");
   }
   async repairIncomplete(pageId: string, plan: string): Promise<void> { await this.ensureCanonicalRepresentation(pageId, plan); }
-  async finalizePublication(pageId: string, policy: Policy) { await this.request("PATCH", `/pages/${pageId}`, { properties: { [policy.state]: { select: { name: policy.defaultState } } } }); }
+  async finalizePublication(pageId: string, policy: Policy) { await this.request("PATCH", `/pages/${pageId}`, { properties: { [policy.state]: { rich_text: [{ type: "text", text: { content: PUBLISHER_READY_STATE } }] } } }); }
 }

@@ -23,13 +23,13 @@ class PublicationFake extends NotionClient {
 
 async function inputs() {
   const directory = await mkdtemp(join(tmpdir(), "publisher-cli-")); const plan = join(directory, "plan.md"); const config = join(directory, "config.json");
-  await writeFile(plan, "# Plan\ncontent"); await writeFile(config, JSON.stringify({ state: "Ready" })); return { directory, plan, config };
+  await writeFile(plan, "# Plan\ncontent"); await writeFile(config, JSON.stringify({ priority: 3 })); return { directory, plan, config };
 }
 
 test("success keeps Publisher Pending until canonical representation finalizes", async () => {
   const { plan, config } = await inputs(); const client = new PublicationFake("token");
   const result = await publishPlanFile(plan, config, DATABASE_URL, client);
-  assert.equal(result.page_id, "page"); assert.equal(client.createdProperties.State.select.name, PUBLISHER_PENDING_STATE);
+  assert.equal(result.page_id, "page"); assert.equal(client.createdProperties.State.rich_text[0].text.content, PUBLISHER_PENDING_STATE);
   assert.deepEqual(Object.keys(client.createdProperties).sort(), ["Blocked By", "Identifier", "Labels", "Priority", "State", "Title"]);
   assert.deepEqual(client.finalized, ["page"]);
 });
