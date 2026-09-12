@@ -77,3 +77,22 @@ list.
   intended external flow when credentials are available.
 - Repository test/quality commands, `mix specs.check`, `git diff --check`, and
   `chatgpt-shot submit` provide delivery evidence.
+
+## chatgpt-shot review log
+
+### Round 1
+
+- Reviewed HEAD: `7afcd5866fb94dc967dd4d9918c1802bb69031d1` on [PR #15](https://github.com/leesh7807/leesh-loop/pull/15).
+- Verdict: `PASS` (`None.`).
+- Findings: none; the completed Result confirmed the specified HEAD and found no
+  evidence-backed defect.
+- Applied commit: none; no finding required a code change.
+- Verification: Publisher `npm test` passed (16/16); Notion adapter target
+  passed (4/4); `mix specs.check`, `mix format --check-formatted`, and
+  dialyzer passed; `git diff --check` passed. Full `mix test` had a passing
+  299-test run, while later coverage/full runs exposed existing retry-timing
+  boundary flakes and aggregate quality limits from existing Credo findings and
+  the repository's 100% coverage threshold.
+- Submission handling: the first local service attempt produced no Invocation;
+  after service restart and exact SHA correction, Invocation readback reached
+  `completed` and returned the PASS Result.
