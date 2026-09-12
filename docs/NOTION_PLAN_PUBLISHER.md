@@ -24,10 +24,20 @@ node dist/src/cli.js \
 
 `--plan`, `--config`, and `--database-url` are explicit CLI inputs. The database URL is not read from `NOTION_PUBLISH_DATABASE_URL`; defining that environment variable cannot override the value supplied to the publisher. The CLI may load `NOTION_TOKEN` from the process environment or a local `.env` in its current directory as a runtime-secret convenience.
 
-Optional policy settings in the JSON configuration are `state` (default `Ready`), `priority` (default `3`, or `null`), `labels` (default `[]`), and `property_names` for the six canonical property names. Unknown keys and invalid structural types fail before mutation; state text remains open-ended.
+Optional policy settings in the JSON configuration are `priority` (default `3`, or `null`),
+`labels` (default `[]`), and `property_names` for the six canonical property names. The Publisher
+owns only the publication states `Publisher Pending` and `Ready`; it does not accept a workflow
+state or enumerate the repository's workflow vocabulary. Unknown keys and invalid structural types
+fail before mutation.
 
-The configured database is resolved and its schema validated before a task mutation. The publisher does not inspect a parent page, discover a same-named database, or create a destination database. Its required durable task schema is exactly `Identifier`, `Title`, `State`, `Priority`, `Labels`, and self-relation `Blocked By`. Existing legacy or user properties are not deleted and are ignored. Page ID, URL, and timestamps remain Notion provider metadata; Symphony-only values are not publisher properties.
+The configured database is resolved and its schema validated before a task mutation. The publisher does not inspect a parent page, discover a same-named database, or create a destination database. Its required durable task schema is exactly `Identifier`, `Title`, `State` (`rich_text`), `Priority`, `Labels`, and self-relation `Blocked By`. Existing legacy or user properties are not deleted and are ignored. Page ID, URL, and timestamps remain Notion provider metadata; Symphony-only values are not publisher properties.
 
 For a successful publication the page has exactly one direct child page named `Plan` and one named `Workpad`. The `Plan` page contains the complete non-empty accepted Plan as paragraph content; `Workpad` starts empty. This replaces the old body-heading convention—there is no `# Plan`/`# Workpad` boundary in the task body. Native Notion comments remain separate.
 
-The parent page is first created with `State: Publisher Pending`. That state is publisher recovery state, not a task-lifecycle state. The publisher creates and validates both child pages before changing State to the requested initial state. Retrying finds a sole `Publisher Pending` match and repairs it without duplicating either page; a sole completed match is rejected as a duplicate. Two or more matching identifiers always fail with an Identifier invariant violation, without selecting or changing any match. Completed tasks are not reclassified or repaired if a human later changes their child-page structure.
+The parent page is first created with `State: Publisher Pending`. That state is publisher recovery
+state, not a task-lifecycle state. The publisher creates and validates both child pages before
+changing State to the fixed publication handoff `Ready`. Retrying finds a sole `Publisher Pending`
+match and repairs it without duplicating either page; a sole completed match is rejected as a
+duplicate. Two or more matching identifiers always fail with an Identifier invariant violation,
+without selecting or changing any match. Completed tasks are not reclassified or repaired if a
+human later changes their child-page structure.

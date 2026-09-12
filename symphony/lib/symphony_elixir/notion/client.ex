@@ -9,7 +9,7 @@ defmodule SymphonyElixir.Notion.Client do
   @required %{
     "Identifier" => ["rich_text", "title"],
     "Title" => ["title"],
-    "State" => ["select"],
+    "State" => ["rich_text"],
     "Priority" => ["number"],
     "Labels" => ["multi_select"],
     "Blocked By" => ["relation"]
@@ -140,7 +140,14 @@ defmodule SymphonyElixir.Notion.Client do
   defp query_states(source, states, settings, fun), do: query_states(source, states, settings, fun, nil, [])
 
   defp query_states(source, states, settings, fun, cursor, acc) do
-    body = %{"page_size" => 100, "filter" => %{"or" => Enum.map(states, &%{"property" => "State", "select" => %{"equals" => &1}})}} |> maybe_cursor(cursor)
+    body =
+      %{
+        "page_size" => 100,
+        "filter" => %{
+          "or" => Enum.map(states, &%{"property" => "State", "rich_text" => %{"equals" => &1}})
+        }
+      }
+      |> maybe_cursor(cursor)
 
     with {:ok, response} <- fun.("POST", "/data_sources/#{source}/query", %{}, body, settings),
          {:ok, results, next} <- pagination(response) do
@@ -266,8 +273,8 @@ defmodule SymphonyElixir.Notion.Client do
 
   defp text_property(_, _), do: {:error, :invalid_property}
 
-  defp state_property(%{"type" => "select"} = p) do
-    case get_in(p, ["select", "name"]) do
+  defp state_property(%{"type" => "rich_text", "rich_text" => values}) when is_list(values) do
+    case Enum.map_join(values, "", &Map.get(&1, "plain_text", "")) do
       v when is_binary(v) and v != "" -> {:ok, v}
       _ -> {:error, :invalid_state}
     end
@@ -286,7 +293,7 @@ defmodule SymphonyElixir.Notion.Client do
        end)}
 
   defp labels_property(_), do: {:error, :invalid_labels}
-  defp value_state(%{"type" => "select"} = p), do: get_in(p, ["select", "name"])
+  defp value_state(%{"type" => "rich_text", "rich_text" => values}) when is_list(values), do: Enum.map_join(values, "", &Map.get(&1, "plain_text", ""))
   defp value_state(_), do: nil
   defp child_title(%{"type" => "child_page", "child_page" => %{"title" => t}}), do: t
   defp child_title(_), do: nil

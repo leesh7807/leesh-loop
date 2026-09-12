@@ -4,7 +4,7 @@ import { NotionClient } from "../src/notion.js";
 import { DEFAULT_POLICY, PUBLISHER_PENDING_STATE } from "../src/core.js";
 
 const completeSchema = (dataSource = "ds", extra = {}) => ({ properties: {
-  [DEFAULT_POLICY.identifier]: { type: "rich_text" }, [DEFAULT_POLICY.title]: { type: "title" }, [DEFAULT_POLICY.state]: { type: "select" }, [DEFAULT_POLICY.priority]: { type: "number" }, [DEFAULT_POLICY.labels]: { type: "multi_select" }, [DEFAULT_POLICY.blockedBy]: { type: "relation", relation: { data_source_id: dataSource, single_property: {} } }, ...extra,
+  [DEFAULT_POLICY.identifier]: { type: "rich_text" }, [DEFAULT_POLICY.title]: { type: "title" }, [DEFAULT_POLICY.state]: { type: "rich_text" }, [DEFAULT_POLICY.priority]: { type: "number" }, [DEFAULT_POLICY.labels]: { type: "multi_select" }, [DEFAULT_POLICY.blockedBy]: { type: "relation", relation: { data_source_id: dataSource, single_property: {} } }, ...extra,
 } });
 
 class RequestFake extends NotionClient {
@@ -15,18 +15,28 @@ class RequestFake extends NotionClient {
 
 test("schema bootstraps only six canonical metadata properties and preserves extras", async () => {
   const extra = { Description: { type: "rich_text" }, "Plan Source": { type: "url" }, Custom: { type: "checkbox" } };
-  const client = new RequestFake([{ data_sources: [{ id: "ds" }] }, completeSchema("ds", extra)]);
+  const client = new RequestFake([{ data_sources: [{ id: "ds" }] }, completeSchema("ds", extra), { data_sources: [{ id: "ds" }] }, completeSchema("ds", extra)]);
   assert.equal(await client.ensureDatabase("db", DEFAULT_POLICY), "ds");
-  assert.equal(client.calls.length, 2);
+  assert.equal(await client.ensureDatabase("db", DEFAULT_POLICY), "ds");
+  assert.equal(client.calls.length, 4);
   const missing = new RequestFake([{ data_sources: [{ id: "ds" }] }, { properties: { Title: { type: "title" } } }, {}]);
   await missing.ensureDatabase("db", DEFAULT_POLICY);
   assert.deepEqual(Object.keys(missing.calls[2].body.properties).sort(), ["Blocked By", "Identifier", "Labels", "Priority", "State"]);
+  assert.deepEqual(missing.calls[2].body.properties.State, { rich_text: {} });
+  assert.equal("options" in missing.calls[2].body.properties.State, false);
   assert.equal("Description" in missing.calls[2].body.properties, false);
 });
 
+test("incompatible select State surfaces fail without schema migration", async () => {
+  const client = new RequestFake([{ data_sources: [{ id: "ds" }] }, completeSchema("ds", { State: { type: "select", select: { options: [] } } })]);
+  await assert.rejects(client.ensureDatabase("db", DEFAULT_POLICY), /property State has the wrong type/);
+  assert.equal(client.calls.length, 2);
+  assert.equal(client.calls.some((call) => call.method === "PATCH"), false);
+});
+
 test("identifier lookup distinguishes pending, completed, and ambiguity without body inspection", async () => {
-  const pending = { id: "pending", properties: { State: { select: { name: PUBLISHER_PENDING_STATE } } } };
-  const completed = { id: "done", properties: { State: { select: { name: "Ready" } } } };
+  const pending = { id: "pending", properties: { State: { rich_text: [{ plain_text: PUBLISHER_PENDING_STATE }] } } };
+  const completed = { id: "done", properties: { State: { rich_text: [{ plain_text: "Rework" }] } } };
   const onePending = new RequestFake([{ results: [pending] }]);
   assert.deepEqual(await onePending.findPublication("ds", DEFAULT_POLICY, "PLAN-X"), { pageId: "pending", url: undefined, complete: false });
   assert.equal(onePending.calls.some((call) => call.path.includes("/children")), false);
@@ -34,6 +44,12 @@ test("identifier lookup distinguishes pending, completed, and ambiguity without 
   assert.deepEqual(await oneCompleted.findPublication("ds", DEFAULT_POLICY, "PLAN-X"), { pageId: "done", url: undefined, complete: true });
   const ambiguous = new RequestFake([{ results: [pending, completed] }]);
   await assert.rejects(ambiguous.findPublication("ds", DEFAULT_POLICY, "PLAN-X"), /Identifier invariant violation/);
+});
+
+test("finalization writes the fixed Ready state as rich text", async () => {
+  const client = new RequestFake([{}]);
+  await client.finalizePublication("page", DEFAULT_POLICY);
+  assert.deepEqual(client.calls[0].body, { properties: { State: { rich_text: [{ type: "text", text: { content: "Ready" } }] } } });
 });
 
 class StructureFake extends NotionClient {

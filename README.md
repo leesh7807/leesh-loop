@@ -48,11 +48,14 @@ There is no separate central project manager for coordinating multiple repositor
 
 ## How It Works
 
-The Publisher takes a plan written as plain text or Markdown, normalizes it into the Leesh Loop task model, and publishes it to Notion.
+The Publisher takes a plan written as plain text or Markdown, normalizes it into the canonical Leesh Loop task representation, and publishes it to Notion.
 
 Notion acts as the durable execution surface for tasks and workflow state.
 
-Because the Publisher maps plans into a defined task structure and state vocabulary, it is more than a document copy tool. It turns a plan into the execution surface used by the rest of the loop.
+The Publisher owns publication state only: it creates incomplete tasks as `Publisher Pending` and
+sets `State` to `Ready` after the canonical representation is complete and validated. The Notion
+`State` property stores provider-native strings as free-form rich text; the repository's workflow
+state vocabulary remains in `WORKFLOW.md` and Symphony.
 
 Symphony finds runnable tasks in Notion and runs agents in isolated workspaces.
 
@@ -76,15 +79,27 @@ Normalize
 Notion Tasks
 ```
 
-Rather than copying plan content into free-form Notion pages, it creates or updates records according to the task schema, relations, and state vocabulary used by Leesh Loop.
+Rather than copying plan content into free-form Notion pages, it creates the shared canonical task
+representation: durable `Identifier`, `Title`, `Priority`, `Labels`, and `Blocked By` metadata,
+plus exactly one direct `Plan` child page and one direct `Workpad` child page. The Publisher and
+Notion adapter share this representation.
+
+These are the Leesh Loop integration contracts: successful publication hands work to Symphony in
+`Ready`; changing that handoff requires coordinated Publisher and workflow changes; and the
+Publisher/adapter representation remains shared. Free-form `State` removes schema-option coupling
+for ordinary workflow-state additions or renames, but it does not make the complete lifecycle
+independently configurable.
 
 ## Symphony
 
-Task execution uses OpenAI Symphony.
+Task execution uses [OpenAI Symphony](https://github.com/openai/symphony).
 
-Symphony finds runnable work from Notion task state, creates an isolated workspace for each task, and starts an agent worker.
+At a high level, Symphony polls the configured tracker for runnable work, manages isolated
+workspaces, and runs agent workers against the repository.
 
-Repository-specific worker behavior is defined by `WORKFLOW.md`; Symphony continues to own dispatch, retry, reconciliation, and workspace/session lifecycle.
+Repository-specific worker behavior and the exact state vocabulary are defined by `WORKFLOW.md`.
+Scheduling, dispatch, retry, reconciliation, workspace/session lifecycle, and active/terminal
+state semantics are upstream Symphony behavior; see the [upstream Symphony specification](https://github.com/openai/symphony/blob/main/SPEC.md) for that detailed runtime contract.
 
 ## Browser UI
 

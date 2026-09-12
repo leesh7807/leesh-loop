@@ -4,7 +4,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config.js";
-import { buildPlanBlocks, buildTaskProperties, chunkText, DEFAULT_POLICY, extractPlanTitle, notionId, PublicationError, resolvePublishDatabase, validatePlanTitle } from "../src/core.js";
+import { buildPlanBlocks, buildTaskProperties, chunkText, DEFAULT_POLICY, extractPlanTitle, notionId, PublicationError, PUBLISHER_PENDING_STATE, resolvePublishDatabase, validatePlanTitle } from "../src/core.js";
 
 test("six-property task metadata and chunked Plan content are canonical", () => {
   const properties = buildTaskProperties(DEFAULT_POLICY, "PLAN-X", "Title");
@@ -12,6 +12,8 @@ test("six-property task metadata and chunked Plan content are canonical", () => 
   assert.equal("Description" in properties, false);
   assert.equal("Plan Source" in properties, false);
   assert.equal("branch_name" in properties, false);
+  assert.deepEqual(properties.State, { rich_text: [{ type: "text", text: { content: PUBLISHER_PENDING_STATE } }] });
+  assert.equal("bootstrapStates" in DEFAULT_POLICY, false);
   const blocks = buildPlanBlocks("x".repeat(4000));
   assert.equal(blocks.every((block: any) => block.type === "paragraph"), true);
   assert.equal(blocks.map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "x".repeat(4000));
@@ -19,9 +21,11 @@ test("six-property task metadata and chunked Plan content are canonical", () => 
 
 test("typed config keeps only durable task policy", async () => {
   const directory = await mkdtemp(join(tmpdir(), "publisher-")); const file = join(directory, "c.json");
-  await writeFile(file, JSON.stringify({ state: "Unlisted", labels: [" symphony "], priority: null, property_names: { blocked_by: "Dependencies" } }));
+  await writeFile(file, JSON.stringify({ labels: [" symphony "], priority: null, property_names: { blocked_by: "Dependencies" } }));
   const { policy } = await loadConfig(file);
-  assert.equal(policy.defaultState, "Unlisted"); assert.equal(policy.defaultPriority, null); assert.deepEqual(policy.defaultLabels, ["symphony"]); assert.equal(policy.blockedBy, "Dependencies");
+  assert.equal(policy.defaultPriority, null); assert.deepEqual(policy.defaultLabels, ["symphony"]); assert.equal(policy.blockedBy, "Dependencies");
+  await writeFile(file, JSON.stringify({ state: "Rework" }));
+  await assert.rejects(loadConfig(file), /unknown configuration key/);
   await writeFile(file, JSON.stringify({ plan_source: "https://example.com" }));
   await assert.rejects(loadConfig(file), /unknown configuration key/);
 });

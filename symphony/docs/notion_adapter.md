@@ -16,7 +16,7 @@ tracker:
 
 The database URL identifies a database container. Symphony retrieves its child data sources and
 chooses exactly one whose schema has `Identifier` (rich text or title), `Title` (title), `State`
-(select), `Priority` (number), `Labels` (multi-select), and `Blocked By`
+(rich text), `Priority` (number), `Labels` (multi-select), and `Blocked By`
 (relation). Zero or multiple compatible sources are configuration errors; a display name, view, or
 enumeration order is never a tie breaker. The selected data source is the configured tracker scope.
 
