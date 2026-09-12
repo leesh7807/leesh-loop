@@ -1,4 +1,4 @@
-# 20260908-chatgpt-shot-v1
+# 2026-09-08-chatgpt-shot-v1
 
 ## Objective
 

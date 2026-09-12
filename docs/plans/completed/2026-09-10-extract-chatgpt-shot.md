@@ -1,4 +1,4 @@
-# Extract `chatgpt-shot`
+# 2026-09-10-extract-chatgpt-shot
 
 ## Objective
 
