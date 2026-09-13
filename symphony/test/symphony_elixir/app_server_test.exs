@@ -1589,9 +1589,8 @@ defmodule SymphonyElixir.AppServerTest do
 
       expected_turn_policy = %{
         "type" => "workspaceWrite",
-        "writableRoots" => [remote_workspace],
-        "readOnlyAccess" => %{"type" => "fullAccess"},
-        "networkAccess" => false,
+        "writableRoots" => [remote_workspace, Path.join(remote_workspace, ".git")],
+        "networkAccess" => true,
         "excludeTmpdirEnvVar" => false,
         "excludeSlashTmp" => false
       }

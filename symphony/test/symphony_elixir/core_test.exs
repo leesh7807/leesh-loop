@@ -2079,10 +2079,12 @@ defmodule SymphonyElixir.CoreTest do
                  |> Jason.decode!()
                  |> then(fn payload ->
                    expected_approval_policy = %{
-                     "reject" => %{
-                       "sandbox_approval" => true,
-                       "rules" => true,
-                       "mcp_elicitations" => true
+                     "granular" => %{
+                       "sandbox_approval" => false,
+                       "rules" => false,
+                       "mcp_elicitations" => false,
+                       "request_permissions" => false,
+                       "skill_approval" => false
                      }
                    }
 
@@ -2098,9 +2100,8 @@ defmodule SymphonyElixir.CoreTest do
 
       expected_turn_sandbox_policy = %{
         "type" => "workspaceWrite",
-        "writableRoots" => [canonical_workspace],
-        "readOnlyAccess" => %{"type" => "fullAccess"},
-        "networkAccess" => false,
+        "writableRoots" => [canonical_workspace, Path.join(canonical_workspace, ".git")],
+        "networkAccess" => true,
         "excludeTmpdirEnvVar" => false,
         "excludeSlashTmp" => false
       }
@@ -2112,10 +2113,12 @@ defmodule SymphonyElixir.CoreTest do
                  |> Jason.decode!()
                  |> then(fn payload ->
                    expected_approval_policy = %{
-                     "reject" => %{
-                       "sandbox_approval" => true,
-                       "rules" => true,
-                       "mcp_elicitations" => true
+                     "granular" => %{
+                       "sandbox_approval" => false,
+                       "rules" => false,
+                       "mcp_elicitations" => false,
+                       "request_permissions" => false,
+                       "skill_approval" => false
                      }
                    }
 

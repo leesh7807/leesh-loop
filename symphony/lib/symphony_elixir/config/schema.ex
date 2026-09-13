@@ -182,10 +182,12 @@ defmodule SymphonyElixir.Config.Schema do
 
       field(:approval_policy, StringOrMap,
         default: %{
-          "reject" => %{
-            "sandbox_approval" => true,
-            "rules" => true,
-            "mcp_elicitations" => true
+          "granular" => %{
+            "sandbox_approval" => false,
+            "rules" => false,
+            "mcp_elicitations" => false,
+            "request_permissions" => false,
+            "skill_approval" => false
           }
         }
       )
@@ -591,9 +593,8 @@ defmodule SymphonyElixir.Config.Schema do
   defp default_turn_sandbox_policy(workspace) do
     %{
       "type" => "workspaceWrite",
-      "writableRoots" => [workspace],
-      "readOnlyAccess" => %{"type" => "fullAccess"},
-      "networkAccess" => false,
+      "writableRoots" => [workspace, Path.join(workspace, ".git")],
+      "networkAccess" => true,
       "excludeTmpdirEnvVar" => false,
       "excludeSlashTmp" => false
     }

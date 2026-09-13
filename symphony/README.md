@@ -142,20 +142,25 @@ Notes:
 - `tracker.required_labels` is optional. When set, an issue must have every
   configured label to dispatch or continue running. Label matching ignores
   case and surrounding whitespace. A blank configured label matches no issue.
-- Safer Codex defaults are used when policy fields are omitted:
-  - `codex.approval_policy` defaults to `{"reject":{"sandbox_approval":true,"rules":true,"mcp_elicitations":true}}`
+- Unattended Codex defaults are used when policy fields are omitted:
+  - `codex.approval_policy` defaults to a granular policy with `sandbox_approval`, `rules`,
+    `mcp_elicitations`, `request_permissions`, and `skill_approval` all set to `false`
   - `codex.thread_sandbox` defaults to `workspace-write`
-  - `codex.turn_sandbox_policy` defaults to a `workspaceWrite` policy rooted at the current issue workspace
+  - `codex.turn_sandbox_policy` defaults to a `workspaceWrite` policy whose writable roots are the
+    current issue workspace and its `.git` directory, with network access enabled
 - `codex.turn_timeout_ms` is the maximum silence interval while a turn is streaming. Each
   app-server update resets it; it is not a total turn runtime cap.
-- Supported `codex.approval_policy` values depend on the targeted Codex app-server version. In the current local Codex schema, string values include `untrusted`, `on-failure`, `on-request`, and `never`, and object-form `reject` is also supported.
+- Supported `codex.approval_policy` values depend on the targeted Codex app-server version. In the
+  current Codex schema, string values include `untrusted`, `on-request`, and `never`, and the
+  granular object form is supported.
 - Supported `codex.thread_sandbox` values: `read-only`, `workspace-write`, `danger-full-access`.
 - When `codex.turn_sandbox_policy` is set explicitly, Symphony passes the map through to Codex
   unchanged. Compatibility then depends on the targeted Codex app-server version rather than local
   Symphony validation.
-- Workflows that run package managers or other commands that resolve external hosts should set
-  `networkAccess: true` in `codex.turn_sandbox_policy`; otherwise DNS/network access may be denied
-  by the Codex turn sandbox.
+- Workflows that run package managers or other commands that resolve external hosts receive
+  `networkAccess: true` in the default turn sandbox policy. An explicit
+  `codex.turn_sandbox_policy` remains a complete override and is passed through unchanged; such
+  workflows must include any required network access themselves.
 - `agent.max_turns` caps how many back-to-back Codex turns Symphony will run in a single agent
   invocation when a turn completes normally but the issue is still in an active state. Default: `20`.
 - If the Markdown body is blank, Symphony uses a default prompt template that includes the issue
