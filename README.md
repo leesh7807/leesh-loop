@@ -119,10 +119,11 @@ Normalize
 Notion Tasks
 ```
 
-Rather than copying plan content into free-form Notion pages, it creates the shared canonical task
-representation: durable `Identifier`, `Title`, `Priority`, `Labels`, and `Blocked By` metadata,
-plus exactly one direct `Plan` child page and one direct `Workpad` child page. The Publisher and
-Notion adapter share this representation.
+It creates the shared canonical task representation: durable `Identifier`, `Title`, `State`,
+`Priority`, `Labels`, and `Blocked By` metadata plus an explicit `Plan` relation. The task page
+body is the mutable Workpad; the relation opens a separate locked Plan page containing the complete
+accepted Plan. The Publisher and Notion adapter share this representation, and comments remain a
+separate human-review surface.
 
 These are the Leesh Loop integration contracts: successful publication hands work to Symphony in
 `Ready`; changing that handoff requires coordinated Publisher and workflow changes; and the

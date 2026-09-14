@@ -1,18 +1,57 @@
 # Notion plan publisher
 
-The publisher core is an in-process capability. It receives the complete UTF-8 Plan content, a resolved Notion database URL, a Notion client, resolved publication policy, and (when the Plan has no Markdown H1) a caller-resolved fallback title:
+The publisher core receives complete Plan content, an explicit Notion database
+URL, a Notion client, resolved policy, and an optional fallback title:
 
 ```ts
 publish({ plan, databaseUrl, fallbackTitle, client, config })
 ```
 
-The core owns Notion publication semantics: identifier and title derivation, schema validation, duplicate detection, incomplete-publication repair, child-page creation, and finalization. A heading-less Plan must supply `fallbackTitle`; this preserves a meaningful title without making a path part of the core contract. It does not accept paths or discover a destination through `.env`, `process.env`, `WORKFLOW.md`, Symphony, or the Notion adapter.
+The URL identifies a Notion database container. The publisher reads every child
+data-source schema and structurally resolves one task data source. It ensures a
+sibling Plan data source exists under the same container, then ensures that the
+task data source's `Plan` relation targets that Plan data source. Display names
+and enumeration order are not identity boundaries; ambiguous task or Plan
+sources fail.
 
-Authority and input acquisition belong to the caller. The upper operator owns the authoritative project-level Notion database binding and may separately materialize the matching Symphony tracker binding in `WORKFLOW.md`. Keeping those values synchronized is an operator/bootstrap responsibility, not a publisher responsibility.
+The task data source contains the durable task properties:
 
-For a given `(database destination, Plan content)` pair, concurrent calls must be serialized by the operator across processes or hosts. Notion has no unique constraint or transaction spanning publication lookup and task creation. The core serializes concurrent calls within one process; it does not provide a distributed lock. Duplicate detection is deterministic only within this single-writer boundary.
+- `Identifier`
+- `Title`
+- `State`
+- `Priority`
+- `Labels`
+- self-relation `Blocked By`
+- relation `Plan` to the Plan data source
 
-The CLI is one convenience caller. It reads a file and configuration, resolves the runtime credential, derives a filename fallback title only for heading-less Plans, then forwards those semantic values and the explicit destination to the same core:
+The Plan data source contains only the accepted snapshot identity fields
+`Identifier` and `Title`. A Plan page and its task share the same publication
+`Identifier`. The relation selects the Plan page; equal identifiers prove that
+the selected page belongs to the same publication.
+
+The task page body is the Workpad. It starts empty and is never included in
+`Tracker.Issue.description`. The complete accepted Plan is written only to the
+separate Plan page body. After the Plan is completely written and validated,
+the publisher locks that page with the Notion page-lock API. No worker or
+adapter path mutates Plan content.
+
+Publication is recoverable through `Publisher Pending`:
+
+1. create or recover the pending task by its derived Identifier;
+2. create or recover one matching Plan page in the Plan data source;
+3. complete missing Plan content while publication is pending;
+4. lock and validate the Plan page;
+5. set the task `Plan` relation to exactly that page;
+6. validate task/Plan source ownership, equal Identifiers, and complete content;
+7. finalize the task to `Ready`.
+
+Retries reuse a matching Plan page. Multiple task or Plan identities, an
+existing pending relation to another publication, incomplete or conflicting
+Plan content, and malformed schemas fail. A completed publication is a
+duplicate and is never repaired or rewritten. The publisher creates no
+`Plan` or `Workpad` child page.
+
+The CLI is a convenience caller:
 
 ```sh
 cd notion_publisher && npm install && npm run build
@@ -22,22 +61,6 @@ node dist/src/cli.js \
   --database-url https://www.notion.so/Tasks-3d28a26586258052b3ecccc9c33787e3
 ```
 
-`--plan`, `--config`, and `--database-url` are explicit CLI inputs. The database URL is not read from `NOTION_PUBLISH_DATABASE_URL`; defining that environment variable cannot override the value supplied to the publisher. The CLI may load `NOTION_TOKEN` from the process environment or a local `.env` in its current directory as a runtime-secret convenience.
-
-Optional policy settings in the JSON configuration are `priority` (default `3`, or `null`),
-`labels` (default `[]`), and `property_names` for the six canonical property names. The Publisher
-owns only the publication states `Publisher Pending` and `Ready`; it does not accept a workflow
-state or enumerate the repository's workflow vocabulary. Unknown keys and invalid structural types
-fail before mutation.
-
-The configured database is resolved and its schema validated before a task mutation. The publisher does not inspect a parent page, discover a same-named database, or create a destination database. Its required durable task schema is exactly `Identifier`, `Title`, `State` (`rich_text`), `Priority`, `Labels`, and self-relation `Blocked By`. Existing legacy or user properties are not deleted and are ignored. Page ID, URL, and timestamps remain Notion provider metadata; Symphony-only values are not publisher properties.
-
-For a successful publication the page has exactly one direct child page named `Plan` and one named `Workpad`. The `Plan` page contains the complete non-empty accepted Plan as paragraph content; `Workpad` starts empty. This replaces the old body-heading convention—there is no `# Plan`/`# Workpad` boundary in the task body. Native Notion comments remain separate.
-
-The parent page is first created with `State: Publisher Pending`. That state is publisher recovery
-state, not a task-lifecycle state. The publisher creates and validates both child pages before
-changing State to the fixed publication handoff `Ready`. Retrying finds a sole `Publisher Pending`
-match and repairs it without duplicating either page; a sole completed match is rejected as a
-duplicate. Two or more matching identifiers always fail with an Identifier invariant violation,
-without selecting or changing any match. Completed tasks are not reclassified or repaired if a
-human later changes their child-page structure.
+Comments remain Notion comments attached to the task page. They are a separate
+human-review input surface and are not merged into Workpad, Plan, or
+`Tracker.Issue.description`.

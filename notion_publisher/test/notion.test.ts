@@ -1,94 +1,145 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { NotionClient } from "../src/notion.js";
-import { DEFAULT_POLICY, PUBLISHER_PENDING_STATE } from "../src/core.js";
+import { DEFAULT_POLICY, PLAN_PROPERTY, PUBLISHER_PENDING_STATE } from "../src/core.js";
 
-const completeSchema = (dataSource = "ds", extra = {}) => ({ properties: {
-  [DEFAULT_POLICY.identifier]: { type: "rich_text" }, [DEFAULT_POLICY.title]: { type: "title" }, [DEFAULT_POLICY.state]: { type: "rich_text" }, [DEFAULT_POLICY.priority]: { type: "number" }, [DEFAULT_POLICY.labels]: { type: "multi_select" }, [DEFAULT_POLICY.blockedBy]: { type: "relation", relation: { data_source_id: dataSource, single_property: {} } }, ...extra,
-} });
+const planSchema = { properties: { Identifier: { type: "rich_text" }, Title: { type: "title" } } };
 
 class RequestFake extends NotionClient {
   calls: any[] = [];
   constructor(private responses: any[]) { super("token"); }
-  override async request(method: string, path: string, body?: unknown) { this.calls.push({ method, path, body }); const response = this.responses.shift(); if (response instanceof Error) throw response; return response; }
+  override async request(method: string, path: string, body?: unknown) {
+    this.calls.push({ method, path, body });
+    const response = this.responses.shift();
+    if (response instanceof Error) throw response;
+    return response;
+  }
 }
 
-test("schema bootstraps only six canonical metadata properties and preserves extras", async () => {
-  const extra = { Description: { type: "rich_text" }, "Plan Source": { type: "url" }, Custom: { type: "checkbox" } };
-  const client = new RequestFake([{ data_sources: [{ id: "ds" }] }, completeSchema("ds", extra), { data_sources: [{ id: "ds" }] }, completeSchema("ds", extra)]);
-  assert.equal(await client.ensureDatabase("db", DEFAULT_POLICY), "ds");
-  assert.equal(await client.ensureDatabase("db", DEFAULT_POLICY), "ds");
-  assert.equal(client.calls.length, 4);
-  const missing = new RequestFake([{ data_sources: [{ id: "ds" }] }, { properties: { Title: { type: "title" } } }, {}]);
-  await missing.ensureDatabase("db", DEFAULT_POLICY);
-  assert.deepEqual(Object.keys(missing.calls[2].body.properties).sort(), ["Blocked By", "Identifier", "Labels", "Priority", "State"]);
-  assert.deepEqual(missing.calls[2].body.properties.State, { rich_text: {} });
-  assert.equal("options" in missing.calls[2].body.properties.State, false);
-  assert.equal("Description" in missing.calls[2].body.properties, false);
+test("schema bootstrap creates a distinct Plan source and wires the explicit relation", async () => {
+  const task = { id: "task-source", properties: oldTaskSchema() };
+  const client = new RequestFake([
+    { data_sources: [{ id: "task-source" }] },
+    task,
+    { id: "plan-source", properties: planSchema.properties },
+    { properties: planSchema.properties },
+    {},
+    { properties: taskSchema("plan-source") }
+  ]);
+
+  assert.deepEqual(await client.ensureDatabase("db", DEFAULT_POLICY), { taskDataSourceId: "task-source", planDataSourceId: "plan-source" });
+  assert.deepEqual(client.calls.map((call) => [call.method, call.path]), [
+    ["GET", "/databases/db"],
+    ["GET", "/data_sources/task-source"],
+    ["POST", "/data_sources"],
+    ["GET", "/data_sources/plan-source"],
+    ["PATCH", "/data_sources/task-source"],
+    ["GET", "/data_sources/task-source"]
+  ]);
+  assert.deepEqual(client.calls[2].body, {
+    parent: { database_id: "db" },
+    title: [{ type: "text", text: { content: "Plans" } }],
+    properties: { Identifier: { rich_text: {} }, Title: { title: {} } }
+  });
+  assert.deepEqual(client.calls[4].body.properties.Plan, { relation: { data_source_id: "plan-source", single_property: {} } });
 });
 
-test("incompatible select State surfaces fail without schema migration", async () => {
-  const client = new RequestFake([{ data_sources: [{ id: "ds" }] }, completeSchema("ds", { State: { type: "select", select: { options: [] } } })]);
-  await assert.rejects(client.ensureDatabase("db", DEFAULT_POLICY), /property State has the wrong type/);
-  assert.equal(client.calls.length, 2);
+test("existing canonical sources are selected structurally and extras are preserved", async () => {
+  const client = new RequestFake([
+    { data_sources: [{ id: "plan-source", name: "Tasks" }, { id: "task-source", name: "Not Plans" }] },
+    { properties: planSchema.properties, custom: true },
+    { properties: taskSchema("plan-source"), custom: true }
+  ]);
+
+  assert.deepEqual(await client.ensureDatabase("db", DEFAULT_POLICY), { taskDataSourceId: "task-source", planDataSourceId: "plan-source" });
   assert.equal(client.calls.some((call) => call.method === "PATCH"), false);
 });
 
-test("identifier lookup distinguishes pending, completed, and ambiguity without body inspection", async () => {
-  const pending = { id: "pending", properties: { State: { rich_text: [{ plain_text: PUBLISHER_PENDING_STATE }] } } };
-  const completed = { id: "done", properties: { State: { rich_text: [{ plain_text: "Rework" }] } } };
-  const onePending = new RequestFake([{ results: [pending] }]);
-  assert.deepEqual(await onePending.findPublication("ds", DEFAULT_POLICY, "PLAN-X"), { pageId: "pending", url: undefined, complete: false });
+test("a Plan source with arbitrary extra properties is not structurally canonical", async () => {
+  const client = new RequestFake([
+    { data_sources: [{ id: "task-source" }, { id: "foreign-source" }] },
+    { properties: taskSchema("plan-source") },
+    { properties: { ...planSchema.properties, Notes: { type: "rich_text" } } },
+    { id: "plan-source", properties: planSchema.properties },
+    { properties: planSchema.properties }
+  ]);
+
+  assert.deepEqual(await client.ensureDatabase("db", DEFAULT_POLICY), { taskDataSourceId: "task-source", planDataSourceId: "plan-source" });
+  assert.equal(client.calls.some((call) => call.method === "POST" && call.path === "/data_sources"), true);
+});
+
+test("multiple task or Plan sources fail without heuristic selection", async () => {
+  const taskSources = new RequestFake([
+    { data_sources: [{ id: "task-a" }, { id: "task-b" }, { id: "plan-source" }] },
+    { properties: taskSchema("plan-source", "task-a") },
+    { properties: taskSchema("plan-source", "task-b") },
+    { properties: planSchema.properties }
+  ]);
+  await assert.rejects(taskSources.ensureDatabase("db", DEFAULT_POLICY), /multiple structurally compatible task/);
+
+  const planSources = new RequestFake([
+    { data_sources: [{ id: "task-source" }, { id: "plan-a" }, { id: "plan-b" }] },
+    { properties: taskSchema("plan-a") },
+    { properties: planSchema.properties },
+    { properties: planSchema.properties }
+  ]);
+  await assert.rejects(planSources.ensureDatabase("db", DEFAULT_POLICY), /multiple structurally compatible Plan/);
+});
+
+test("identifier lookup never inspects task body and distinguishes pending from completed", async () => {
+  const pending = { id: "pending", properties: { State: { type: "rich_text", rich_text: [{ plain_text: PUBLISHER_PENDING_STATE }] } } };
+  const completed = { id: "done", properties: { State: { type: "rich_text", rich_text: [{ plain_text: "Rework" }] } } };
+  const onePending = new RequestFake([{ results: [pending], has_more: false }]);
+  assert.deepEqual(await onePending.findPublication("task-source", DEFAULT_POLICY, "PLAN-X"), { pageId: "pending", url: undefined, complete: false });
   assert.equal(onePending.calls.some((call) => call.path.includes("/children")), false);
-  const oneCompleted = new RequestFake([{ results: [completed] }]);
-  assert.deepEqual(await oneCompleted.findPublication("ds", DEFAULT_POLICY, "PLAN-X"), { pageId: "done", url: undefined, complete: true });
-  const ambiguous = new RequestFake([{ results: [pending, completed] }]);
-  await assert.rejects(ambiguous.findPublication("ds", DEFAULT_POLICY, "PLAN-X"), /Identifier invariant violation/);
+  const oneCompleted = new RequestFake([{ results: [completed], has_more: false }]);
+  assert.deepEqual(await oneCompleted.findPublication("task-source", DEFAULT_POLICY, "PLAN-X"), { pageId: "done", url: undefined, complete: true });
+  const malformedState = new RequestFake([{ results: [{ id: "malformed", properties: {} }], has_more: false }]);
+  await assert.rejects(malformedState.findPublication("task-source", DEFAULT_POLICY, "PLAN-X"), /malformed State/);
+  const ambiguous = new RequestFake([{ results: [pending, completed], has_more: false }]);
+  await assert.rejects(ambiguous.findPublication("task-source", DEFAULT_POLICY, "PLAN-X"), /Identifier invariant violation/);
 });
 
-test("finalization writes the fixed Ready state as rich text", async () => {
-  const client = new RequestFake([{}]);
-  await client.finalizePublication("page", DEFAULT_POLICY);
-  assert.deepEqual(client.calls[0].body, { properties: { State: { rich_text: [{ type: "text", text: { content: "Ready" } }] } } });
+test("finalization, relation wiring, and page locking use their provider-native operations", async () => {
+  const client = new RequestFake([{}, {}, {}]);
+  await client.lockPlanPage("plan-page");
+  await client.setTaskPlanRelation("task-page", "plan-page");
+  await client.finalizePublication("task-page", DEFAULT_POLICY);
+  assert.deepEqual(client.calls.map((call) => call.body), [
+    { is_locked: true },
+    { properties: { [PLAN_PROPERTY]: { relation: [{ id: "plan-page" }] } } },
+    { properties: { State: { rich_text: [{ type: "text", text: { content: "Ready" } }] } } }
+  ]);
 });
 
-class StructureFake extends NotionClient {
-  children = new Map<string, any[]>([["task", []]]); created: string[] = [];
-  override async listChildren(id: string) { return this.children.get(id) ?? []; }
-  override async request(method: string, path: string, body?: any) {
-    if (method === "POST" && path === "/pages") {
-      const title = body.properties.title.title[0].text.content; const id = title.toLowerCase(); const page = { id, type: "child_page", child_page: { title } };
-      this.children.get(body.parent.page_id)!.push(page); this.children.set(id, []); this.created.push(title); return { id };
-    }
-    throw new Error(`unexpected ${method} ${path}`);
-  }
-  override async appendBlocks(id: string, blocks: any[]) { this.children.get(id)!.push(...blocks.map((block) => ({ ...block, paragraph: block.paragraph && { rich_text: block.paragraph.rich_text.map((part: any) => ({ ...part, plain_text: part.text.content })) } }))); }
-}
-
-test("canonical representation creates independent Plan and Workpad pages and validates complete Plan", async () => {
-  const client = new StructureFake("token");
-  await client.ensureCanonicalRepresentation("task", "# Ship it\naccepted plan");
-  assert.deepEqual(client.created, ["Plan", "Workpad"]);
-  assert.deepEqual(client.children.get("task")!.map((page) => page.child_page.title), ["Plan", "Workpad"]);
-  assert.equal(client.children.get("plan")!.map((block: any) => block.paragraph.rich_text[0].plain_text).join(""), "# Ship it\naccepted plan");
-  assert.deepEqual(client.children.get("workpad"), []);
-  await client.ensureCanonicalRepresentation("task", "# Ship it\naccepted plan");
-  assert.deepEqual(client.created, ["Plan", "Workpad"]);
-});
-
-test("pending repair rejects duplicate surfaces or conflicting Plan content", async () => {
-  const client = new StructureFake("token");
-  client.children.set("task", [{ id: "plan-a", type: "child_page", child_page: { title: "Plan" } }, { id: "plan-b", type: "child_page", child_page: { title: "Plan" } }]);
-  await assert.rejects(client.ensureCanonicalRepresentation("task", "plan"), /multiple Plan/);
-  const conflict = new StructureFake("token");
-  conflict.children.set("task", [{ id: "plan", type: "child_page", child_page: { title: "Plan" } }]);
-  conflict.children.set("plan", [{ type: "paragraph", paragraph: { rich_text: [{ plain_text: "other" }] } }]);
-  await assert.rejects(conflict.ensureCanonicalRepresentation("task", "plan"), /differs/);
-});
-
-test("provider failure categories and pagination remain explicit", async () => {
+test("provider failures and malformed pagination remain explicit", async () => {
   for (const [status, message] of [[401, "authentication failure"], [403, "configured database is inaccessible"], [500, "provider/API failure"]] as const) {
     const client = new NotionClient("token", async () => new Response("failure", { status }));
     await assert.rejects(client.request("GET", "/databases/x"), new RegExp(message));
   }
+  const malformed = new RequestFake([{ results: [], has_more: true }]);
+  await assert.rejects(malformed.findPublication("task-source", DEFAULT_POLICY, "PLAN-X"), /omitted next_cursor/);
 });
+
+function oldTaskSchema() {
+  return {
+    Identifier: { type: "rich_text" },
+    Title: { type: "title" },
+    State: { type: "rich_text" },
+    Priority: { type: "number" },
+    Labels: { type: "multi_select" },
+    "Blocked By": { type: "relation", relation: { data_source_id: "task-source", single_property: {} } }
+  };
+}
+
+function taskSchema(planSource: string, taskSource = "task-source") {
+  return {
+    Identifier: { type: "rich_text" },
+    Title: { type: "title" },
+    State: { type: "rich_text" },
+    Priority: { type: "number" },
+    Labels: { type: "multi_select" },
+    "Blocked By": { type: "relation", relation: { data_source_id: taskSource } },
+    Plan: { type: "relation", relation: { data_source_id: planSource } }
+  };
+}
