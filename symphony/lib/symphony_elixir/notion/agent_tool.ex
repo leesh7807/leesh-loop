@@ -91,9 +91,19 @@ defmodule SymphonyElixir.Notion.AgentTool do
   defp text_chunks(<<>>, chunks), do: Enum.reverse(chunks)
 
   defp text_chunks(text, chunks) do
-    chunk = String.slice(text, 0, @max_text_chunk_length)
-    rest = binary_part(text, byte_size(chunk), byte_size(text) - byte_size(chunk))
+    {chunk, rest} = take_codepoints(text, @max_text_chunk_length, [])
     text_chunks(rest, [chunk | chunks])
+  end
+
+  defp take_codepoints(text, 0, codepoints),
+    do: {IO.iodata_to_binary(Enum.reverse(codepoints)), text}
+
+  defp take_codepoints(<<>>, _remaining, codepoints),
+    do: {IO.iodata_to_binary(Enum.reverse(codepoints)), <<>>}
+
+  defp take_codepoints(text, remaining, codepoints) do
+    {codepoint, rest} = String.next_codepoint(text)
+    take_codepoints(rest, remaining - 1, [codepoint | codepoints])
   end
 
   defp paragraph_blocks(chunks), do: paragraph_blocks(chunks, [])

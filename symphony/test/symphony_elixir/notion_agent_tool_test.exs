@@ -47,6 +47,16 @@ defmodule SymphonyElixir.Notion.AgentToolTest do
     assert Enum.all?(unicode_items, &(String.length(get_in(&1, ["text", "content"])) <= 2_000))
   end
 
+  test "chunking limits code points even when combining marks share one grapheme" do
+    text = "a" <> String.duplicate("\u0301", 2_001)
+    body = append_body(text)
+    contents = body |> rich_text_items() |> Enum.map(&get_in(&1, ["text", "content"]))
+
+    assert Enum.join(contents) == text
+    assert Enum.all?(contents, &(length(String.codepoints(&1)) <= 2_000))
+    assert byte_size(Jason.encode!(body)) <= 500_000
+  end
+
   test "paragraphs split only when the rich-text representation limit requires it" do
     text = String.duplicate("c", 2_000 * 100 + 1)
     body = append_body(text)
