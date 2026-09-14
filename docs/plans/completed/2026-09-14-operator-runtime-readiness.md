@@ -118,7 +118,7 @@ Verify through the intended bootstrap and dispatch paths, using representative r
 - Accepted the GitHub credential finding: public `ls-remote` does not prove that the credential
   selected by Git is accepted. Added an authenticated API probe using the exact helper-returned
   token before the HTTPS Git probe.
-- Applied commit: `d966d5bb29d93e487d5533d1d5c4c65d7356d7b4`.
+- Applied commit: `373ec42b254bb3d76f02f65611fdbf259268fdce`.
 - Verification: a stale first credential helper now fails bootstrap before `chatgpt-shot`; the
   valid host credential completes the full bootstrap and real smoke submit successfully.
 
