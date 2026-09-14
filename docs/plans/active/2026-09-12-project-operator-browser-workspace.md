@@ -42,4 +42,10 @@ Make Leesh Loop a runnable local project environment without turning externally 
 
 ## chatgpt-shot review log
 
-Pending implementation.
+### Round 1
+
+- Reviewed HEAD: `bc870b99ec0b5167ebc8c5482f6437088528e71c` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: dispatch authorization was externally observable before durable `runtime.json` reached `running`; the configured GitHub HTTPS target was omitted from bootstrap; browser fallback returned before confirming a process spawn.
+- Applied commit: pending.
+- Verification: pending post-fix Node UI/publisher/Symphony formatting and lifecycle-path checks.

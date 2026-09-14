@@ -73,10 +73,15 @@ function launch(command, args, env) { const child = spawn(command, args, { cwd: 
 async function waitFor(check, description) { for (let i = 0; i < 150; i += 1) { if (await check()) return; await sleep(100); } throw new Error(`timed out waiting for ${description}`); }
 async function openWindow(config, dashboard) {
   await ensureUi(config);
-  if (process.env.LEESH_LOOP_BROWSER_COMMAND) { spawn(process.env.LEESH_LOOP_BROWSER_COMMAND, [uiUrl(config), config.notion_database_url, dashboard], { detached: true, stdio: 'ignore' }).unref(); return; }
+  if (process.env.LEESH_LOOP_BROWSER_COMMAND) {
+    if (await spawnBrowser(process.env.LEESH_LOOP_BROWSER_COMMAND, [uiUrl(config), config.notion_database_url, dashboard])) return;
+    throw new Error(`could not launch ${process.env.LEESH_LOOP_BROWSER_COMMAND}`);
+  }
   const candidates = ['google-chrome', 'chromium', 'chromium-browser'];
-  for (const browser of candidates) { const child = spawn(browser, ['--new-window', uiUrl(config), config.notion_database_url, dashboard], { detached: true, stdio: 'ignore' }); child.on('error', () => {}); child.unref(); return; }
+  for (const browser of candidates) if (await spawnBrowser(browser, ['--new-window', uiUrl(config), config.notion_database_url, dashboard])) return;
+  throw new Error('no supported browser is available for the project window');
 }
+function spawnBrowser(command, args) { return new Promise(resolveBrowser => { const child = spawn(command, args, { detached: true, stdio: 'ignore' }); child.once('error', () => resolveBrowser(false)); child.once('spawn', () => { child.unref(); resolveBrowser(true); }); }); }
 function uiPort(config) { return Number(config.ui_port || 4310); }
 function uiUrl(config) { return `http://127.0.0.1:${uiPort(config)}`; }
 async function ensureUi(config) {
@@ -96,7 +101,7 @@ async function start(config) {
     try {
       const symphony = config.symphony_command || join(root, 'operator/app/run-symphony');
       const args = [join(root, 'operator/app/operator-bootstrap'), '--', symphony, '--port', String(port), '--i-understand-that-this-will-be-running-without-the-usual-guardrails', config.workflow_path];
-      const env = { ...process.env, SYMPHONY_WORKSPACE_ROOT: config.symphony_workspace_root, SYMPHONY_DISPATCH_BARRIER: 'closed', SYMPHONY_RUNTIME_ID: runtimeId, SYMPHONY_DISPATCH_AUTHORIZATION_FILE: p.authorization, SYMPHONY_DISPATCH_ACK_FILE: p.acknowledgement, SYMPHONY_OWNERSHIP_FILE: p.ownership };
+      const env = { ...process.env, SYMPHONY_WORKSPACE_ROOT: config.symphony_workspace_root, SYMPHONY_GITHUB_REPOSITORY_URL: config.github_repository_url || '', SYMPHONY_DISPATCH_BARRIER: 'closed', SYMPHONY_RUNTIME_ID: runtimeId, SYMPHONY_DISPATCH_AUTHORIZATION_FILE: p.authorization, SYMPHONY_DISPATCH_ACK_FILE: p.acknowledgement, SYMPHONY_OWNERSHIP_FILE: p.ownership };
       const pid = launch(join(root, 'operator/app/owned-symphony'), args, env);
       const ownedStarting = { ...starting, pid };
       await atomicJson(p.state, ownedStarting);
@@ -104,10 +109,11 @@ async function start(config) {
       const provisional = { ...ownedStarting, status: 'provisional' }; await atomicJson(p.state, provisional);
       await waitFor(() => runtimeObserved({ ...provisional, effective: identity }, false), 'Symphony observability');
       const committed = { ...provisional, status: 'committed-disabled' }; await atomicJson(p.state, committed);
-      await atomicJson(p.authorization, { state: 'running', runtime_id: runtimeId, published_at: new Date().toISOString() });
       const running = { ...committed, status: 'running', authorized_at: new Date().toISOString() }; await atomicJson(p.state, running);
+      await atomicJson(p.authorization, { state: 'running', runtime_id: runtimeId, published_at: new Date().toISOString() });
       await waitFor(() => runtimeObserved(running, true), 'dispatch acknowledgement');
-      await openWindow(config, identity.dashboard); return { reused: false, pid, dashboard: identity.dashboard };
+      try { await openWindow(config, identity.dashboard); return { reused: false, pid, dashboard: identity.dashboard }; }
+      catch (windowError) { return { reused: false, pid, dashboard: identity.dashboard, window_error: String(windowError.message || windowError) }; }
     } catch (error) { const state = await json(p.state); try { await terminate(state); await clear(config); } catch (cleanupError) { await atomicJson(p.state, { ...(state || starting), status: 'failed', cleanup_error: String(cleanupError) }); } throw error; }
   });
 }
