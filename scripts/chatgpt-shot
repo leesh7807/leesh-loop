@@ -1,0 +1,101 @@
+#!/bin/sh
+set -eu
+
+usage() {
+  printf '%s\n' 'Usage: chatgpt-shot submit "<prompt>"' >&2
+  exit 2
+}
+
+if [ "$#" -ne 2 ] || [ "$1" != "submit" ]; then
+  usage
+fi
+
+case "$2" in
+  *[![:space:]]*) ;;
+  *) usage ;;
+esac
+
+if [ -n "${CHATGPT_SHOT_WORKER_DISCOVERY_PATH:-}" ]; then
+  discovery_path=$CHATGPT_SHOT_WORKER_DISCOVERY_PATH
+elif [ -n "${XDG_CACHE_HOME:-}" ]; then
+  discovery_path=$XDG_CACHE_HOME/chatgpt-shot/runtime.json
+else
+  discovery_path=$HOME/.cache/chatgpt-shot/runtime.json
+fi
+
+case "$discovery_path" in
+  /*) ;;
+  *)
+    printf '%s\n' 'BROWSER_UNAVAILABLE: chatgpt-shot Service discovery must be an absolute Operator path.' >&2
+    exit 1
+    ;;
+esac
+
+exec node - "$discovery_path" "$2" <<'NODE'
+const fs = require('node:fs');
+const http = require('node:http');
+
+const discoveryPath = process.argv[2];
+const prompt = process.argv[3];
+
+let record;
+try {
+  record = JSON.parse(fs.readFileSync(discoveryPath, 'utf8'));
+} catch {
+  process.stderr.write(`BROWSER_UNAVAILABLE: No prepared chatgpt-shot Service discovery at ${discoveryPath}.\n`);
+  process.exit(1);
+}
+
+if (record?.host !== '127.0.0.1' || !Number.isInteger(record.port) || record.port < 1 || record.port > 65_535 || typeof record.credential !== 'string' || record.credential.length === 0) {
+  process.stderr.write('BROWSER_UNAVAILABLE: Invalid chatgpt-shot Service discovery record.\n');
+  process.exit(1);
+}
+
+const request = http.request({
+  host: record.host,
+  port: record.port,
+  path: '/submit',
+  method: 'POST',
+  headers: {
+    authorization: `Bearer ${record.credential}`,
+    'content-type': 'application/json'
+  }
+}, response => {
+  let body = '';
+  response.setEncoding('utf8');
+  response.on('data', chunk => body += chunk);
+  response.on('end', () => {
+    let payload;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      process.stderr.write('BROWSER_UNAVAILABLE: Prepared chatgpt-shot Service returned invalid JSON.\n');
+      process.exitCode = 1;
+      return;
+    }
+
+    if (response.statusCode !== 200) {
+      const code = typeof payload.code === 'string' ? payload.code : 'INVOCATION_FAILED';
+      const message = typeof payload.message === 'string' ? payload.message : 'Service submit failed.';
+      process.stderr.write(`${code}: ${message}\n`);
+      process.exitCode = 1;
+      return;
+    }
+
+    if (typeof payload.result !== 'string') {
+      process.stderr.write('INVOCATION_FAILED: Prepared chatgpt-shot Service returned no Result.\n');
+      process.exitCode = 1;
+      return;
+    }
+
+    process.stdout.write(`${payload.result}\n`);
+  });
+});
+
+request.on('error', error => {
+  process.stderr.write(`BROWSER_UNAVAILABLE: Prepared chatgpt-shot Service is unreachable: ${error.message}\n`);
+  process.exitCode = 1;
+});
+
+request.end(JSON.stringify({ prompt }));
+NODE
