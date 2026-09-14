@@ -90,7 +90,7 @@ export class NotionClient {
   private isPlanSchema(data: any): boolean {
     const properties = data?.properties;
     if (!properties || properties[PLAN_IDENTIFIER]?.type !== "rich_text" || properties[PLAN_TITLE]?.type !== "title") return false;
-    return !PLAN_FORBIDDEN_PROPERTIES.some((name) => Object.prototype.hasOwnProperty.call(properties, name));
+    return Object.keys(properties).length === 2 && !PLAN_FORBIDDEN_PROPERTIES.some((name) => Object.prototype.hasOwnProperty.call(properties, name));
   }
 
   private isTaskSchema(data: any, dataSource: string, policy: Policy): boolean {
@@ -282,7 +282,7 @@ export class NotionClient {
     return ids[0];
   }
 
-  async ensureCanonicalRepresentation(pageId: string, plan: string, binding: DatabaseBinding, identifier: string, title: string): Promise<void> {
+  async ensureCanonicalRepresentation(pageId: string, plan: string, binding: DatabaseBinding, identifier: string, title: string, identifierProperty: string): Promise<void> {
     if (!plan.trim()) throw new PublicationError("Plan content must be non-empty");
     const task = await this.request("GET", `/pages/${pageId}`);
     if (task?.parent?.type !== "data_source_id" || task.parent.data_source_id !== binding.taskDataSourceId) throw new PublicationError("pending task is outside the expected task data source");
@@ -298,12 +298,13 @@ export class NotionClient {
       await this.validatePlanContent(planPageId, plan);
     }
     await this.setTaskPlanRelation(pageId, planPageId);
-    await this.validateCanonicalRepresentation(pageId, plan, binding, identifier, title);
+    await this.validateCanonicalRepresentation(pageId, plan, binding, identifier, title, identifierProperty);
   }
 
-  async validateCanonicalRepresentation(pageId: string, plan: string, binding: DatabaseBinding, identifier: string, title: string): Promise<void> {
+  async validateCanonicalRepresentation(pageId: string, plan: string, binding: DatabaseBinding, identifier: string, title: string, identifierProperty: string): Promise<void> {
     const task = await this.request("GET", `/pages/${pageId}`);
     if (task?.parent?.type !== "data_source_id" || task.parent.data_source_id !== binding.taskDataSourceId) throw new PublicationError("canonical task is outside the expected task data source");
+    if (propertyText(task.properties?.[identifierProperty], "rich_text") !== identifier) throw new PublicationError("canonical task has a mismatched publication Identifier");
     const planPageId = await this.relationPlanPage(task, binding, identifier, title);
     if (!planPageId) throw new PublicationError("canonical task Plan property must contain exactly one Plan page");
     const planPage = await this.assertPlanIdentity(planPageId, binding, identifier, title);
@@ -311,8 +312,8 @@ export class NotionClient {
     await this.validatePlanContent(planPageId, plan);
   }
 
-  async repairIncomplete(pageId: string, plan: string, binding: DatabaseBinding, identifier: string, title: string): Promise<void> {
-    await this.ensureCanonicalRepresentation(pageId, plan, binding, identifier, title);
+  async repairIncomplete(pageId: string, plan: string, binding: DatabaseBinding, identifier: string, title: string, identifierProperty: string): Promise<void> {
+    await this.ensureCanonicalRepresentation(pageId, plan, binding, identifier, title, identifierProperty);
   }
 
   async finalizePublication(pageId: string, policy: Policy): Promise<void> {

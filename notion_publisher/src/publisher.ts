@@ -28,7 +28,7 @@ export async function publish({ plan, databaseUrl, fallbackTitle, client, config
 
     if (existing) {
       if (existing.complete) throw new PublicationError(`duplicate publication: ${identifier} already exists`);
-      try { await client.repairIncomplete(existing.pageId, plan, binding, identifier, title); await client.finalizePublication(existing.pageId, config.policy); }
+      try { await client.repairIncomplete(existing.pageId, plan, binding, identifier, title, config.policy.identifier); await client.finalizePublication(existing.pageId, config.policy); }
       catch (error) { if (error instanceof PublicationError) throw error; throw new PublicationError(`provider/API failure while repairing incomplete Plan publication; retry is safe: ${error instanceof Error ? error.message : "unknown error"}`); }
       return { identifier, page_id: existing.pageId, url: existing.url };
     }
@@ -36,7 +36,7 @@ export async function publish({ plan, databaseUrl, fallbackTitle, client, config
     const properties = buildTaskProperties(config.policy, identifier, title);
     const page = await client.createTask(binding.taskDataSourceId, properties);
     if (typeof page?.id !== "string") throw new PublicationError("provider/API failure: creating the task returned no page id");
-    try { await client.ensureCanonicalRepresentation(page.id, plan, binding, identifier, title); await client.finalizePublication(page.id, config.policy); }
+    try { await client.ensureCanonicalRepresentation(page.id, plan, binding, identifier, title, config.policy.identifier); await client.finalizePublication(page.id, config.policy); }
     catch (error) { if (error instanceof PublicationError) throw error; throw new PublicationError(`provider/API failure while publishing Plan; pending task remains retryable: ${error instanceof Error ? error.message : "unknown error"}`); }
     return { identifier, page_id: page.id, url: page.url };
   });

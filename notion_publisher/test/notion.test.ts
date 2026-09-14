@@ -55,6 +55,19 @@ test("existing canonical sources are selected structurally and extras are preser
   assert.equal(client.calls.some((call) => call.method === "PATCH"), false);
 });
 
+test("a Plan source with arbitrary extra properties is not structurally canonical", async () => {
+  const client = new RequestFake([
+    { data_sources: [{ id: "task-source" }, { id: "foreign-source" }] },
+    { properties: taskSchema("plan-source") },
+    { properties: { ...planSchema.properties, Notes: { type: "rich_text" } } },
+    { id: "plan-source", properties: planSchema.properties },
+    { properties: planSchema.properties }
+  ]);
+
+  assert.deepEqual(await client.ensureDatabase("db", DEFAULT_POLICY), { taskDataSourceId: "task-source", planDataSourceId: "plan-source" });
+  assert.equal(client.calls.some((call) => call.method === "POST" && call.path === "/data_sources"), true);
+});
+
 test("multiple task or Plan sources fail without heuristic selection", async () => {
   const taskSources = new RequestFake([
     { data_sources: [{ id: "task-a" }, { id: "task-b" }, { id: "plan-source" }] },

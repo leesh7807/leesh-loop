@@ -137,6 +137,13 @@ defmodule SymphonyElixir.Notion.AdapterTest do
              Client.fetch_issues_by_states_for_test(["Ready"], notion_settings(), request)
   end
 
+  test "a Plan source with arbitrary extra fields is not structurally canonical" do
+    request = recording_request(self(), data_sources: ["source", "plan-source"], extra_plan_fields: true)
+
+    assert {:error, :notion_incompatible_task_data_source} =
+             Client.fetch_issues_by_states_for_test(["Ready"], notion_settings(), request)
+  end
+
   test "worker state mutation writes exact rich-text strings" do
     settings = notion_settings()
 
@@ -226,6 +233,7 @@ defmodule SymphonyElixir.Notion.AdapterTest do
       plan_path: "/pages/#{plan_id}",
       data_sources: Keyword.get(opts, :data_sources, ["source", "plan-source"]),
       extra_task_source: Keyword.get(opts, :extra_task_source, false),
+      extra_plan_fields: Keyword.get(opts, :extra_plan_fields, false),
       task_schema: canonical_properties(),
       source_names: Keyword.get(opts, :source_names, %{}),
       task_children: Keyword.get(opts, :task_children, []),
@@ -261,6 +269,10 @@ defmodule SymphonyElixir.Notion.AdapterTest do
 
   defp recording_response("GET", "/data_sources/source-2", %{extra_task_source: extra}),
     do: {:ok, %{"properties" => task_source_schema(extra)}}
+
+  defp recording_response("GET", path, %{extra_plan_fields: true})
+       when path in ["/data_sources/plan-source", "/data_sources/plan-2"],
+       do: {:ok, %{"properties" => Map.put(plan_properties(), "Notes", %{"type" => "rich_text"})}}
 
   defp recording_response("GET", path, _state)
        when path in ["/data_sources/plan-source", "/data_sources/plan-2"],

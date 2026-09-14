@@ -189,6 +189,7 @@ defmodule SymphonyElixir.Notion.Client do
 
   defp plan_schema?(%{properties: properties}) when is_map(properties) do
     get_in(properties, ["Identifier", "type"]) == "rich_text" and get_in(properties, ["Title", "type"]) == "title" and
+      map_size(properties) == 2 and
       not Enum.any?(@plan_forbidden, &Map.has_key?(properties, &1))
   end
 

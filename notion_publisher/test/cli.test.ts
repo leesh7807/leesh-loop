@@ -20,6 +20,7 @@ class PublicationFake extends NotionClient {
   nextPlan = 1;
   failNextLock = false;
   failNextRelation = false;
+  mutateTaskIdentifierAfterRelation = false;
 
   constructor() {
     super("token");
@@ -43,6 +44,10 @@ class PublicationFake extends NotionClient {
     if (method === "PATCH" && body?.properties?.[PLAN_PROPERTY] && this.failNextRelation) {
       this.failNextRelation = false;
       throw new PublicationError("injected task relation failure");
+    }
+    if (method === "PATCH" && path.startsWith("/pages/") && body?.properties?.[PLAN_PROPERTY] && this.mutateTaskIdentifierAfterRelation) {
+      this.mutateTaskIdentifierAfterRelation = false;
+      this.taskPage().properties.Identifier = { type: "rich_text", rich_text: [{ type: "text", text: { content: "PLAN-TAMPERED" } }] };
     }
 
     if (method === "GET" && path.startsWith("/databases/")) return { data_sources: [...this.sources.values()].map(({ id }) => ({ id, name: id })) };
@@ -172,6 +177,15 @@ test("pending tasks related to another publication or ambiguous Plan identity ar
   ambiguous.pages.get(duplicate)!.children = structuredClone(matching.children);
   await assert.rejects(publishPlanFile(plan, config, DATABASE_URL, ambiguous), /matches 2 Plan pages/);
   assert.equal(ambiguous.taskPage().properties.State.rich_text[0].text.content, PUBLISHER_PENDING_STATE);
+});
+
+test("final validation rejects a task Identifier changed before finalization", async () => {
+  const { plan, config } = await inputs("# Identifier race\naccepted");
+  const client = new PublicationFake();
+  client.mutateTaskIdentifierAfterRelation = true;
+
+  await assert.rejects(publishPlanFile(plan, config, DATABASE_URL, client), /mismatched publication Identifier/);
+  assert.equal(client.taskPage().properties.State.rich_text[0].text.content, PUBLISHER_PENDING_STATE);
 });
 
 test("completed publications are never repaired even if Plan content is later changed", async () => {
