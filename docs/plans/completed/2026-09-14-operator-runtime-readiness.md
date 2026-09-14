@@ -121,3 +121,14 @@ Verify through the intended bootstrap and dispatch paths, using representative r
 - Applied commit: `d966d5bb29d93e487d5533d1d5c4c65d7356d7b4`.
 - Verification: a stale first credential helper now fails bootstrap before `chatgpt-shot`; the
   valid host credential completes the full bootstrap and real smoke submit successfully.
+
+### Round 3
+
+- Reviewed HEAD: `373ec42b254bb3d76f02f65611fdbf259268fdce` on [PR #16](https://github.com/leesh7807/leesh-loop/pull/16).
+- Verdict: `PASS` (`None.`).
+- No findings to accept or reject; the prior GitHub credential-path finding is fixed and independently
+  verified against the current source.
+- Applied commit: none.
+- Verification: the exact helper-selected credential rejects the stale-helper reproduction before
+  dispatch, valid bootstrap performs the real smoke submit, and shell syntax, formatting, specs,
+  targeted Symphony tests (80/80), `npm test` (16/16), and `git diff --check` pass.
