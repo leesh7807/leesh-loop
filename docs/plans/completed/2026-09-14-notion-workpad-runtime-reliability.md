@@ -188,3 +188,8 @@ Run targeted Notion agent-tool, adapter, and dynamic-tool tests; the affected Sy
 - Findings: grapheme 기반 `String.slice/3`가 combining mark가 대량 포함된 단일 grapheme을 2,000자 chunk로 잘못 취급해 500KB를 초과하는 rich-text item/block을 만들 수 있다는 finding을 재검증하고 수용했다. code point 단위 streaming chunking과 combining-mark 회귀 테스트를 적용했다.
 - Applied commit: `46f66126b4502bd5bf1f89e531823151215e7670`
 - Verification: 타깃 Notion/adapter/dynamic-tool 42 tests passed; changed-file `mix credo --strict`, formatter, and `git diff --check` passed. Full `mix test`는 322개 중 321 passed, 1 existing timing-sensitive `CoreTest` failure, 6 skipped였고 해당 테스트 단독 실행은 이전 라운드에서 통과했다.
+- Reviewed HEAD: `c8dc2dd4d2bc8c1ddc6a1d55a7bf667eab488bb9`
+- Verdict: `None.` (finding 없음)
+- Findings: 없음. 직전 수정(code point chunking)이 지정 HEAD의 실제 원문과 실행 경로에서 요구사항을 충족하는 것으로 확인되었고 추가 수정은 적용하지 않았다.
+- Applied commit: 없음
+- Verification: `chatgpt-shot` completed stdout Result `None.`; 타깃 42 tests와 변경 파일 정적 검증은 통과했다.
