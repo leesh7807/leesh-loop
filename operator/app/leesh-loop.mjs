@@ -35,8 +35,8 @@ async function loadConfig(file) {
   const config = await json(canonical(file));
   if (!config || typeof config !== 'object') throw new Error(`missing or invalid project configuration: ${file}`);
   for (const key of ['workflow_path', 'notion_database_url', 'symphony_workspace_root']) if (typeof config[key] !== 'string' || !config[key]) throw new Error(`project configuration requires ${key}`);
+  if (!isAbsolute(config.workflow_path) || !isAbsolute(config.symphony_workspace_root)) throw new Error('workflow_path and symphony_workspace_root must be absolute');
   const resolved = { ...config, workflow_path: canonical(config.workflow_path), symphony_workspace_root: canonical(config.symphony_workspace_root), configuration_path: canonical(file) };
-  if (!isAbsolute(resolved.workflow_path) || !isAbsolute(resolved.symphony_workspace_root)) throw new Error('workflow_path and symphony_workspace_root must be absolute');
   return resolved;
 }
 async function withLock(config, action) {

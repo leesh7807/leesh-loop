@@ -103,5 +103,13 @@ Make Leesh Loop a runnable local project environment without turning externally 
 - Reviewed HEAD: `2c58e56514cee76961db8d28e4644c0f5a323e6e` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
 - Verdict: `FINDINGS`.
 - Accepted: compatible runtime reuse recreated the three initial tabs after users could have closed them.
+- Applied commit: `486c39596547ad41c7214753ee6f3c51194d3afe`.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 9
+
+- Reviewed HEAD: `486c39596547ad41c7214753ee6f3c51194d3afe` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: canonicalization occurred before absolute-path validation, making relative workflow/workspace paths valid unexpectedly.
 - Applied commit: pending.
 - Verification: pending post-fix Node UI/publisher/Symphony formatting and lifecycle-path checks.
