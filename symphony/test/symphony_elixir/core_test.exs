@@ -1045,7 +1045,14 @@ defmodule SymphonyElixir.CoreTest do
     assert %{attempt: 1, due_at_ms: due_at_ms} = state.retry_attempts[issue_id]
     assert is_integer(due_at_ms)
 
-    assert_receive {:retry_schedule_timing, %{requested_delay_ms: 1_000, scheduling_timestamp_ms: scheduling_timestamp_ms, due_at_ms: ^due_at_ms}}
+    assert_receive {
+      :retry_schedule_timing,
+      %{
+        requested_delay_ms: 1_000,
+        scheduling_timestamp_ms: scheduling_timestamp_ms,
+        due_at_ms: ^due_at_ms
+      }
+    }
 
     assert_due_at_scheduled_for(due_at_ms, scheduling_timestamp_ms, 1_000)
 
@@ -1093,7 +1100,14 @@ defmodule SymphonyElixir.CoreTest do
     assert %{attempt: 3, due_at_ms: due_at_ms, identifier: "MT-559", error: "agent exited: :boom"} =
              state.retry_attempts[issue_id]
 
-    assert_receive {:retry_schedule_timing, %{requested_delay_ms: 40_000, scheduling_timestamp_ms: scheduling_timestamp_ms, due_at_ms: ^due_at_ms}}
+    assert_receive {
+      :retry_schedule_timing,
+      %{
+        requested_delay_ms: 40_000,
+        scheduling_timestamp_ms: scheduling_timestamp_ms,
+        due_at_ms: ^due_at_ms
+      }
+    }
 
     assert_due_at_scheduled_for(due_at_ms, scheduling_timestamp_ms, 40_000)
   end
@@ -1135,7 +1149,14 @@ defmodule SymphonyElixir.CoreTest do
     assert %{attempt: 1, due_at_ms: due_at_ms, identifier: "MT-560", error: "agent exited: :boom"} =
              state.retry_attempts[issue_id]
 
-    assert_receive {:retry_schedule_timing, %{requested_delay_ms: 10_000, scheduling_timestamp_ms: scheduling_timestamp_ms, due_at_ms: ^due_at_ms}}
+    assert_receive {
+      :retry_schedule_timing,
+      %{
+        requested_delay_ms: 10_000,
+        scheduling_timestamp_ms: scheduling_timestamp_ms,
+        due_at_ms: ^due_at_ms
+      }
+    }
 
     assert_due_at_scheduled_for(due_at_ms, scheduling_timestamp_ms, 10_000)
   end
