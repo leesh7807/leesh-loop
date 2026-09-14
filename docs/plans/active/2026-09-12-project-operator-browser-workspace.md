@@ -47,5 +47,13 @@ Make Leesh Loop a runnable local project environment without turning externally 
 - Reviewed HEAD: `bc870b99ec0b5167ebc8c5482f6437088528e71c` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
 - Verdict: `FINDINGS`.
 - Accepted: dispatch authorization was externally observable before durable `runtime.json` reached `running`; the configured GitHub HTTPS target was omitted from bootstrap; browser fallback returned before confirming a process spawn.
+- Applied commit: `f88327b76921bea3e9fd6c976042fda89bf3ce97`.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 2
+
+- Reviewed HEAD: `f88327b76921bea3e9fd6c976042fda89bf3ce97` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: the publish-surface readiness probe used JSON decoding against an HTML response; the configured Symphony command was omitted from effective-runtime compatibility.
 - Applied commit: pending.
 - Verification: pending post-fix Node UI/publisher/Symphony formatting and lifecycle-path checks.

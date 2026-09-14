@@ -46,10 +46,11 @@ async function withLock(config, action) {
   try { return await action(); } finally { await rm(lock, { recursive: true, force: true }); }
 }
 function effective(config, runtimeId, port) {
-  return { workflow_path: config.workflow_path, notion_database_url: config.notion_database_url, symphony_workspace_root: config.symphony_workspace_root, worker_interface_identity: config.worker_interface_identity || 'operator/external/chatgpt-shot/chatgpt-shot', github_repository_url: config.github_repository_url || null, dashboard: `http://127.0.0.1:${port}`, runtime_id: runtimeId };
+  return { workflow_path: config.workflow_path, notion_database_url: config.notion_database_url, symphony_workspace_root: config.symphony_workspace_root, worker_interface_identity: config.worker_interface_identity || 'operator/external/chatgpt-shot/chatgpt-shot', github_repository_url: config.github_repository_url || null, symphony_command: canonical(config.symphony_command || join(root, 'operator/app/run-symphony')), dashboard: `http://127.0.0.1:${port}`, runtime_id: runtimeId };
 }
 function compatible(oldValue, current) { const { runtime_id: _old, ...oldIdentity } = oldValue || {}; const { runtime_id: _new, ...newIdentity } = current; return JSON.stringify(oldIdentity) === JSON.stringify(newIdentity); }
 async function request(url) { const response = await fetch(url, { signal: AbortSignal.timeout(1_000) }); if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }
+async function reachable(url) { const response = await fetch(url, { signal: AbortSignal.timeout(1_000) }); if (!response.ok) throw new Error(`HTTP ${response.status}`); }
 async function runtimeObserved(state, requireAck = true) {
   if (!state?.pid || !alive(state.pid) || !state.effective?.dashboard) return false;
   try {
@@ -85,10 +86,10 @@ function spawnBrowser(command, args) { return new Promise(resolveBrowser => { co
 function uiPort(config) { return Number(config.ui_port || 4310); }
 function uiUrl(config) { return `http://127.0.0.1:${uiPort(config)}`; }
 async function ensureUi(config) {
-  try { await request(uiUrl(config)); return; } catch { /* start the project-local publish surface */ }
+  try { await reachable(uiUrl(config)); return; } catch { /* start the project-local publish surface */ }
   const child = spawn(process.execPath, [new URL(import.meta.url).pathname, 'serve', config.configuration_path], { cwd: root, detached: true, stdio: 'ignore', env: process.env });
   child.unref();
-  await waitFor(async () => { try { await request(uiUrl(config)); return true; } catch { return false; } }, 'publish surface');
+  await waitFor(async () => { try { await reachable(uiUrl(config)); return true; } catch { return false; } }, 'publish surface');
 }
 
 async function start(config) {
@@ -99,7 +100,7 @@ async function start(config) {
     const starting = { status: 'starting', runtime_id: runtimeId, effective: identity, authorization_path: p.authorization, acknowledgement_path: p.acknowledgement, ownership_path: p.ownership, created_at: new Date().toISOString() };
     await atomicJson(p.state, starting); await remove(p.authorization); await remove(p.acknowledgement);
     try {
-      const symphony = config.symphony_command || join(root, 'operator/app/run-symphony');
+      const symphony = identity.symphony_command;
       const args = [join(root, 'operator/app/operator-bootstrap'), '--', symphony, '--port', String(port), '--i-understand-that-this-will-be-running-without-the-usual-guardrails', config.workflow_path];
       const env = { ...process.env, SYMPHONY_WORKSPACE_ROOT: config.symphony_workspace_root, SYMPHONY_GITHUB_REPOSITORY_URL: config.github_repository_url || '', SYMPHONY_DISPATCH_BARRIER: 'closed', SYMPHONY_RUNTIME_ID: runtimeId, SYMPHONY_DISPATCH_AUTHORIZATION_FILE: p.authorization, SYMPHONY_DISPATCH_ACK_FILE: p.acknowledgement, SYMPHONY_OWNERSHIP_FILE: p.ownership };
       const pid = launch(join(root, 'operator/app/owned-symphony'), args, env);
