@@ -41,14 +41,17 @@ async function loadConfig(file) {
 }
 async function withLock(config, action) {
   const { lock } = paths(config); await mkdir(dirname(lock), { recursive: true, mode: 0o700 });
-  const lease = String(process.pid);
+  const startTicks = processStartTicks(process.pid);
+  if (!startTicks) throw new Error('could not establish lifecycle lease identity');
+  const lease = `${process.pid}:${startTicks}:${randomUUID()}`;
   for (;;) {
     try { await symlink(lease, lock); break; }
     catch (error) {
       if (error.code !== 'EEXIST') throw error;
       let owner;
-      try { owner = Number(await readlink(lock)); } catch { continue; }
-      if (!Number.isInteger(owner) || owner <= 0 || !alive(owner)) { await unlink(lock).catch(() => {}); continue; }
+      try { owner = (await readlink(lock)).split(':'); } catch { continue; }
+      const [ownerPid, ownerStartTicks] = owner;
+      if (!/^\d+$/.test(ownerPid || '') || !ownerStartTicks || processStartTicks(Number(ownerPid)) !== ownerStartTicks) { await unlink(lock).catch(() => {}); continue; }
       await sleep(50);
     }
   }
@@ -70,10 +73,11 @@ async function runtimeObserved(state, requireAck = true) {
 }
 async function terminate(state) {
   if (state?.pid && alive(state.pid)) {
-    if (!state.process_start_ticks || await processStartTicks(state.pid) !== state.process_start_ticks) throw new Error(`refusing to signal PID ${state.pid}: durable ownership identity does not match`);
+    if (!state.process_start_ticks || processStartTicks(state.pid) !== state.process_start_ticks) return false;
     process.kill(state.pid, 'SIGTERM'); for (let i = 0; i < 50 && alive(state.pid); i += 1) await sleep(100); if (alive(state.pid)) { process.kill(state.pid, 'SIGKILL'); await sleep(100); }
   }
   if (state?.pid && alive(state.pid)) throw new Error(`owned Symphony process ${state.pid} did not terminate`);
+  return true;
 }
 async function clear(config) { const p = paths(config); await Promise.all([remove(p.state), remove(p.ownership), remove(p.authorization), remove(p.acknowledgement)]); }
 async function reconcile(config, desired) {
