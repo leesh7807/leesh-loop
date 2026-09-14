@@ -148,8 +148,9 @@ const locked = args[0] === '__locked';
 const [command, configFile = defaultConfig] = locked ? args.slice(1) : args;
 if (!['start', 'stop', 'serve'].includes(command)) { console.error('Usage: leesh-loop <start|stop|serve> [project-config.json]'); process.exitCode = 2; }
 else {
-  loadConfig(configFile).then(config => {
+  loadConfig(configFile).then(async config => {
     if (!locked && ['start', 'stop'].includes(command)) {
+      await mkdir(stateRoot(config), { recursive: true, mode: 0o700 });
       const lockPath = join(stateRoot(config), 'lifecycle.flock');
       const result = spawnSync('flock', ['-x', lockPath, process.execPath, process.argv[1], '__locked', command, config.configuration_path], { cwd: root, stdio: 'inherit' });
       if (result.error) throw result.error;
