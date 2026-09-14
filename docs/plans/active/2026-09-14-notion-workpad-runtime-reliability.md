@@ -178,3 +178,8 @@ Run targeted Notion agent-tool, adapter, and dynamic-tool tests; the affected Sy
 
 ## chatgpt-shot review log
 
+- Reviewed HEAD: `a81774fc9ed6f1e61f68ed8e8f8db9065361b88b`
+- Verdict: `FINDINGS`
+- Findings: 두 finding을 현재 HEAD의 실제 원문과 provider mapping으로 재검증하고 모두 수용했다. 5xx `notion_provider_response`를 ambiguous로 분류하지 않아 mutation durable effect를 known failure로 오인하던 결함은 5xx 판별과 회귀 테스트로 수정했다. `provider_error`를 `inspect/1` 문자열로만 노출하던 결함은 provider response status/body와 transport/error kind를 구조화해 보존하도록 수정했다.
+- Applied commit: `59efc335830f9c973a2f3e6dad2c6cdc2665a6dd`
+- Verification: 타깃 Notion/adapter/dynamic-tool 41 tests passed; full `mix test` 321 passed, 6 skipped; changed-file `mix credo --strict`, formatter, `mix specs.check`, and `git diff --check` passed.
