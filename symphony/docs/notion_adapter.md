@@ -48,11 +48,12 @@ also proves the page parent is that data source, so accessible pages elsewhere
 are outside scope. Observed duplicate Identifiers fail the read rather than
 being repaired.
 
-Bound Notion sessions advertise only `notion_task_read`,
+Bound Notion sessions advertise only `notion_task_read`, `notion_task_read_workpad`,
 `notion_task_comments`, `notion_task_set_state` (`state` string), and
 `notion_task_append_workpad` (`text` string). The host checks the bound page and
 task data-source identity before each call. Workpad append sends a paragraph
 directly to `/blocks/<task-page-id>/children`; it does not look up or create a
-child page. Comments remain reads against the task page's comments endpoint and
+child page. Workpad read paginates that same canonical child-block collection and
+returns all blocks in provider order. Comments remain reads against the task page's comments endpoint and
 retain their own pagination. No schema, identity, Plan, or generic page
 mutation capability is exposed.

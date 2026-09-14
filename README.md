@@ -90,7 +90,10 @@ runtime state, and worker interface stay outside `$SYMPHONY_WORKSPACE_ROOT`.
 
 The Publisher takes a plan written as plain text or Markdown, normalizes it into the canonical Leesh Loop task representation, and publishes it to Notion.
 
-Notion acts as the durable execution surface for tasks and workflow state.
+Notion task State remains lifecycle authority. Its canonical Workpad is the live
+execution surface: workers reconstruct current execution context from the Workpad,
+Accepted/Repository Plan, State, and actual workspace on every dispatch. The
+Repository Plan remains the durable execution contract rather than a running log.
 
 The Publisher owns publication state only: it creates incomplete tasks as `Publisher Pending` and
 sets `State` to `Ready` after the canonical representation is complete and validated. The Notion
@@ -124,6 +127,12 @@ It creates the shared canonical task representation: durable `Identifier`, `Titl
 body is the mutable Workpad; the relation opens a separate locked Plan page containing the complete
 accepted Plan. The Publisher and Notion adapter share this representation, and comments remain a
 separate human-review surface.
+
+`Human Review` is the single non-terminal human pause state. Workpad cycle markers
+make ordinary review return, bounded comment consumption, and Rework recovery
+understandable without adding a separate lifecycle database. `In Progress` resumes
+the preserved workspace; `Rework` deliberately starts a fresh task branch from the
+current `origin/main` and preserves the latest Repository Plan.
 
 These are the Leesh Loop integration contracts: successful publication hands work to Symphony in
 `Ready`; changing that handoff requires coordinated Publisher and workflow changes; and the
