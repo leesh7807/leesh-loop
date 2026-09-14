@@ -79,5 +79,13 @@ Make Leesh Loop a runnable local project environment without turning externally 
 - Reviewed HEAD: `3029c64de984eaec966f16f003372c1d0c3ce68a` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
 - Verdict: `FINDINGS`.
 - Accepted: PID start-identity mismatch must clear stale metadata without signaling the unrelated process; lifecycle lease identity must include startup identity to recover PID-reused abandoned locks.
+- Applied commit: `2422bceedd6e7c28d2a1c803b09261c545699228`.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 6
+
+- Reviewed HEAD: `2422bceedd6e7c28d2a1c803b09261c545699228` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: a stale ownership record could satisfy a file-existence-only child gate before the new PID identity was durable.
 - Applied commit: pending.
 - Verification: pending post-fix Node UI/publisher/Symphony formatting and lifecycle-path checks.

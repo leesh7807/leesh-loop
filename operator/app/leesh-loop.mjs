@@ -114,7 +114,7 @@ async function start(config) {
     if (existing) { await openWindow(config, existing.effective.dashboard); return { reused: true, pid: existing.pid, dashboard: existing.effective.dashboard }; }
     const p = paths(config); const runtimeId = randomUUID(); const identity = effective(config, runtimeId, port);
     const starting = { status: 'starting', runtime_id: runtimeId, effective: identity, authorization_path: p.authorization, acknowledgement_path: p.acknowledgement, ownership_path: p.ownership, created_at: new Date().toISOString() };
-    await atomicJson(p.state, starting); await remove(p.authorization); await remove(p.acknowledgement);
+    await atomicJson(p.state, starting); await remove(p.ownership); await remove(p.authorization); await remove(p.acknowledgement);
     try {
       const symphony = identity.symphony_command;
       const args = [join(root, 'operator/app/operator-bootstrap'), '--', symphony, '--port', String(port), '--i-understand-that-this-will-be-running-without-the-usual-guardrails', config.workflow_path];

@@ -6,8 +6,18 @@ set -eu
 [ -n "${SYMPHONY_OWNERSHIP_FILE:-}" ] || exit 64
 [ -n "${SYMPHONY_RUNTIME_ID:-}" ] || exit 64
 
+owns_current_runtime() {
+  node - "$SYMPHONY_OWNERSHIP_FILE" "$SYMPHONY_RUNTIME_ID" <<'NODE'
+const fs = require('node:fs');
+try {
+  const record = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+  process.exit(record.runtime_id === process.argv[3] ? 0 : 1);
+} catch { process.exit(1); }
+NODE
+}
+
 attempt=0
-while [ ! -f "$SYMPHONY_OWNERSHIP_FILE" ]; do
+while ! owns_current_runtime; do
   [ "$attempt" -lt 100 ] || exit 65
   sleep 0.01
   attempt=$((attempt + 1))
