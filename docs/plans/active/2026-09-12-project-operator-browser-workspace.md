@@ -95,5 +95,13 @@ Make Leesh Loop a runnable local project environment without turning externally 
 - Reviewed HEAD: `5b64d77832315e413a5c98d8e906f8b1529f6757` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
 - Verdict: `FINDINGS`.
 - Accepted: a detached untracked Publish UI could survive stop and continue publishing with stale Notion configuration.
+- Applied commit: `2c58e56514cee76961db8d28e4644c0f5a323e6e`.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 8
+
+- Reviewed HEAD: `2c58e56514cee76961db8d28e4644c0f5a323e6e` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: compatible runtime reuse recreated the three initial tabs after users could have closed them.
 - Applied commit: pending.
 - Verification: pending post-fix Node UI/publisher/Symphony formatting and lifecycle-path checks.

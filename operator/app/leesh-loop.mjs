@@ -123,7 +123,7 @@ async function ensureUi(config) {
 async function start(config) {
   return withLock(config, async () => {
     const port = Number(config.symphony_port || 4100); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
-    if (existing) { await openWindow(config, existing.effective.dashboard); return { reused: true, pid: existing.pid, dashboard: existing.effective.dashboard }; }
+    if (existing) return { reused: true, pid: existing.pid, dashboard: existing.effective.dashboard };
     const p = paths(config); const runtimeId = randomUUID(); const identity = effective(config, runtimeId, port);
     const starting = { status: 'starting', runtime_id: runtimeId, effective: identity, authorization_path: p.authorization, acknowledgement_path: p.acknowledgement, ownership_path: p.ownership, created_at: new Date().toISOString() };
     await atomicJson(p.state, starting); await remove(p.ownership); await remove(p.authorization); await remove(p.acknowledgement);
@@ -143,7 +143,11 @@ async function start(config) {
       const running = { ...committed, status: 'running', authorized_at: new Date().toISOString() }; await atomicJson(p.state, running);
       await atomicJson(p.authorization, { state: 'running', runtime_id: runtimeId, published_at: new Date().toISOString() });
       await waitFor(() => runtimeObserved(running, true), 'dispatch acknowledgement');
-      try { await openWindow(config, identity.dashboard); return { reused: false, pid, dashboard: identity.dashboard }; }
+      try {
+        await openWindow(config, identity.dashboard);
+        await atomicJson(p.state, { ...running, project_window_opened_at: new Date().toISOString() });
+        return { reused: false, pid, dashboard: identity.dashboard };
+      }
       catch (windowError) { return { reused: false, pid, dashboard: identity.dashboard, window_error: String(windowError.message || windowError) }; }
     } catch (error) { const state = await json(p.state); try { await terminate(state); await clear(config); } catch (cleanupError) { await atomicJson(p.state, { ...(state || starting), status: 'failed', cleanup_error: String(cleanupError) }); } throw error; }
   });
