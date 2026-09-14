@@ -99,3 +99,14 @@ Verify through the intended bootstrap and dispatch paths, using representative r
 - `chatgpt-shot submit` review using the current PR URL and exact HEAD SHA: independently review the designated artifact; validate every finding against the current HEAD before accepting or rejecting it.
 
 ## chatgpt-shot review log
+
+### Round 1
+
+- Reviewed HEAD: `8ab5c546ce6d1e2cdb04ce60f269b96fa3a75336` on [PR #16](https://github.com/leesh7807/leesh-loop/pull/16).
+- Verdict: `FINDINGS`.
+- Accepted the PATH-launch finding: Symphony prepends `exec` to `codex.command`, so a bare
+  `PATH=... codex` command is parsed as an executable name and exits 127. Changed the workflow
+  command to `env PATH=... codex app-server`.
+- Applied commit: `18a480e4a8937186e48db01ccd46db7cd5269e71`.
+- Verification: the failing shell form now exits successfully with `exec env`; formatter,
+  `mix specs.check`, targeted Symphony tests (80/80), shell syntax, and `git diff --check` pass.
