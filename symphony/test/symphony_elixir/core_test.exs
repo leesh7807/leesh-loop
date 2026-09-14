@@ -1019,6 +1019,7 @@ defmodule SymphonyElixir.CoreTest do
     end)
 
     initial_state = :sys.get_state(pid)
+    test_pid = self()
 
     running_entry = %{
       pid: self(),
@@ -1030,12 +1031,12 @@ defmodule SymphonyElixir.CoreTest do
 
     :sys.replace_state(pid, fn _ ->
       initial_state
+      |> install_retry_schedule_observer(test_pid)
       |> Map.put(:running, %{issue_id => running_entry})
       |> Map.put(:claimed, MapSet.new([issue_id]))
       |> Map.put(:retry_attempts, %{})
     end)
 
-    scheduling_started_at_ms = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :normal})
     state = :sys.get_state(pid)
 
@@ -1043,7 +1044,15 @@ defmodule SymphonyElixir.CoreTest do
     assert MapSet.member?(state.completed, issue_id)
     assert %{attempt: 1, due_at_ms: due_at_ms} = state.retry_attempts[issue_id]
     assert is_integer(due_at_ms)
-    assert_due_in_range(due_at_ms, scheduling_started_at_ms, 1_000, 100)
+
+    assert_receive {:retry_schedule_timing, %{requested_delay_ms: 1_000, scheduling_timestamp_ms: scheduling_timestamp_ms, due_at_ms: ^due_at_ms}}
+
+    assert_due_at_scheduled_for(due_at_ms, scheduling_timestamp_ms, 1_000)
+
+    controlled_observation_at_ms = scheduling_timestamp_ms + 600
+    original_lower_bound_ms = controlled_observation_at_ms + 500
+    assert due_at_ms - controlled_observation_at_ms == 400
+    refute due_at_ms >= original_lower_bound_ms
   end
 
   test "abnormal worker exit increments retry attempt progressively" do
@@ -1059,6 +1068,7 @@ defmodule SymphonyElixir.CoreTest do
     end)
 
     initial_state = :sys.get_state(pid)
+    test_pid = self()
 
     running_entry = %{
       pid: self(),
@@ -1071,19 +1081,21 @@ defmodule SymphonyElixir.CoreTest do
 
     :sys.replace_state(pid, fn _ ->
       initial_state
+      |> install_retry_schedule_observer(test_pid)
       |> Map.put(:running, %{issue_id => running_entry})
       |> Map.put(:claimed, MapSet.new([issue_id]))
       |> Map.put(:retry_attempts, %{})
     end)
 
-    scheduling_started_at_ms = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :boom})
     state = :sys.get_state(pid)
 
     assert %{attempt: 3, due_at_ms: due_at_ms, identifier: "MT-559", error: "agent exited: :boom"} =
              state.retry_attempts[issue_id]
 
-    assert_due_in_range(due_at_ms, scheduling_started_at_ms, 40_000, 500)
+    assert_receive {:retry_schedule_timing, %{requested_delay_ms: 40_000, scheduling_timestamp_ms: scheduling_timestamp_ms, due_at_ms: ^due_at_ms}}
+
+    assert_due_at_scheduled_for(due_at_ms, scheduling_timestamp_ms, 40_000)
   end
 
   test "first abnormal worker exit waits before retrying" do
@@ -1099,6 +1111,7 @@ defmodule SymphonyElixir.CoreTest do
     end)
 
     initial_state = :sys.get_state(pid)
+    test_pid = self()
 
     running_entry = %{
       pid: self(),
@@ -1110,19 +1123,21 @@ defmodule SymphonyElixir.CoreTest do
 
     :sys.replace_state(pid, fn _ ->
       initial_state
+      |> install_retry_schedule_observer(test_pid)
       |> Map.put(:running, %{issue_id => running_entry})
       |> Map.put(:claimed, MapSet.new([issue_id]))
       |> Map.put(:retry_attempts, %{})
     end)
 
-    scheduling_started_at_ms = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :boom})
     state = :sys.get_state(pid)
 
     assert %{attempt: 1, due_at_ms: due_at_ms, identifier: "MT-560", error: "agent exited: :boom"} =
              state.retry_attempts[issue_id]
 
-    assert_due_in_range(due_at_ms, scheduling_started_at_ms, 10_000, 500)
+    assert_receive {:retry_schedule_timing, %{requested_delay_ms: 10_000, scheduling_timestamp_ms: scheduling_timestamp_ms, due_at_ms: ^due_at_ms}}
+
+    assert_due_at_scheduled_for(due_at_ms, scheduling_timestamp_ms, 10_000)
   end
 
   test "stale retry timer messages do not consume newer retry entries" do
@@ -1242,16 +1257,14 @@ defmodule SymphonyElixir.CoreTest do
     assert Orchestrator.select_worker_host_for_test(state, "worker-a") == "worker-a"
   end
 
-  defp assert_due_in_range(
-         due_at_ms,
-         scheduling_started_at_ms,
-         requested_delay_ms,
-         max_scheduling_overhead_ms
-       ) do
-    expected_due_at_ms = scheduling_started_at_ms + requested_delay_ms
+  defp install_retry_schedule_observer(state, test_pid) do
+    Map.put(state, :retry_schedule_observer, fn timing ->
+      send(test_pid, {:retry_schedule_timing, timing})
+    end)
+  end
 
-    assert due_at_ms >= expected_due_at_ms
-    assert due_at_ms <= expected_due_at_ms + max_scheduling_overhead_ms
+  defp assert_due_at_scheduled_for(due_at_ms, scheduling_timestamp_ms, requested_delay_ms) do
+    assert due_at_ms == scheduling_timestamp_ms + requested_delay_ms
   end
 
   defp restore_app_env(key, nil), do: Application.delete_env(:symphony_elixir, key)

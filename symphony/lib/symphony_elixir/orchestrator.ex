@@ -39,6 +39,7 @@ defmodule SymphonyElixir.Orchestrator do
       claimed: MapSet.new(),
       blocked: %{},
       retry_attempts: %{},
+      retry_schedule_observer: nil,
       codex_totals: nil,
       codex_rate_limits: nil
     ]
@@ -1038,7 +1039,8 @@ defmodule SymphonyElixir.Orchestrator do
     delay_ms = retry_delay(next_attempt, metadata)
     old_timer = Map.get(previous_retry, :timer_ref)
     retry_token = make_ref()
-    due_at_ms = System.monotonic_time(:millisecond) + delay_ms
+    scheduling_timestamp_ms = System.monotonic_time(:millisecond)
+    due_at_ms = scheduling_timestamp_ms + delay_ms
     identifier = pick_retry_identifier(issue_id, previous_retry, metadata)
     issue_url = pick_retry_issue_url(previous_retry, metadata)
     error = pick_retry_error(previous_retry, metadata)
@@ -1050,6 +1052,13 @@ defmodule SymphonyElixir.Orchestrator do
     end
 
     timer_ref = Process.send_after(self(), {:retry_issue, issue_id, retry_token}, delay_ms)
+
+    notify_retry_schedule_observer(state.retry_schedule_observer, %{
+      issue_id: issue_id,
+      requested_delay_ms: delay_ms,
+      scheduling_timestamp_ms: scheduling_timestamp_ms,
+      due_at_ms: due_at_ms
+    })
 
     error_suffix = if is_binary(error), do: " error=#{error}", else: ""
 
@@ -1071,6 +1080,11 @@ defmodule SymphonyElixir.Orchestrator do
           })
     }
   end
+
+  defp notify_retry_schedule_observer(observer, timing) when is_function(observer, 1),
+    do: observer.(timing)
+
+  defp notify_retry_schedule_observer(_observer, _timing), do: :ok
 
   defp pop_retry_attempt_state(%State{} = state, issue_id, retry_token) when is_reference(retry_token) do
     case Map.get(state.retry_attempts, issue_id) do
