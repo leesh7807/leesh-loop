@@ -33,7 +33,7 @@ agent:
 codex:
   # The Operator launch wrapper supplies CHATGPT_SHOT_WORKER_INTERFACE_ROOT and
   # CHATGPT_SHOT_WORKER_DISCOVERY_PATH before Symphony starts.
-  command: 'PATH="$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:$PATH" codex app-server'
+  command: 'env PATH="$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:$PATH" codex app-server'
 ---
 
 # Leesh Loop repository workflow
