@@ -85,6 +85,7 @@ async function openWindow(config, dashboard) {
 }
 function spawnBrowser(command, args) { return new Promise(resolveBrowser => { const child = spawn(command, args, { detached: true, stdio: 'ignore' }); child.once('error', () => resolveBrowser(false)); child.once('spawn', () => { child.unref(); resolveBrowser(true); }); }); }
 function uiPort(config) { return Number(config.ui_port || 4310); }
+function ensurePublisher() { const publisher = join(root, 'operator/notion_publisher'); if (existsSync(join(publisher, 'dist/src/cli.js'))) return; for (const args of [['ci'], ['run', 'build']]) { const result = spawnSync('npm', args, { cwd: publisher, stdio: 'inherit' }); if (result.status !== 0) throw new Error(`publisher preparation failed: npm ${args.join(' ')}`); } }
 function uiUrl(config) { return `http://127.0.0.1:${uiPort(config)}`; }
 function uiIdentity(config) { return { notion_database_url: config.notion_database_url, ui_port: uiPort(config), publisher: join(root, 'operator/notion_publisher/dist/cli.js') }; }
 function sameIdentity(first, second) { return JSON.stringify(first) === JSON.stringify(second); }
@@ -109,6 +110,7 @@ async function start(config) {
   return withLock(config, async () => {
     const port = Number(config.symphony_port || 4100); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
     if (existing) return { reused: true, pid: existing.pid, dashboard: existing.effective.dashboard };
+    ensurePublisher();
     const p = paths(config); const runtimeId = randomUUID(); const identity = effective(config, runtimeId, port);
     const starting = { status: 'starting', runtime_id: runtimeId, effective: identity, authorization_path: p.authorization, acknowledgement_path: p.acknowledgement, ownership_path: p.ownership, created_at: new Date().toISOString() };
     await atomicJson(p.state, starting); await remove(p.ownership); await remove(p.authorization); await remove(p.acknowledgement);
