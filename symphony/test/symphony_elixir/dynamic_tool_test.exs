@@ -3,6 +3,7 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
 
   alias SymphonyElixir.Codex.DynamicTool, as: BoundDynamicTool
   alias SymphonyElixir.Linear.AgentTool, as: DynamicTool
+  alias SymphonyElixir.Notion.Adapter, as: NotionAdapter
 
   test "tool_specs advertises the linear_graphql input contract" do
     assert [
@@ -75,6 +76,43 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
     assert response["success"] == true
   end
 
+  test "notion workpad append uses the worker-facing dynamic tool path for long input" do
+    text = String.duplicate("workpad", 100_001)
+    test_pid = self()
+
+    binding = %{
+      adapter: NotionAdapter,
+      tracker_settings: %{token: "token", database_id: "database", terminal_states: ["Done"]},
+      notion_data_source_id: "source",
+      notion_issue_id: "task"
+    }
+
+    response =
+      BoundDynamicTool.execute(
+        "notion_task_append_workpad",
+        %{"text" => text},
+        binding,
+        notion_request: fn
+          "GET", "/pages/task", _params, nil, _settings ->
+            send(test_pid, :dynamic_scope_check)
+            {:ok, %{"parent" => %{"type" => "data_source_id", "data_source_id" => "source"}}}
+
+          "PATCH", "/blocks/task/children", _params, body, _settings ->
+            send(test_pid, {:dynamic_workpad_append, body})
+            {:ok, %{"id" => "append"}}
+        end
+      )
+
+    assert response["success"]
+    assert_received :dynamic_scope_check
+
+    bodies = collect_dynamic_append_bodies()
+    assert length(bodies) > 1
+    assert bodies |> Enum.flat_map(&dynamic_rich_text_items/1) |> Enum.map_join("", &get_in(&1, ["text", "content"])) == text
+    assert Enum.all?(bodies, &(length(&1["children"]) <= 100))
+    assert Enum.all?(bodies, &(byte_size(Jason.encode!(&1)) <= 500_000))
+  end
+
   test "linear_graphql returns successful GraphQL responses as tool text" do
     test_pid = self()
 
@@ -97,6 +135,16 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
     assert Jason.decode!(response["output"]) == %{"data" => %{"viewer" => %{"id" => "usr_123"}}}
     assert response["contentItems"] == [%{"type" => "inputText", "text" => response["output"]}]
   end
+
+  defp collect_dynamic_append_bodies do
+    receive do
+      {:dynamic_workpad_append, body} -> [body | collect_dynamic_append_bodies()]
+    after
+      0 -> []
+    end
+  end
+
+  defp dynamic_rich_text_items(body), do: Enum.flat_map(body["children"], &get_in(&1, ["paragraph", "rich_text"]))
 
   test "linear_graphql accepts a raw GraphQL query string" do
     test_pid = self()

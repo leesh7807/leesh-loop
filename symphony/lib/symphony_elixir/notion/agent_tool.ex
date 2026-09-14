@@ -2,6 +2,11 @@ defmodule SymphonyElixir.Notion.AgentTool do
   @moduledoc "Task-local, capability-limited Notion worker tools."
   alias SymphonyElixir.Notion.Client
 
+  @max_text_chunk_length 2_000
+  @max_rich_text_items 100
+  @max_child_blocks 100
+  @max_request_payload_bytes 500_000
+
   @spec tool_specs() :: [map()]
   def tool_specs do
     [
@@ -75,21 +80,144 @@ defmodule SymphonyElixir.Notion.AgentTool do
   end
 
   defp append_workpad(id, text, settings, client) do
-    body = %{
-      "children" => [
-        %{
-          "object" => "block",
-          "type" => "paragraph",
-          "paragraph" => %{
-            "rich_text" => [%{"type" => "text", "text" => %{"content" => text}}]
-          }
-        }
-      ]
+    batches = text |> text_chunks() |> paragraph_blocks() |> request_batches()
+    append_batches(id, batches, settings, client)
+  end
+
+  defp text_chunks(text) do
+    text_chunks(text, [])
+  end
+
+  defp text_chunks(<<>>, chunks), do: Enum.reverse(chunks)
+
+  defp text_chunks(text, chunks) do
+    chunk = String.slice(text, 0, @max_text_chunk_length)
+    rest = binary_part(text, byte_size(chunk), byte_size(text) - byte_size(chunk))
+    text_chunks(rest, [chunk | chunks])
+  end
+
+  defp paragraph_blocks(chunks), do: paragraph_blocks(chunks, [])
+
+  defp paragraph_blocks([], blocks), do: Enum.reverse(blocks)
+
+  defp paragraph_blocks(chunks, blocks) do
+    {candidate, rest} = Enum.split(chunks, @max_rich_text_items)
+    fitting_count = largest_fitting_prefix(candidate)
+    {paragraph_chunks, remaining} = Enum.split(candidate, fitting_count)
+    paragraph_blocks(remaining ++ rest, [paragraph_block(paragraph_chunks) | blocks])
+  end
+
+  defp largest_fitting_prefix(chunks), do: largest_fitting_prefix(chunks, 1, length(chunks), 1)
+
+  defp largest_fitting_prefix(_chunks, low, high, best) when low > high, do: best
+
+  defp largest_fitting_prefix(chunks, low, high, best) do
+    midpoint = div(low + high, 2)
+    candidate = Enum.take(chunks, midpoint)
+
+    if payload_size([paragraph_block(candidate)]) <= @max_request_payload_bytes do
+      largest_fitting_prefix(chunks, midpoint + 1, high, midpoint)
+    else
+      largest_fitting_prefix(chunks, low, midpoint - 1, best)
+    end
+  end
+
+  defp paragraph_block(chunks) do
+    %{
+      "object" => "block",
+      "type" => "paragraph",
+      "paragraph" => %{
+        "rich_text" => Enum.map(chunks, &%{"type" => "text", "text" => %{"content" => &1}})
+      }
+    }
+  end
+
+  defp request_batches(blocks), do: request_batches(blocks, [], [])
+
+  defp request_batches([], [], batches), do: Enum.reverse(batches)
+  defp request_batches([], current, batches), do: Enum.reverse([current | batches])
+
+  defp request_batches([block | rest], [], batches),
+    do: request_batches(rest, [block], batches)
+
+  defp request_batches([block | rest], current, batches) do
+    candidate = current ++ [block]
+
+    if length(candidate) <= @max_child_blocks and payload_size(candidate) <= @max_request_payload_bytes do
+      request_batches(rest, candidate, batches)
+    else
+      request_batches(rest, [block], [current | batches])
+    end
+  end
+
+  defp payload_size(blocks), do: Jason.encode!(%{"children" => blocks}) |> byte_size()
+
+  defp append_batches(id, batches, settings, client) do
+    total = length(batches)
+    append_batches(id, batches, settings, client, 0, total)
+  end
+
+  defp append_batches(_id, [], _settings, _client, acknowledged, total),
+    do: respond({:ok, %{"outcome" => "complete", "acknowledged_batch_count" => acknowledged, "total_batch_count" => total}})
+
+  defp append_batches(id, [blocks | rest], settings, client, acknowledged, total) do
+    body = %{"children" => blocks}
+
+    case client.("PATCH", "/blocks/#{id}/children", %{}, body, settings) do
+      {:ok, _response} ->
+        append_batches(id, rest, settings, client, acknowledged + 1, total)
+
+      {:error, reason} ->
+        append_failure(reason, acknowledged, total, acknowledged + 1)
+
+      response ->
+        append_failure(
+          {:notion_unexpected_provider_response, response},
+          acknowledged,
+          total,
+          acknowledged + 1
+        )
+    end
+  end
+
+  defp append_failure(reason, acknowledged, total, failed_batch) do
+    ambiguous = ambiguous_provider_error?(reason)
+
+    outcome =
+      cond do
+        ambiguous -> "ambiguous_provider_outcome"
+        acknowledged == 0 -> "failed_before_acknowledgement"
+        true -> "partial_append"
+      end
+
+    error = %{
+      "type" => "notion_workpad_append_failure",
+      "outcome" => outcome,
+      "acknowledged_batch_count" => acknowledged,
+      "total_batch_count" => total,
+      "failed_batch_index" => failed_batch,
+      "provider_error" => inspect(reason)
     }
 
-    client.("PATCH", "/blocks/#{id}/children", %{}, body, settings)
-    |> respond()
+    error =
+      if ambiguous do
+        Map.merge(error, %{
+          "failed_batch_durable_effect" => "unknown",
+          "retry_suffix" => "unknown"
+        })
+      else
+        error
+      end
+
+    output(false, %{"error" => error})
   end
+
+  defp ambiguous_provider_error?({:notion_transport_failure, _reason}), do: true
+  defp ambiguous_provider_error?({:transport_failure, _reason}), do: true
+  defp ambiguous_provider_error?(:timeout), do: true
+  defp ambiguous_provider_error?(:closed), do: true
+  defp ambiguous_provider_error?(:econnreset), do: true
+  defp ambiguous_provider_error?(_reason), do: false
 
   defp append_workpad_tool(id, arguments, binding, settings, client) do
     with {:ok, text} <- string_arg(arguments, "text"),
