@@ -32,3 +32,11 @@ Demonstrate the new read operation through the worker-facing dynamic-tool path w
 - `symphony/test/symphony_elixir/notion_agent_tool_test.exs` and `dynamic_tool_test.exs` for the bound provider path.
 - Symphony workflow/config and runner tests for state-driven dispatch regression.
 - `mix test`, `mix format --check-formatted`, `mix specs.check`, and `git diff --check`.
+
+## chatgpt-shot review log
+
+- Reviewed HEAD: `2c5b1b936a511347e1451583f6ce1321b2e30445`
+- Verdict: `PASS`
+- Findings: 없음.
+- Applied commit: 없음.
+- Verification: `chatgpt-shot` Notion Invocation `55b0429c-7900-4ecc-8b84-95ed3ecc89b9` completed with `# Verdict` / `PASS`.
