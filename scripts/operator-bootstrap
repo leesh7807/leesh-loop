@@ -123,8 +123,17 @@ if ! printf '%s\n' "$github_helpers" | grep -Fq 'gh auth git-credential'; then
 fi
 
 credential_response=$(printf '%s\n' 'protocol=https' 'host=github.com' '' | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null) || fail 'Git HTTPS credential helper could not provide a GitHub credential.'
-printf '%s\n' "$credential_response" | grep -q '^password=.' || fail 'Git HTTPS credential helper returned no credential.'
-unset credential_response github_helpers
+credential_username=$(printf '%s\n' "$credential_response" | sed -n 's/^username=//p' | head -n 1)
+credential_password=$(printf '%s\n' "$credential_response" | sed -n 's/^password=//p' | head -n 1)
+[ -n "$credential_username" ] && [ -n "$credential_password" ] || fail 'Git HTTPS credential helper returned no complete credential.'
+
+# A public repository can make ls-remote succeed without GitHub accepting the
+# credential selected by Git. Validate that exact helper output separately,
+# then exercise the HTTPS Git path below.
+if ! GH_HOST=github.com GH_PROMPT_DISABLED=1 GH_TOKEN="$credential_password" gh api user >/dev/null 2>&1; then
+  fail 'Git HTTPS credential helper returned a credential rejected by GitHub.'
+fi
+unset credential_response credential_username credential_password github_helpers
 
 GH_PROMPT_DISABLED=1 gh api --hostname github.com user >/dev/null 2>&1 || fail 'authenticated GitHub API probe failed.'
 GIT_TERMINAL_PROMPT=0 git -c credential.interactive=never ls-remote "$github_repository_url" HEAD >/dev/null 2>&1 || fail 'authenticated HTTPS Git probe failed.'

@@ -110,3 +110,14 @@ Verify through the intended bootstrap and dispatch paths, using representative r
 - Applied commit: `18a480e4a8937186e48db01ccd46db7cd5269e71`.
 - Verification: the failing shell form now exits successfully with `exec env`; formatter,
   `mix specs.check`, targeted Symphony tests (80/80), shell syntax, and `git diff --check` pass.
+
+### Round 2
+
+- Reviewed HEAD: `7b788b7230e135d2213744b57e619873afbb2c56` on [PR #16](https://github.com/leesh7807/leesh-loop/pull/16).
+- Verdict: `FINDINGS`.
+- Accepted the GitHub credential finding: public `ls-remote` does not prove that the credential
+  selected by Git is accepted. Added an authenticated API probe using the exact helper-returned
+  token before the HTTPS Git probe.
+- Applied commit: `d966d5bb29d93e487d5533d1d5c4c65d7356d7b4`.
+- Verification: a stale first credential helper now fails bootstrap before `chatgpt-shot`; the
+  valid host credential completes the full bootstrap and real smoke submit successfully.
