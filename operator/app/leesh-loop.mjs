@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { chmod, mkdir, open, readFile, readlink, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -40,22 +40,7 @@ async function loadConfig(file) {
   return resolved;
 }
 async function withLock(config, action) {
-  const { lock } = paths(config); await mkdir(dirname(lock), { recursive: true, mode: 0o700 });
-  const startTicks = processStartTicks(process.pid);
-  if (!startTicks) throw new Error('could not establish lifecycle lease identity');
-  const lease = `${process.pid}:${startTicks}:${randomUUID()}`;
-  for (;;) {
-    try { await symlink(lease, lock); break; }
-    catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-      let owner;
-      try { owner = (await readlink(lock)).split(':'); } catch { continue; }
-      const [ownerPid, ownerStartTicks] = owner;
-      if (!/^\d+$/.test(ownerPid || '') || !ownerStartTicks || processStartTicks(Number(ownerPid)) !== ownerStartTicks) { await unlink(lock).catch(() => {}); continue; }
-      await sleep(50);
-    }
-  }
-  try { return await action(); } finally { if (await readlink(lock).catch(() => null) === lease) await unlink(lock).catch(() => {}); }
+  return action();
 }
 function effective(config, runtimeId, port) {
   return { workflow_path: config.workflow_path, notion_database_url: config.notion_database_url, symphony_workspace_root: config.symphony_workspace_root, worker_interface_identity: config.worker_interface_identity || 'operator/external/chatgpt-shot/chatgpt-shot', github_repository_url: config.github_repository_url || null, symphony_command: canonical(config.symphony_command || join(root, 'operator/app/run-symphony')), dashboard: `http://127.0.0.1:${port}`, runtime_id: runtimeId };
@@ -158,6 +143,19 @@ const html = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&l
 function page(config, { plan = '', result = '' } = {}) { return `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Leesh Loop Publish</title><main><h1>Leesh Loop Publish</h1><form method="post"><label for="plan">Plan</label><textarea id="plan" name="plan" rows="20" required>${html(plan)}</textarea><button>Publish</button></form><p><a href="${html(config.notion_database_url)}">Notion Tasks</a> · <a href="${`http://127.0.0.1:${Number(config.symphony_port || 4100)}`}">Symphony Dashboard</a></p><output>${html(result)}</output></main>`; }
 async function serve(config) { const server = createServer(async (req, res) => { if (req.method === 'GET') { res.end(page(config)); return; } if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; } let body = ''; for await (const chunk of req) body += chunk; const plan = new URLSearchParams(body).get('plan') || ''; const temp = join(paths(config).dir, `publish-${randomUUID()}.md`); try { await writeFile(temp, plan); const publisher = spawn('node', [join(root, 'operator/notion_publisher/dist/cli.js'), '--plan', temp, '--config', join(root, 'operator/notion_publisher/examples/publisher-config.json'), '--database-url', config.notion_database_url], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] }); let output = '', errors = ''; for await (const chunk of publisher.stdout) output += chunk; for await (const chunk of publisher.stderr) errors += chunk; const code = await new Promise(resolveExit => publisher.on('close', resolveExit)); res.end(page(config, { plan: code === 0 ? '' : plan, result: code === 0 ? output : errors || 'Publishing failed.' })); } finally { await remove(temp); } }); server.listen(uiPort(config), '127.0.0.1'); }
 
-const [command, configFile = defaultConfig] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const locked = args[0] === '__locked';
+const [command, configFile = defaultConfig] = locked ? args.slice(1) : args;
 if (!['start', 'stop', 'serve'].includes(command)) { console.error('Usage: leesh-loop <start|stop|serve> [project-config.json]'); process.exitCode = 2; }
-else { loadConfig(configFile).then(config => command === 'start' ? start(config) : command === 'stop' ? stop(config) : serve(config)).then(value => { if (value) console.log(JSON.stringify(value)); }).catch(error => { console.error(`Operator failed: ${error.message}`); process.exitCode = 1; }); }
+else {
+  loadConfig(configFile).then(config => {
+    if (!locked && ['start', 'stop'].includes(command)) {
+      const lockPath = join(stateRoot(config), 'lifecycle.flock');
+      const result = spawnSync('flock', ['-x', lockPath, process.execPath, process.argv[1], '__locked', command, config.configuration_path], { cwd: root, stdio: 'inherit' });
+      if (result.error) throw result.error;
+      process.exitCode = result.status ?? 1;
+      return undefined;
+    }
+    return command === 'start' ? start(config) : command === 'stop' ? stop(config) : serve(config);
+  }).then(value => { if (value) console.log(JSON.stringify(value)); }).catch(error => { console.error(`Operator failed: ${error.message}`); process.exitCode = 1; });
+}
