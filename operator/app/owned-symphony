@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+# The Operator records this wrapper before it can exec Symphony.  A crashed
+# Operator can therefore always attribute and terminate a waiting child.
+[ -n "${SYMPHONY_OWNERSHIP_FILE:-}" ] || exit 64
+[ -n "${SYMPHONY_RUNTIME_ID:-}" ] || exit 64
+
+attempt=0
+while [ ! -f "$SYMPHONY_OWNERSHIP_FILE" ]; do
+  [ "$attempt" -lt 100 ] || exit 65
+  sleep 0.01
+  attempt=$((attempt + 1))
+done
+
+exec "$@"

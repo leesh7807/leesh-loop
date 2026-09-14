@@ -54,7 +54,7 @@ duplicate and is never repaired or rewritten. The publisher creates no
 The CLI is a convenience caller:
 
 ```sh
-cd notion_publisher && npm install && npm run build
+cd operator/notion_publisher && npm install && npm run build
 node dist/src/cli.js \
   --plan /path/to/plan.md \
   --config /path/to/publisher-config.json \

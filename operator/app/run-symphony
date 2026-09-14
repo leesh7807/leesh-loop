@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+repository_root=$(CDPATH= cd -- "$script_dir/../.." && pwd -P)
+
+cd "$repository_root/operator/symphony"
+exec mise exec -- mix run --no-start -e 'SymphonyElixir.CLI.main(System.argv())' -- "$@"

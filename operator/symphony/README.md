@@ -51,7 +51,7 @@ the binary directly:
 
 ```bash
 export SYMPHONY_WORKSPACE_ROOT="$HOME/.local/share/leesh-loop/workspaces"
-../scripts/operator-bootstrap -- \
+../app/operator-bootstrap -- \
   ./bin/symphony \
   --i-understand-that-this-will-be-running-without-the-usual-guardrails \
   ../WORKFLOW.md

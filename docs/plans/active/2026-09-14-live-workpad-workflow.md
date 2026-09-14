@@ -29,7 +29,7 @@ Demonstrate the new read operation through the worker-facing dynamic-tool path w
 
 ## Verification Tools
 
-- `symphony/test/symphony_elixir/notion_agent_tool_test.exs` and `dynamic_tool_test.exs` for the bound provider path.
+- `operator/symphony/test/symphony_elixir/notion_agent_tool_test.exs` and `dynamic_tool_test.exs` for the bound provider path.
 - Symphony workflow/config and runner tests for state-driven dispatch regression.
 - `mix test`, `mix format --check-formatted`, `mix specs.check`, and `git diff --check`.
 

@@ -33,6 +33,7 @@ defmodule SymphonyElixir.Orchestrator do
       :poll_check_in_progress,
       :tick_timer_ref,
       :tick_token,
+      :dispatch_enabled,
       task_supervisor: SymphonyElixir.TaskSupervisor,
       running: %{},
       completed: MapSet.new(),
@@ -64,20 +65,27 @@ defmodule SymphonyElixir.Orchestrator do
           poll_check_in_progress: false,
           tick_timer_ref: nil,
           tick_token: nil,
+          dispatch_enabled: false,
           task_supervisor: Keyword.get(opts, :task_supervisor, SymphonyElixir.TaskSupervisor),
           codex_totals: @empty_codex_totals,
           codex_rate_limits: nil
         }
 
-        run_terminal_workspace_cleanup()
-        state = schedule_tick(state, 0)
-
+        :ok = SymphonyElixir.DispatchBarrier.subscribe(self())
         {:ok, state}
 
       {:error, reason} ->
         {:stop, reason}
     end
   end
+
+  @impl true
+  def handle_info(:dispatch_authorized, %{dispatch_enabled: false} = state) do
+    run_terminal_workspace_cleanup()
+    {:noreply, state |> Map.put(:dispatch_enabled, true) |> schedule_tick(0)}
+  end
+
+  def handle_info(:dispatch_authorized, state), do: {:noreply, state}
 
   @impl true
   def handle_info({:tick, tick_token}, %{tick_token: tick_token} = state)
