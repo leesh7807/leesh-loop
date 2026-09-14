@@ -87,3 +87,11 @@ page body structure.
   review commands: verify delivery and review evidence.
 
 ## chatgpt-shot review log
+
+### Round 1
+
+- 리뷰한 HEAD: `da315be4a9adb5bc273d44e3c9a24b505a4b4365`
+- verdict: `FINDINGS`
+- Finding 수용: finalize 직전 task Identifier readback이 없어 외부 변경 후에도 Ready가 될 수 있었고, Plan source 판별이 임의의 추가 속성을 허용했다. 둘 다 현재 경로에서 재현되어 수정했다.
+- 적용 커밋: `e00cd61` (`Validate canonical publication identity and Plan schemas`)
+- 검증: publisher `npm test` 18개 통과; Symphony Notion 대상 16개, format check, `specs.check` 통과.
