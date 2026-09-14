@@ -12,7 +12,7 @@ const defaultConfig = join(appRoot, 'project.json');
 const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 const canonical = value => resolve(value);
 const stateRoot = config => canonical(config.state_directory || join(appRoot, '.runtime'));
-const paths = config => { const dir = stateRoot(config); return { dir, state: join(dir, 'runtime.json'), lock: join(dir, 'lifecycle.lock'), ownership: join(dir, 'ownership.json'), authorization: join(dir, 'dispatch-authorization.json'), acknowledgement: join(dir, 'dispatch-acknowledgement.json') }; };
+const paths = config => { const dir = stateRoot(config); return { dir, state: join(dir, 'runtime.json'), ui: join(dir, 'publish-ui.json'), lock: join(dir, 'lifecycle.lock'), ownership: join(dir, 'ownership.json'), authorization: join(dir, 'dispatch-authorization.json'), acknowledgement: join(dir, 'dispatch-acknowledgement.json') }; };
 
 async function atomicJson(path, value) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -101,10 +101,22 @@ async function openWindow(config, dashboard) {
 function spawnBrowser(command, args) { return new Promise(resolveBrowser => { const child = spawn(command, args, { detached: true, stdio: 'ignore' }); child.once('error', () => resolveBrowser(false)); child.once('spawn', () => { child.unref(); resolveBrowser(true); }); }); }
 function uiPort(config) { return Number(config.ui_port || 4310); }
 function uiUrl(config) { return `http://127.0.0.1:${uiPort(config)}`; }
+function uiIdentity(config) { return { notion_database_url: config.notion_database_url, ui_port: uiPort(config), publisher: join(root, 'operator/notion_publisher/dist/cli.js') }; }
+function sameIdentity(first, second) { return JSON.stringify(first) === JSON.stringify(second); }
+async function stopUi(config) { const ui = await json(paths(config).ui); if (ui) await terminate(ui); await remove(paths(config).ui); }
 async function ensureUi(config) {
-  try { await reachable(uiUrl(config)); return; } catch { /* start the project-local publish surface */ }
+  const p = paths(config), identity = uiIdentity(config), ui = await json(p.ui);
+  if (ui && await processStartTicks(ui.pid) === ui.process_start_ticks && sameIdentity(ui.identity, identity)) {
+    try { await reachable(uiUrl(config)); return; } catch { await stopUi(config); }
+  } else if (ui) await stopUi(config);
+  let unmanaged = false;
+  try { await reachable(uiUrl(config)); unmanaged = true; } catch { /* start the project-local publish surface */ }
+  if (unmanaged) throw new Error(`publish surface at ${uiUrl(config)} is not owned by this project`);
   const child = spawn(process.execPath, [new URL(import.meta.url).pathname, 'serve', config.configuration_path], { cwd: root, detached: true, stdio: 'ignore', env: process.env });
   child.unref();
+  const process_start_ticks = processStartTicks(child.pid);
+  if (!process_start_ticks) throw new Error(`could not record startup identity for publish UI PID ${child.pid}`);
+  await atomicJson(p.ui, { pid: child.pid, process_start_ticks, identity });
   await waitFor(async () => { try { await reachable(uiUrl(config)); return true; } catch { return false; } }, 'publish surface');
 }
 
@@ -136,7 +148,7 @@ async function start(config) {
     } catch (error) { const state = await json(p.state); try { await terminate(state); await clear(config); } catch (cleanupError) { await atomicJson(p.state, { ...(state || starting), status: 'failed', cleanup_error: String(cleanupError) }); } throw error; }
   });
 }
-async function stop(config) { return withLock(config, async () => { const state = await json(paths(config).state); if (state) await terminate(state); await clear(config); return { stopped: Boolean(state) }; }); }
+async function stop(config) { return withLock(config, async () => { const state = await json(paths(config).state); if (state) await terminate(state); await stopUi(config); await clear(config); return { stopped: Boolean(state) }; }); }
 
 const html = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 function page(config, { plan = '', result = '' } = {}) { return `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Leesh Loop Publish</title><main><h1>Leesh Loop Publish</h1><form method="post"><label for="plan">Plan</label><textarea id="plan" name="plan" rows="20" required>${html(plan)}</textarea><button>Publish</button></form><p><a href="${html(config.notion_database_url)}">Notion Tasks</a> · <a href="${`http://127.0.0.1:${Number(config.symphony_port || 4100)}`}">Symphony Dashboard</a></p><output>${html(result)}</output></main>`; }

@@ -87,5 +87,13 @@ Make Leesh Loop a runnable local project environment without turning externally 
 - Reviewed HEAD: `2422bceedd6e7c28d2a1c803b09261c545699228` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
 - Verdict: `FINDINGS`.
 - Accepted: a stale ownership record could satisfy a file-existence-only child gate before the new PID identity was durable.
+- Applied commit: `5b64d77832315e413a5c98d8e906f8b1529f6757`.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 7
+
+- Reviewed HEAD: `5b64d77832315e413a5c98d8e906f8b1529f6757` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: a detached untracked Publish UI could survive stop and continue publishing with stale Notion configuration.
 - Applied commit: pending.
 - Verification: pending post-fix Node UI/publisher/Symphony formatting and lifecycle-path checks.
