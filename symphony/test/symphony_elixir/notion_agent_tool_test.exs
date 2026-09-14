@@ -93,7 +93,7 @@ defmodule SymphonyElixir.Notion.AgentToolTest do
     assert error["outcome"] == "failed_before_acknowledgement"
     assert error["acknowledged_batch_count"] == 0
     assert error["total_batch_count"] > 1
-    assert error["provider_error"] =~ "notion_rate_limited"
+    assert error["provider_error"] == %{"kind" => "notion_error", "reason" => "notion_rate_limited"}
   end
 
   test "a later known failure stops subsequent batches and reports acknowledged progress" do
@@ -121,7 +121,40 @@ defmodule SymphonyElixir.Notion.AgentToolTest do
     assert error["outcome"] == "partial_append"
     assert error["acknowledged_batch_count"] == 1
     assert error["total_batch_count"] > 2
-    assert error["provider_error"] =~ "notion_rate_limited"
+    assert error["provider_error"] == %{"kind" => "notion_error", "reason" => "notion_rate_limited"}
+  end
+
+  test "server response failures preserve ambiguity and structured provider details" do
+    text = String.duplicate("5", 600_001)
+
+    response =
+      append_response(text, fn
+        "GET", "/pages/task", _params, nil, _settings ->
+          scope_response()
+
+        "PATCH", "/blocks/task/children", _params, _body, _settings ->
+          case Process.get(:workpad_server_attempt, 0) do
+            0 ->
+              Process.put(:workpad_server_attempt, 1)
+              {:ok, %{"id" => "first"}}
+
+            1 ->
+              {:error, {:notion_provider_response, 503, %{"code" => "service_unavailable", "message" => "try again"}}}
+          end
+      end)
+
+    assert response["success"] == false
+
+    error = Jason.decode!(response["output"])["error"]
+    assert error["outcome"] == "ambiguous_provider_outcome"
+    assert error["acknowledged_batch_count"] == 1
+    assert error["failed_batch_durable_effect"] == "unknown"
+
+    assert error["provider_error"] == %{
+             "kind" => "notion_provider_response",
+             "status" => 503,
+             "body" => %{"code" => "service_unavailable", "message" => "try again"}
+           }
   end
 
   test "transport failures preserve ambiguity instead of claiming an exact durable prefix" do
@@ -150,7 +183,7 @@ defmodule SymphonyElixir.Notion.AgentToolTest do
     assert error["acknowledged_batch_count"] == 1
     assert error["failed_batch_durable_effect"] == "unknown"
     assert error["retry_suffix"] == "unknown"
-    assert error["provider_error"] =~ "notion_transport_failure"
+    assert error["provider_error"] == %{"kind" => "notion_transport_failure", "reason" => ":timeout"}
   end
 
   test "out-of-scope workpad append fails before mutation" do

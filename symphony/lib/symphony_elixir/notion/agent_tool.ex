@@ -196,7 +196,7 @@ defmodule SymphonyElixir.Notion.AgentTool do
       "acknowledged_batch_count" => acknowledged,
       "total_batch_count" => total,
       "failed_batch_index" => failed_batch,
-      "provider_error" => inspect(reason)
+      "provider_error" => provider_error_details(reason)
     }
 
     error =
@@ -213,11 +213,39 @@ defmodule SymphonyElixir.Notion.AgentTool do
   end
 
   defp ambiguous_provider_error?({:notion_transport_failure, _reason}), do: true
+  defp ambiguous_provider_error?({:notion_provider_response, status, _body}) when status >= 500, do: true
   defp ambiguous_provider_error?({:transport_failure, _reason}), do: true
   defp ambiguous_provider_error?(:timeout), do: true
   defp ambiguous_provider_error?(:closed), do: true
   defp ambiguous_provider_error?(:econnreset), do: true
   defp ambiguous_provider_error?(_reason), do: false
+
+  defp provider_error_details({:notion_provider_response, status, body}) do
+    %{"kind" => "notion_provider_response", "status" => status, "body" => json_safe(body)}
+  end
+
+  defp provider_error_details({:notion_transport_failure, reason}) do
+    %{"kind" => "notion_transport_failure", "reason" => inspect(reason)}
+  end
+
+  defp provider_error_details(reason) when is_atom(reason) do
+    %{"kind" => "notion_error", "reason" => Atom.to_string(reason)}
+  end
+
+  defp provider_error_details(reason), do: %{"kind" => "notion_error", "reason" => inspect(reason)}
+
+  defp json_safe(value) when is_map(value) do
+    Map.new(value, fn {key, nested} -> {json_key(key), json_safe(nested)} end)
+  end
+
+  defp json_safe(value) when is_list(value), do: Enum.map(value, &json_safe/1)
+  defp json_safe(value) when is_tuple(value), do: inspect(value)
+  defp json_safe(value) when is_atom(value) and value not in [nil, true, false], do: Atom.to_string(value)
+  defp json_safe(value), do: value
+
+  defp json_key(key) when is_binary(key), do: key
+  defp json_key(key) when is_atom(key), do: Atom.to_string(key)
+  defp json_key(key), do: inspect(key)
 
   defp append_workpad_tool(id, arguments, binding, settings, client) do
     with {:ok, text} <- string_arg(arguments, "text"),
