@@ -417,6 +417,17 @@ Fields:
   - Relative paths are resolved relative to the directory containing `WORKFLOW.md`.
   - The effective workspace root is normalized to an absolute path before use.
 
+This repository's workflow places the effective workspace root under Operator control through
+`$SYMPHONY_WORKSPACE_ROOT`. The Operator must select a dedicated absolute directory outside the
+canonical repository and run the readiness bootstrap before starting Symphony. Workspace-root
+selection is not a worker task responsibility.
+
+The bootstrap also owns external GitHub credentials and the `chatgpt-shot` installation,
+authentication, browser/session state, Service lifecycle, and persistent XDG state. A dispatched
+worker receives only the Operator-prepared `chatgpt-shot submit "<prompt>"` Service interface; the
+bootstrap's real submit smoke round trip is the authoritative pre-dispatch readiness check.
+Bootstrap failure is reported before dispatch and does not create a tracker lifecycle transition.
+
 #### 5.3.4 `hooks` (object)
 
 Fields:

@@ -46,6 +46,24 @@ tracker issue can become a dispatch candidate again after restart.
      Team Settings → Workflow in Linear.
 6. Follow the instructions below to install the required runtime dependencies and start the service.
 
+For this repository, start Symphony through the Operator readiness boundary rather than launching
+the binary directly:
+
+```bash
+export SYMPHONY_WORKSPACE_ROOT="$HOME/.local/share/leesh-loop/workspaces"
+../scripts/operator-bootstrap -- \
+  ./bin/symphony \
+  --i-understand-that-this-will-be-running-without-the-usual-guardrails \
+  ../WORKFLOW.md
+```
+
+The Operator bootstrap owns workspace-root placement, GitHub HTTPS credential setup, and all
+`chatgpt-shot` installation, authentication, browser/profile, and Service lifecycle work. It
+requires a successful real `chatgpt-shot submit` smoke round trip, not only `doctor`, before the
+Symphony command is started. The worker receives only the read-only `chatgpt-shot submit
+"<prompt>"` Service client; it does not start or repair the Service and does not write the
+Operator-owned XDG or browser state.
+
 ## Prerequisites
 
 We recommend using [mise](https://mise.jdx.dev/) to manage Elixir/Erlang versions.
