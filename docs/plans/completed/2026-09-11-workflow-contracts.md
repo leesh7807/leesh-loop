@@ -6,7 +6,7 @@ Define the reusable Leesh Loop Plan-based worker guidance and this repository's 
 
 ## Definitions
 
-**Accepted Plan** is the immutable execution input published to a Notion task and passed to a worker. **Repository Plan** is the durable local artifact corresponding to it. **Workpad** is the mutable execution record. **Human Handoff** is a repository-defined, non-active, non-terminal tracker state. **chatgpt-shot review** is the independent review/fix/re-review gate after normal verification.
+**Accepted Plan** is the immutable execution input published to a Notion task and passed to a worker. **Repository Plan** is the durable local artifact corresponding to it. **Workpad** is the mutable execution record. The former separate human-handoff tracker state has been superseded by `Human Review`. **chatgpt-shot review** is the independent review/fix/re-review gate after normal verification.
 
 ## Intent
 
@@ -18,8 +18,8 @@ Workers trust normally published tasks and execute the accepted objective. Symph
 - The Accepted Plan H1 `# <date-summary>` determines only `docs/plans/active/<date-summary>.md`. A worker never searches for or guesses another Plan; an unidentifiable H1 is an ordinary blocker. A missing deterministic path in a fresh workspace is initialized from the immutable Accepted Plan without overwriting an existing Repository Plan.
 - Workpad records execution history. Before handoff, update the Repository Plan only for material durable contract corrections caused by the actual result.
 - The root workflow uses Symphony `after_create` to clone this repository and install Node and Elixir dependencies for a fresh workspace. Continuations reuse Symphony's workspace without a reset.
-- This repository uses `Ready`, `In Progress`, and `Rework` as active states; `Human Handoff` and `Human Review` as non-terminal handoffs; and `Done`/`Cancelled` as terminal states.
-- The root workflow requires Korean Workpad entries and a `chatgpt-shot submit` review/fix/re-review gate. An unsuccessful invocation hands off to `Human Handoff`, not a terminal state.
+- This repository uses `Ready`, `In Progress`, and `Rework` as active states; `Human Review` as its non-terminal human pause; and `Done`/`Cancelled` as terminal states.
+- The root workflow requires Korean Workpad entries and a `chatgpt-shot submit` review/fix/re-review gate. An unsuccessful invocation pauses at `Human Review`, not a terminal state.
 - After final Plan comparison and before its PR, a delivered Repository Plan moves to `completed/`; that artifact move does not terminalize the tracker task.
 - No Publisher change, Symphony source change, publication/binding recovery protocol, completion checkpoint protocol, terminal reopen protocol, or Leesh Loop-specific human-decision taxonomy is introduced.
 
@@ -52,7 +52,7 @@ Workers trust normally published tasks and execute the accepted objective. Symph
 ### 2026-09-11 round 3
 
 - HEAD `f93df4a70fe2cb1df67bbb2573c6d0ad97aa492f`: `FINDINGS`.
-- Accepted the unavailable-task-surface correction: only an available surface can perform the required `Human Handoff`; total surface/auth loss is reported as an external integration blocker without claiming an impossible mutation.
+- Accepted the unavailable-task-surface correction: only an available surface can perform the required human-pause transition; total surface/auth loss is reported as an external integration blocker without claiming an impossible mutation.
 - Accepted the review-ledger correction: the compact per-finding ledger in this Repository Plan is now an explicit repository extension, while transcripts and ordinary execution history remain Workpad-only.
 
 ### 2026-09-11 round 4

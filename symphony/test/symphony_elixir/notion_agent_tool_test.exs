@@ -240,6 +240,69 @@ defmodule SymphonyElixir.Notion.AgentToolTest do
     assert response["output"] =~ "comment-2"
   end
 
+  test "workpad read returns every canonical block in provider order" do
+    response =
+      AgentTool.execute(
+        "notion_task_read_workpad",
+        %{},
+        tracker_settings: notion_settings(),
+        tracker_binding: %{notion_data_source_id: "source", notion_issue_id: "task"},
+        notion_request: fn
+          "GET", "/pages/task", _params, nil, _settings ->
+            {:ok, %{"parent" => %{"type" => "data_source_id", "data_source_id" => "source"}}}
+
+          "GET", "/blocks/task/children", params, nil, _settings ->
+            case params["start_cursor"] do
+              nil -> {:ok, %{"results" => [%{"id" => "block-1"}], "has_more" => true, "next_cursor" => "page-2"}}
+              "page-2" -> {:ok, %{"results" => [%{"id" => "block-2"}, %{"id" => "block-3"}], "has_more" => false}}
+            end
+        end
+      )
+
+    assert response["success"]
+    assert Jason.decode!(response["output"]) == %{"blocks" => [%{"id" => "block-1"}, %{"id" => "block-2"}, %{"id" => "block-3"}]}
+  end
+
+  test "workpad read rejects unrelated tasks and exposes provider failures structurally" do
+    out_of_scope =
+      AgentTool.execute(
+        "notion_task_read_workpad",
+        %{},
+        tracker_settings: notion_settings(),
+        tracker_binding: %{notion_data_source_id: "source", notion_issue_id: "task"},
+        notion_request: fn "GET", "/pages/task", _params, nil, _settings -> {:ok, %{"parent" => %{"type" => "page_id", "page_id" => "other"}}} end
+      )
+
+    assert out_of_scope["success"] == false
+
+    assert Jason.decode!(out_of_scope["output"])["error"] == %{
+             "type" => "notion_workpad_read_failure",
+             "reason" => %{"kind" => "notion_error", "reason" => "notion_out_of_scope_task"}
+           }
+
+    provider_failure =
+      AgentTool.execute(
+        "notion_task_read_workpad",
+        %{},
+        tracker_settings: notion_settings(),
+        tracker_binding: %{notion_data_source_id: "source", notion_issue_id: "task"},
+        notion_request: fn
+          "GET", "/pages/task", _params, nil, _settings ->
+            {:ok, %{"parent" => %{"type" => "data_source_id", "data_source_id" => "source"}}}
+
+          "GET", "/blocks/task/children", _params, nil, _settings ->
+            {:error, {:notion_provider_response, 502, %{"code" => "bad_gateway"}}}
+        end
+      )
+
+    assert provider_failure["success"] == false
+
+    assert Jason.decode!(provider_failure["output"])["error"] == %{
+             "type" => "notion_workpad_read_failure",
+             "reason" => %{"kind" => "notion_provider_response", "status" => 502, "body" => %{"code" => "bad_gateway"}}
+           }
+  end
+
   test "read returns the bound task page" do
     response =
       AgentTool.execute(
@@ -264,6 +327,7 @@ defmodule SymphonyElixir.Notion.AgentToolTest do
 
   test "unbound, unsupported, invalid argument, and scope failures stay explicit" do
     assert AgentTool.execute("notion_task_read", %{}, tracker_settings: notion_settings())["output"] =~ "notion_unbound_task"
+    assert AgentTool.execute("notion_task_read_workpad", %{}, tracker_settings: notion_settings())["output"] =~ "notion_unbound_task"
 
     assert AgentTool.execute(
              "unsupported",

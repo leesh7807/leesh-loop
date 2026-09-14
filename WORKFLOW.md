@@ -19,7 +19,7 @@ workspace:
   root: $SYMPHONY_WORKSPACE_ROOT
 hooks:
   # Symphony executes this only for a newly-created workspace. Continuations use
-  # the preserved workspace and are never reset by this workflow.
+  # the preserved workspace; Human Review -> Rework is the documented reset exception.
   after_create: |
     git clone https://github.com/leesh7807/leesh-loop.git .
     (cd notion_publisher && npm ci)
@@ -50,7 +50,7 @@ Accepted Plan:
 {{ issue.description }}
 
 {% if attempt %}
-This is a Symphony continuation or retry. Resume the existing workspace state; do not restart fresh-workspace setup or repeat completed work unless later changes require it.
+This is a Symphony continuation or retry. Reconstruct the current State, Repository Plan, Workpad, and workspace before acting. Preserve the workspace except for the explicit Human Review → Rework reset protocol.
 {% endif %}
 
 Read `AGENTS.md`, then apply [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md). The template is the reusable Plan-based execution policy; this file supplies this repository's concrete rules.
@@ -72,7 +72,7 @@ record, calls the already-running local Service, and never starts or repairs it.
 `$XDG_CACHE_HOME/chatgpt-shot`, the browser profile, Service lifecycle state, and Notion
 credentials remain Operator-owned and outside the worker workspace.
 
-Use the Notion task surface for the Accepted Plan, Workpad, and state changes. Write the Workpad in Korean; preserve code, commands, identifiers, paths, API names, and quotations verbatim where accuracy requires it. If independent review fails while this surface remains available, record the cause and current repository/verification state in Korean, move the task to `Human Handoff`, confirm the state readback, and stop. `Human Handoff` is non-active and non-terminal; it becomes runnable again only when a human returns it to an active state.
+Use the Notion task surface for the Accepted Plan, Workpad, and state changes. Write the Workpad in Korean; preserve code, commands, identifiers, paths, API names, and quotations verbatim where accuracy requires it. `notion_task_read_workpad` reads only the complete canonical Workpad of this bound task; use it rather than arbitrary Notion access.
 
 If the task surface itself or its authentication is unavailable, it cannot record a Workpad entry or transition its own state. Do not claim that a same-surface handoff occurred and do not invent a fallback mutation channel. End with the concrete external-access blocker in the worker result; the operator must restore access or perform the provider-side handoff. This is an integration/access failure outside normal worker execution, not a repository-defined recovery lifecycle.
 
@@ -81,9 +81,47 @@ If the task surface itself or its authentication is unavailable, it cannot recor
 The repository state vocabulary is:
 
 - `Ready`, `In Progress`, and `Rework` are active states. Move `Ready` work to `In Progress` before implementation; use `Rework` for review-driven work.
-- `Human Handoff` is the non-active, non-terminal state for an external blocker, including a failed independent review invocation.
-- `Human Review` is the non-active, non-terminal state after a validated PR and successful independent-review gate, awaiting human review or merge.
+- `Human Review` is the single non-active, non-terminal human pause state. Use it after a validated PR, for a human-required blocker, or when independent review cannot continue; record `reason: review` or `reason: blocker` in the Workpad.
 - `Done` and `Cancelled` are terminal states. Move to `Done` only after the full repository lifecycle, including required human review/merge, has actually ended. Never use terminal state merely because implementation, verification, or independent review finished.
+
+## Dispatch reconstruction and live Workpad
+
+Every dispatch—initial, continuation, retry, and either return from Human Review—begins by reading current task State and Accepted Plan, resolving the deterministic Repository Plan, reading `notion_task_read_workpad`, inspecting the actual workspace/Git state, and reconciling the latest relevant markers. State is lifecycle authority; the workspace is concrete repository truth; the Workpad is live execution context; the Repository Plan is the durable execution contract. If Workpad and workspace differ, reconcile from the workspace and write a concise Korean current-state entry when that materially clarifies work. Do not repeat completed work merely because a worker restarted.
+
+Write the Workpad promptly at meaningful milestones: a material approach choice/change, substantial implementation, material finding/constraint, representative validation, review result/disposition/fix, blocker, remaining work, Human Review preparation/entry, Review Input consumption, or Rework reset. Do not use it as command-by-command logging. Update the Repository Plan only for material contract changes, never routine execution history.
+
+Use only these lifecycle entries, retaining ordinary context around them:
+
+```text
+Human Review
+cycle: N
+reason: review | blocker
+delivered_head: <HEAD | none>
+comment_baseline: <comment-id | none>
+
+Human Review Entered
+cycle: N
+
+Review Input
+cycle: N
+mode: continue | rework
+from_comment: <comment-id | none>
+through_comment: <comment-id | none>
+
+<review input>
+
+Rework Reset Complete
+cycle: N
+origin_main: <resolved-commit>
+```
+
+Prepare each independent Human Review interval with the next monotonically increasing cycle number (starting at 1), latest comment ID as its baseline, and current delivered HEAD. Confirm the Workpad append, then transition State to `Human Review`. When the current execution directly receives an explicit State-mutation failure, retry that mutation with the same prepared cycle; do not create another cycle. On State success, append `Human Review Entered` when possible. If the State is observed as `Human Review` with its Entered marker missing, repair that marker when possible and do not dispatch. Missing Entered evidence is not a transaction log: never force an explicitly active `In Progress` or `Rework` task back to Human Review based on it.
+
+Comments alone never dispatch, mutate State, or imply continuation/Rework. At the first active observation after the latest unconsumed Human Review cycle, first reuse an existing `Review Input`; otherwise read provider-ordered comments once, fix `through_comment` to the latest currently visible comment, and append immutable bounded input for `(comment_baseline, through_comment]`. Use `mode: continue` for `In Progress` and `mode: rework` for `Rework`. If a non-`none` baseline cannot be located despite later comments, surface that ambiguity rather than guessing. Retries reuse the same input and never widen it with later comments.
+
+`Human Review → In Progress` resumes the preserved workspace, branch, Plan, and valid work after reconciliation. `Human Review → Rework` rejects the approach: first materialize `mode: rework`, read the exact latest Repository Plan, fetch current `origin/main`, and check `Rework Reset Complete` for that cycle. If absent, recreate implementation state and a fresh task branch from fetched `origin/main`, restore the current Plan to `docs/plans/active/<date-summary>.md` (including a Plan currently under `completed/`), append/confirm `Rework Reset Complete`, and only then implement. Do not reset again when that cycle's marker already exists. If reset/restoration cannot be established, do not dispatch Rework.
+
+For a human-required blocker, record the blocker, required human action, workspace/validation state, and remaining work; prepare `Human Review` with `reason: blocker`; transition to `Human Review`; and stop once observed there. If the Notion surface is unavailable, report that concrete access failure rather than claiming a state transition.
 
 Create a task branch, make only task-related commits, push it, and open a PR against `main`; never merge directly to `main`. Before opening the PR, inspect the final diff and status, run applicable repository checks and `git diff --check`, compare the actual result with the Repository Plan as required by the reusable template, apply any needed durable correction, and move the delivered Plan to `docs/plans/completed/`. That move does not make the task terminal. Record material verification, contract decisions, root causes, and artifact changes as PR comments when a PR exists.
 
@@ -123,8 +161,8 @@ Give the request enough Accepted Plan and changed-result context to judge the ob
 
 Treat findings as review input, not automatic edit commands. Independently validate each finding against the current HEAD and its execution path. Fix only a material actionable finding with concrete evidence and observable impact; rerun affected verification, commit/push, and review the new HEAD. Record a rejection reason without editing for findings that are not valid. Repeat until the Result is `PASS`, or all findings are resolved/rejected and no accepted fix produced a new HEAD.
 
-If `chatgpt-shot` does not complete normally, it has not passed this gate. Record the failure reason and current implementation/verification state in the Korean Workpad, move the task to `Human Handoff`, confirm readback, and stop. Do not create an automatic recovery or failure-code retry policy. For `SUBMISSION_UNCERTAIN`, `INVOCATION_CANCELLED`, or `EXECUTION_TIMEOUT`, inspect the Notion Invocation before any resubmission.
+If `chatgpt-shot` does not complete normally, it has not passed this gate. Record the failure reason and current implementation/verification state in the Korean Workpad, move the task to `Human Review` with `reason: blocker`, confirm readback, and stop. Do not create an automatic recovery or failure-code retry policy. For `SUBMISSION_UNCERTAIN`, `INVOCATION_CANCELLED`, or `EXECUTION_TIMEOUT`, inspect the Notion Invocation before any resubmission.
 
 After a passing review gate, move the task to `Human Review` with authoritative readback. A human may return it to `Rework`; then perform the required verification and independent review again before returning it to `Human Review`.
 
-When a task returns from `Human Review` to `Rework`, restore only its deterministic `docs/plans/completed/<date-summary>.md` artifact to `docs/plans/active/<date-summary>.md` before implementation. This is the same task's non-terminal rework, not a terminal reopen; do not search for a different Plan. Before the next PR handoff, apply the normal final comparison and move it back to `completed/`.
+When a task returns from `Human Review` to `Rework`, follow the Rework reset protocol above. This is the same task's non-terminal rework, not a terminal reopen; do not search for a different Plan. Before the next PR handoff, apply the normal final comparison and move it back to `completed/`.

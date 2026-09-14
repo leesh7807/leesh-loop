@@ -20,16 +20,22 @@ Do not search for, select, or guess another Plan. If the H1 cannot provide that 
 
 Use repository evidence and normal engineering judgment to complete the Accepted Plan. Solve ordinary implementation problems autonomously; the actual implementation path may differ from an anticipated one when that is necessary to deliver the accepted objective. Do not absorb meaningful work outside that objective into the task.
 
-Use the repository's intended entry points and its authoritative repository guidance. On a retry or continuation, continue from the workspace Symphony preserved. A concrete repository workflow may restore the same deterministic completed Repository Plan to its active path for a non-terminal rework; do not search for another Plan or introduce a terminal-reopen lifecycle.
+Use the repository's intended entry points and its authoritative repository guidance. Every dispatch must reconstruct practical current state from current tracker State, the Accepted/Repository Plan, canonical Workpad, and actual workspace. State is lifecycle authority, the workspace is concrete repository truth, the Workpad is live execution context, and the Repository Plan is the durable contract. On a retry or continuation, preserve completed work and reconcile from the workspace rather than restarting it. A concrete repository workflow may define Human Review → Rework as an explicit fresh-baseline exception; do not search for another Plan or introduce a terminal-reopen lifecycle.
 
 ## Keep the two task records distinct
 
-The Workpad is mutable execution history. Record progress, investigation, temporary failures, command output, evidence, blockers, review results, fixes, verification, and handoff there.
+The Workpad is the mutable live execution surface. Record current approach, meaningful completed progress, material investigation findings, validation results, review state, blockers/uncertainty, and remaining work promptly at meaningful milestones. Do not make it command-by-command logging. A task-bound Workpad read primitive must provide the complete canonical Workpad in provider order and may not allow arbitrary provider-page access; worker-visible read failures must be structured.
 
 The Repository Plan is a durable project artifact, not a running log. Before repository handoff, compare it with the actual result. Update it only when the result materially changes the objective, intent, boundary, accepted requirement, important assumption, constraint, or verification method. Do not copy routine history, transient failures, command output, or review transcripts into it. A repository may require a compact, finding-by-finding independent-review ledger in that task's own Repository Plan; it must contain only the reviewed identity, verdict, disposition, applied commit, and verification summary, never the transcript or general execution history.
 
+## Human Review and rework
+
+`Human Review` is the one non-active, non-terminal state for any human pause: review, blocker, external dependency, or independent-review intervention. Before pausing, record current state and required human action in Workpad, prepare a monotonic Human Review cycle, transition State, and record successful entry when possible. Workpad markers improve ordinary retry/restart behavior but are not a transactional State-mutation history: an absent entered marker must never override an explicit active State.
+
+Each prepared cycle has a fixed comment baseline. Once State becomes active after that cycle, materialize one immutable `Review Input` entry using comments in the bounded interval through the latest comment visible at first active observation. Comments never dispatch a worker or change State. `In Progress` resumes the existing workspace and approach; `Rework` rejects that implementation basis, starts a fresh task branch from fetched current `origin/main`, restores the latest Repository Plan, and records reset completion once per cycle before dispatching. A human-required blocker must move to `Human Review`, not remain intentionally active.
+
 ## Verify and hand off
 
-Verify the representative intended flow through the repository's practical interfaces. Follow the concrete repository workflow for delivery, tracker transitions, review, and handoff. A successful worker run, implementation completion, or ordinary verification completion is not by itself a terminal task transition. The repository may require a non-terminal human handoff or further rework.
+Verify the representative intended flow through the repository's practical interfaces. Follow the concrete repository workflow for delivery, tracker transitions, review, and handoff. A successful worker run, implementation completion, or ordinary verification completion is not by itself a terminal task transition. The repository may require Human Review or further rework.
 
 Do not define a Leesh Loop-specific human-decision taxonomy, publication-recovery lifecycle, binding checkpoint lifecycle, completion checkpoint lifecycle, or terminal reopen protocol here.

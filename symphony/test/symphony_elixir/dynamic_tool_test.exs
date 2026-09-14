@@ -113,6 +113,32 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
     assert Enum.all?(bodies, &(byte_size(Jason.encode!(&1)) <= 500_000))
   end
 
+  test "notion workpad read uses the worker-facing dynamic tool path" do
+    binding = %{
+      adapter: NotionAdapter,
+      tracker_settings: %{token: "token", database_id: "database", terminal_states: ["Done"]},
+      notion_data_source_id: "source",
+      notion_issue_id: "task"
+    }
+
+    response =
+      BoundDynamicTool.execute(
+        "notion_task_read_workpad",
+        %{},
+        binding,
+        notion_request: fn
+          "GET", "/pages/task", _params, nil, _settings ->
+            {:ok, %{"parent" => %{"type" => "data_source_id", "data_source_id" => "source"}}}
+
+          "GET", "/blocks/task/children", %{"page_size" => 100}, nil, _settings ->
+            {:ok, %{"results" => [%{"id" => "workpad-block"}], "has_more" => false}}
+        end
+      )
+
+    assert response["success"]
+    assert Jason.decode!(response["output"]) == %{"blocks" => [%{"id" => "workpad-block"}]}
+  end
+
   test "linear_graphql returns successful GraphQL responses as tool text" do
     test_pid = self()
 

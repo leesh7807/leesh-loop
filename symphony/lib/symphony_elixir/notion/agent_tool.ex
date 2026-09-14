@@ -11,6 +11,7 @@ defmodule SymphonyElixir.Notion.AgentTool do
   def tool_specs do
     [
       spec("notion_task_read", "Read the currently bound Notion task.", %{}),
+      spec("notion_task_read_workpad", "Read the complete canonical Workpad of the currently bound Notion task in provider order.", %{}),
       spec("notion_task_comments", "Read all comments on the currently bound Notion task.", %{}),
       spec("notion_task_set_state", "Set State on the currently bound Notion task.", %{"state" => %{"type" => "string"}}, ["state"]),
       spec("notion_task_append_workpad", "Append text to the canonical Workpad of the currently bound task.", %{"text" => %{"type" => "string"}}, ["text"])
@@ -36,6 +37,9 @@ defmodule SymphonyElixir.Notion.AgentTool do
       {"notion_task_read", id} ->
         read_task(id, binding, settings, client)
 
+      {"notion_task_read_workpad", id} ->
+        read_workpad(id, binding, settings, client)
+
       {"notion_task_comments", id} ->
         scoped(id, binding, settings, client, fn -> comments(id, settings, client, nil, []) end) |> respond()
 
@@ -53,6 +57,13 @@ defmodule SymphonyElixir.Notion.AgentTool do
   defp read_task(id, binding, settings, client) do
     scoped(id, binding, settings, client, fn -> client.("GET", "/pages/#{id}", %{}, nil, settings) end)
     |> respond()
+  end
+
+  defp read_workpad(id, binding, settings, client) do
+    case scoped(id, binding, settings, client, fn -> workpad_blocks(id, settings, client, nil, []) end) do
+      {:ok, blocks} -> respond({:ok, %{"blocks" => blocks}})
+      {:error, reason} -> workpad_read_failure(reason)
+    end
   end
 
   defp set_state(id, arguments, binding, settings, client) do
@@ -280,6 +291,24 @@ defmodule SymphonyElixir.Notion.AgentTool do
     end
   end
 
+  defp workpad_blocks(id, settings, client, cursor, acc) do
+    case client.("GET", "/blocks/#{id}/children", block_query(cursor), nil, settings) do
+      {:ok, %{"results" => results, "has_more" => more} = payload}
+      when is_list(results) and is_boolean(more) ->
+        case {more, payload["next_cursor"]} do
+          {false, _} -> {:ok, acc ++ results}
+          {true, next_cursor} when is_binary(next_cursor) -> workpad_blocks(id, settings, client, next_cursor, acc ++ results)
+          {true, _} -> {:error, :notion_pagination_integrity_failure}
+        end
+
+      {:error, _} = error ->
+        error
+
+      _ ->
+        {:error, :notion_malformed_provider_response}
+    end
+  end
+
   defp paginate_comments(id, settings, client, payload, true, results, acc) do
     case payload["next_cursor"] do
       cursor when is_binary(cursor) -> comments(id, settings, client, cursor, acc ++ results)
@@ -317,9 +346,15 @@ defmodule SymphonyElixir.Notion.AgentTool do
   defp string_arg(_, _), do: {:error, :invalid_notion_tool_arguments}
   defp comment_query(id, nil), do: %{"block_id" => id, "page_size" => 100}
   defp comment_query(id, cursor), do: Map.put(comment_query(id, nil), "start_cursor", cursor)
+  defp block_query(nil), do: %{"page_size" => 100}
+  defp block_query(cursor), do: Map.put(block_query(nil), "start_cursor", cursor)
   defp respond({:ok, body}), do: output(true, body)
   defp respond({:error, reason}), do: failure(reason)
   defp failure(reason), do: output(false, %{"error" => %{"message" => inspect(reason)}})
+
+  defp workpad_read_failure(reason) do
+    output(false, %{"error" => %{"type" => "notion_workpad_read_failure", "reason" => provider_error_details(reason)}})
+  end
 
   defp output(success, body) do
     text = Jason.encode!(body, pretty: true)
