@@ -5,6 +5,7 @@ export class PublicationError extends Error {}
 export type Policy = { identifier:string; title:string; state:string; priority:string; labels:string; blockedBy:string; defaultPriority:number|null; defaultLabels:string[] };
 export const PUBLISHER_PENDING_STATE="Publisher Pending";
 export const PUBLISHER_READY_STATE="Ready";
+export const PLAN_PROPERTY="Plan";
 export const DEFAULT_POLICY: Policy = {identifier:"Identifier",title:"Title",state:"State",priority:"Priority",labels:"Labels",blockedBy:"Blocked By",defaultPriority:3,defaultLabels:[]};
 export const NOTION_RICH_TEXT_SAFE_LIMIT=1900;
 export const NOTION_TITLE_SAFE_LIMIT=1900;
@@ -21,5 +22,6 @@ export function chunkText(text:string,limit=NOTION_RICH_TEXT_SAFE_LIMIT):string[
 export function extractPlanTitle(plan:string,fallbackTitle?:string):string { const heading=plan.split(/\r?\n/).find((line)=>line.startsWith("# "))?.slice(2).trim(); if(heading)return heading; if(fallbackTitle?.trim())return fallbackTitle.trim(); throw new PublicationError("Plan title requires a Markdown H1 or caller-supplied fallback title"); }
 export function validatePlanTitle(title:string):void { if(title.length>NOTION_TITLE_SAFE_LIMIT) throw new PublicationError(`plan title exceeds the ${NOTION_TITLE_SAFE_LIMIT}-character Notion title limit`); }
 const text=(content:string)=>({type:"text",text:{content}});
-export function buildTaskProperties(p:Policy,id:string,title:string):Record<string,unknown>{return {[p.identifier]:{rich_text:[text(id)]},[p.title]:{title:[text(title)]},[p.state]:{rich_text:[text(PUBLISHER_PENDING_STATE)]},[p.priority]:{number:p.defaultPriority},[p.labels]:{multi_select:p.defaultLabels.map(name=>({name}))},[p.blockedBy]:{relation:[]}};}
+export function buildTaskProperties(p:Policy,id:string,title:string):Record<string,unknown>{return {[p.identifier]:{rich_text:[text(id)]},[p.title]:{title:[text(title)]},[p.state]:{rich_text:[text(PUBLISHER_PENDING_STATE)]},[p.priority]:{number:p.defaultPriority},[p.labels]:{multi_select:p.defaultLabels.map(name=>({name}))},[p.blockedBy]:{relation:[]},[PLAN_PROPERTY]:{relation:[]}};}
+export function buildPlanProperties(id:string,title:string):Record<string,unknown>{return {Identifier:{rich_text:[text(id)]},Title:{title:[text(title)]}};}
 export function buildPlanBlocks(plan:string):Record<string,unknown>[] { return chunkText(plan).map(part=>({object:"block",type:"paragraph",paragraph:{rich_text:[text(part)]}})); }

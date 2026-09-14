@@ -1,5 +1,5 @@
 import { buildTaskProperties, deriveIdentifier, extractPlanTitle, type Policy, PublicationError, resolvePublishDatabase, validatePlanTitle } from "./core.js";
-import { type NotionClient } from "./notion.js";
+import { type DatabaseBinding, type NotionClient } from "./notion.js";
 
 export type PublisherConfig = { policy: Policy };
 export type PublishInput = { plan: string; databaseUrl: string; fallbackTitle?: string; client: NotionClient; config: PublisherConfig };
@@ -23,20 +23,21 @@ export async function publish({ plan, databaseUrl, fallbackTitle, client, config
   validatePlanTitle(title);
   const identifier = deriveIdentifier(plan);
   return withPublicationLock(`${database.databaseId}:${identifier}`, async () => {
-    const dataSource = await client.ensureDatabase(database.databaseId, config.policy);
-    const existing = await client.findPublication(dataSource, config.policy, identifier);
+    const binding: DatabaseBinding = await client.ensureDatabase(database.databaseId, config.policy);
+    const existing = await client.findPublication(binding.taskDataSourceId, config.policy, identifier);
 
     if (existing) {
       if (existing.complete) throw new PublicationError(`duplicate publication: ${identifier} already exists`);
-      try { await client.repairIncomplete(existing.pageId, plan); await client.finalizePublication(existing.pageId, config.policy); }
-      catch (error) { if (error instanceof PublicationError) throw error; throw new PublicationError("provider/API failure while repairing incomplete Plan publication; retry is safe"); }
+      try { await client.repairIncomplete(existing.pageId, plan, binding, identifier, title); await client.finalizePublication(existing.pageId, config.policy); }
+      catch (error) { if (error instanceof PublicationError) throw error; throw new PublicationError(`provider/API failure while repairing incomplete Plan publication; retry is safe: ${error instanceof Error ? error.message : "unknown error"}`); }
       return { identifier, page_id: existing.pageId, url: existing.url };
     }
 
     const properties = buildTaskProperties(config.policy, identifier, title);
-    const page = await client.createTask(dataSource, properties);
-    try { await client.ensureCanonicalRepresentation(page.id, plan); await client.finalizePublication(page.id, config.policy); }
-    catch (error) { if (error instanceof PublicationError) throw error; throw new PublicationError("provider/API failure while publishing Plan; pending task remains retryable"); }
+    const page = await client.createTask(binding.taskDataSourceId, properties);
+    if (typeof page?.id !== "string") throw new PublicationError("provider/API failure: creating the task returned no page id");
+    try { await client.ensureCanonicalRepresentation(page.id, plan, binding, identifier, title); await client.finalizePublication(page.id, config.policy); }
+    catch (error) { if (error instanceof PublicationError) throw error; throw new PublicationError(`provider/API failure while publishing Plan; pending task remains retryable: ${error instanceof Error ? error.message : "unknown error"}`); }
     return { identifier, page_id: page.id, url: page.url };
   });
 }

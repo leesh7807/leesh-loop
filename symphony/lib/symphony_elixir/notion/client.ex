@@ -12,8 +12,10 @@ defmodule SymphonyElixir.Notion.Client do
     "State" => ["rich_text"],
     "Priority" => ["number"],
     "Labels" => ["multi_select"],
-    "Blocked By" => ["relation"]
+    "Blocked By" => ["relation"],
+    "Plan" => ["relation"]
   }
+  @plan_forbidden ["State", "Priority", "Labels", "Blocked By", "Plan", "Workpad", "Description", "Plan Source", "branch_name", "assignee_id", "native_ref"]
 
   @spec validate_settings(map()) :: :ok | {:error, term()}
   def validate_settings(settings) do
@@ -29,12 +31,8 @@ defmodule SymphonyElixir.Notion.Client do
   def resolve_task_data_source(tracker_settings) do
     with {:ok, settings} <- settings(tracker_settings),
          {:ok, db} <- request("GET", "/databases/#{settings.database_id}", %{}, nil, settings),
-         {:ok, candidates} <- compatible_sources(db, settings) do
-      case candidates do
-        [id] -> {:ok, id}
-        [] -> {:error, :notion_incompatible_task_data_source}
-        _ -> {:error, :notion_ambiguous_task_data_source}
-      end
+         {:ok, binding} <- compatible_sources(db, settings) do
+      {:ok, binding.task}
     end
   end
 
@@ -56,7 +54,17 @@ defmodule SymphonyElixir.Notion.Client do
   def request(method, path, query, body, settings) do
     with {:ok, request_settings} <- settings(settings) do
       url = @endpoint <> path
-      options = [method: String.to_atom(String.downcase(method)), url: url, params: query, json: body, headers: [{"authorization", "Bearer #{request_settings.token}"}, {"notion-version", @api}]]
+
+      options = [
+        method: String.to_atom(String.downcase(method)),
+        url: url,
+        params: query,
+        json: body,
+        headers: [
+          {"authorization", "Bearer #{request_settings.token}"},
+          {"notion-version", @api}
+        ]
+      ]
 
       case Req.request(options) do
         {:ok, %{status: status, body: response}} when status in 200..299 and is_map(response) -> {:ok, response}
@@ -74,49 +82,52 @@ defmodule SymphonyElixir.Notion.Client do
   defp fetch_issues_by_states([], _, _), do: {:ok, []}
 
   defp fetch_issues_by_states(states, tracker, fun) do
-    with {:ok, settings} <- settings(tracker), {:ok, source} <- resolve_source(settings, fun), {:ok, pages} <- query_states(source, states, settings, fun) do
-      normalize_poll_pages(pages, source, settings, fun)
+    with {:ok, settings} <- settings(tracker), {:ok, binding} <- resolve_source(settings, fun), {:ok, pages} <- query_states(binding.task, states, settings, fun) do
+      normalize_poll_pages(pages, binding.task, binding.plan, settings, fun)
     end
   end
 
   defp fetch_issues_by_ids([], _, _), do: {:ok, []}
 
   defp fetch_issues_by_ids(ids, tracker, fun) do
-    with {:ok, settings} <- settings(tracker), {:ok, source} <- resolve_source(settings, fun) do
+    with {:ok, settings} <- settings(tracker), {:ok, binding} <- resolve_source(settings, fun) do
       ids
       |> Enum.uniq()
-      |> Enum.reduce_while({:ok, []}, fn id, {:ok, acc} ->
-        case fun.("GET", "/pages/#{id}", %{}, nil, settings) do
-          {:error, :notion_not_found} ->
-            {:cont, {:ok, acc}}
-
-          {:ok, page} ->
-            if parent_source(page) != source do
-              {:cont, {:ok, acc}}
-            else
-              case normalize_page(page, source, settings, fun) do
-                {:ok, issue} -> {:cont, {:ok, [issue | acc]}}
-                {:error, reason} -> {:halt, {:error, {:notion_malformed_task_representation, id, reason}}}
-              end
-            end
-
-          {:error, reason} ->
-            {:halt, {:error, reason}}
-        end
-      end)
+      |> Enum.reduce_while({:ok, []}, &fetch_page(&1, &2, binding, settings, fun))
       |> reverse_ok()
       |> ensure_unique_identifiers()
     end
   end
 
+  defp fetch_page(id, {:ok, acc}, binding, settings, fun) do
+    case fun.("GET", "/pages/#{id}", %{}, nil, settings) do
+      {:error, :notion_not_found} ->
+        {:cont, {:ok, acc}}
+
+      {:ok, page} ->
+        fetched_page(page, id, binding, settings, fun, acc)
+
+      {:error, reason} ->
+        {:halt, {:error, reason}}
+    end
+  end
+
+  defp fetched_page(page, id, %{task: task, plan: plan}, settings, fun, acc) do
+    case parent_source(page) do
+      ^task ->
+        case normalize_page(page, task, plan, settings, fun) do
+          {:ok, issue} -> {:cont, {:ok, [issue | acc]}}
+          {:error, reason} -> {:halt, {:error, {:notion_malformed_task_representation, id, reason}}}
+        end
+
+      _ ->
+        {:cont, {:ok, acc}}
+    end
+  end
+
   defp resolve_source(settings, fun) do
-    with {:ok, db} <- fun.("GET", "/databases/#{settings.database_id}", %{}, nil, settings),
-         {:ok, candidates} <- compatible_sources(db, settings, fun) do
-      case candidates do
-        [id] -> {:ok, id}
-        [] -> {:error, :notion_incompatible_task_data_source}
-        _ -> {:error, :notion_ambiguous_task_data_source}
-      end
+    with {:ok, db} <- fun.("GET", "/databases/#{settings.database_id}", %{}, nil, settings) do
+      compatible_sources(db, settings, fun)
     end
   end
 
@@ -124,18 +135,67 @@ defmodule SymphonyElixir.Notion.Client do
 
   defp compatible_sources(%{"data_sources" => sources}, settings, fun) when is_list(sources) do
     sources
-    |> Enum.reduce_while({:ok, []}, fn %{"id" => id}, {:ok, acc} ->
-      case fun.("GET", "/data_sources/#{id}", %{}, nil, settings) do
-        {:ok, ds} -> if schema?(ds["properties"]), do: {:cont, {:ok, [id | acc]}}, else: {:cont, {:ok, acc}}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
+    |> Enum.reduce_while({:ok, []}, fn
+      %{"id" => id}, {:ok, acc} when is_binary(id) ->
+        case fun.("GET", "/data_sources/#{id}", %{}, nil, settings) do
+          {:ok, ds} when is_map(ds) -> {:cont, {:ok, [%{id: id, properties: ds["properties"]} | acc]}}
+          {:ok, _} -> {:halt, {:error, :notion_malformed_provider_response}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+
+      _, _ ->
+        {:halt, {:error, :notion_malformed_provider_response}}
     end)
     |> reverse_ok()
+    |> select_task_and_plan()
   end
 
   defp compatible_sources(_, _, _), do: {:error, :notion_malformed_provider_response}
-  defp schema?(properties) when is_map(properties), do: Enum.all?(@required, fn {name, types} -> get_in(properties, [name, "type"]) in types end)
-  defp schema?(_), do: false
+
+  defp select_task_and_plan({:ok, sources}) do
+    tasks = Enum.filter(sources, &task_schema?/1)
+
+    case tasks do
+      [%{id: task_id, properties: properties}] ->
+        plan_id = get_in(properties, ["Plan", "relation", "data_source_id"])
+        plan = Enum.find(sources, &(&1.id == plan_id))
+
+        plans = Enum.filter(sources, &plan_schema?/1)
+
+        cond do
+          length(plans) > 1 -> {:error, :notion_ambiguous_plan_data_source}
+          is_binary(plan_id) and plan_schema?(plan) -> {:ok, %{task: task_id, plan: plan_id}}
+          true -> {:error, :notion_incompatible_task_data_source}
+        end
+
+      [] ->
+        {:error, :notion_incompatible_task_data_source}
+
+      _ ->
+        {:error, :notion_ambiguous_task_data_source}
+    end
+  end
+
+  defp select_task_and_plan(error), do: error
+
+  defp task_schema?(%{id: id, properties: properties}) when is_binary(id) and is_map(properties) do
+    Enum.all?(@required, fn {name, types} -> get_in(properties, [name, "type"]) in types end) and
+      get_in(properties, ["Blocked By", "relation", "data_source_id"]) == id and
+      has_single_relation?(properties["Blocked By"]) and
+      has_single_relation?(properties["Plan"])
+  end
+
+  defp task_schema?(_), do: false
+
+  defp plan_schema?(%{properties: properties}) when is_map(properties) do
+    get_in(properties, ["Identifier", "type"]) == "rich_text" and get_in(properties, ["Title", "type"]) == "title" and
+      not Enum.any?(@plan_forbidden, &Map.has_key?(properties, &1))
+  end
+
+  defp plan_schema?(_), do: false
+
+  defp has_single_relation?(%{"type" => "relation", "relation" => relation}), do: is_map(relation) and is_nil(relation["dual_property"])
+  defp has_single_relation?(_), do: false
 
   defp query_states(source, states, settings, fun), do: query_states(source, states, settings, fun, nil, [])
 
@@ -149,16 +209,21 @@ defmodule SymphonyElixir.Notion.Client do
       }
       |> maybe_cursor(cursor)
 
-    with {:ok, response} <- fun.("POST", "/data_sources/#{source}/query", %{}, body, settings),
+    with {:ok, response} <-
+           fun.("POST", "/data_sources/#{source}/query", %{}, body, settings),
          {:ok, results, next} <- pagination(response) do
-      if next, do: query_states(source, states, settings, fun, next, results ++ acc), else: {:ok, Enum.reverse(results ++ acc)}
+      query_page(source, states, settings, fun, next, results ++ acc)
     end
   end
 
-  defp normalize_poll_pages(pages, source, settings, fun) do
+  defp query_page(source, states, settings, fun, next, results) do
+    if next, do: query_states(source, states, settings, fun, next, results), else: {:ok, Enum.reverse(results)}
+  end
+
+  defp normalize_poll_pages(pages, task_source, plan_source, settings, fun) do
     {issues, errors} =
       Enum.reduce(pages, {[], []}, fn page, {ok, bad} ->
-        case normalize_page(page, source, settings, fun) do
+        case normalize_page(page, task_source, plan_source, settings, fun) do
           {:ok, issue} -> {[issue | ok], bad}
           {:error, reason} -> {ok, [reason | bad]}
         end
@@ -168,8 +233,8 @@ defmodule SymphonyElixir.Notion.Client do
     {:ok, Enum.reverse(issues)} |> ensure_unique_identifiers()
   end
 
-  defp normalize_page(%{"id" => id, "properties" => props} = page, source, settings, fun) when is_map(props) do
-    with true <- parent_source(page) == source or {:error, :out_of_scope},
+  defp normalize_page(%{"id" => id, "properties" => props} = page, task_source, plan_source, settings, fun) when is_map(props) do
+    with true <- parent_source(page) == task_source or {:error, :out_of_scope},
          {:ok, identifier} <- text_property(props["Identifier"], ["rich_text", "title"]),
          true <- present?(identifier) or {:error, :empty_identifier},
          {:ok, title} <- text_property(props["Title"], ["title"]),
@@ -177,7 +242,7 @@ defmodule SymphonyElixir.Notion.Client do
          {:ok, priority} <- priority_property(props["Priority"]),
          {:ok, labels} <- labels_property(props["Labels"]),
          {:ok, blockers} <- blockers(props["Blocked By"], id, settings, fun),
-         {:ok, plan, _workpad} <- surfaces(id, settings, fun),
+         {:ok, plan} <- plan_page(props["Plan"], id, identifier, plan_source, settings, fun),
          {:ok, description} <- page_text(plan, settings, fun),
          true <- present?(description) or {:error, :empty_plan} do
       {:ok,
@@ -205,37 +270,82 @@ defmodule SymphonyElixir.Notion.Client do
     end
   end
 
-  defp normalize_page(_, _, _, _), do: {:error, :malformed_page}
+  defp normalize_page(_, _, _, _, _), do: {:error, :malformed_page}
 
-  defp surfaces(page_id, settings, fun) do
-    with {:ok, children} <- all_children(page_id, settings, fun),
-         plans = Enum.filter(children, &(child_title(&1) == "Plan")),
-         workpads = Enum.filter(children, &(child_title(&1) == "Workpad")),
-         [plan] <- plans,
-         [workpad] <- workpads do
-      {:ok, plan["id"], workpad["id"]}
+  defp plan_page(%{"type" => "relation", "relation" => related} = property, page_id, identifier, plan_source, settings, fun) when is_list(related) do
+    refs = relation_values(property, related, page_id, settings, fun, :invalid_plan_relation)
+
+    with {:ok, refs} <- refs,
+         [reference] <- refs,
+         plan_id when is_binary(plan_id) <- relation_page_id(reference),
+         {:ok, plan} when is_map(plan) <- fun.("GET", "/pages/#{plan_id}", %{}, nil, settings),
+         true <- parent_source(plan) == plan_source or {:error, :out_of_scope_plan},
+         {:ok, plan_identifier} <- text_property(get_in(plan, ["properties", "Identifier"]), ["rich_text", "title"]),
+         true <- plan_identifier == identifier or {:error, :plan_identifier_mismatch} do
+      {:ok, plan_id}
     else
-      _ -> {:error, :invalid_structural_surface}
+      {:error, _} = error -> error
+      _ -> {:error, :invalid_plan_relation}
     end
   end
+
+  defp plan_page(_, _, _, _, _, _), do: {:error, :invalid_plan_relation}
+
+  defp relation_values(%{"has_more" => true, "id" => property_id}, _related, page_id, settings, fun, _error)
+       when is_binary(property_id),
+       do: property_refs(page_id, property_id, settings, fun)
+
+  defp relation_values(property, related, _page_id, _settings, _fun, _error)
+       when not is_map_key(property, "has_more"),
+       do: {:ok, related}
+
+  defp relation_values(%{"has_more" => value}, related, _page_id, _settings, _fun, _error)
+       when value in [false, nil],
+       do: {:ok, related}
+
+  defp relation_values(_property, _related, _page_id, _settings, _fun, error), do: {:error, error}
 
   defp page_text(id, settings, fun) do
     with {:ok, blocks} <- all_children(id, settings, fun) do
-      text = blocks |> Enum.map(&rich_text/1) |> Enum.join("\n") |> String.trim()
-      {:ok, text}
+      plan_text_blocks(blocks)
     end
   end
+
+  defp plan_text_blocks(blocks) do
+    blocks
+    |> Enum.reduce_while({:ok, []}, &plan_text_block/2)
+    |> case do
+      {:ok, values} -> {:ok, values |> Enum.reverse() |> Enum.join("")}
+      error -> error
+    end
+  end
+
+  defp plan_text_block(
+         %{"type" => "paragraph", "paragraph" => %{"rich_text" => values}},
+         {:ok, acc}
+       )
+       when is_list(values) do
+    if valid_rich_text?(values) do
+      {:cont, {:ok, [rich_text(values) | acc]}}
+    else
+      {:halt, {:error, :malformed_plan_content}}
+    end
+  end
+
+  defp plan_text_block(_, _), do: {:halt, {:error, :malformed_plan_content}}
 
   defp all_children(id, settings, fun), do: all_children(id, settings, fun, nil, [])
 
   defp all_children(id, settings, fun, cursor, acc) do
-    with {:ok, response} <- fun.("GET", "/blocks/#{id}/children", maybe_cursor(%{}, cursor), nil, settings), {:ok, results, next} <- pagination(response) do
+    with {:ok, response} <-
+           fun.("GET", "/blocks/#{id}/children", maybe_cursor(%{}, cursor), nil, settings),
+         {:ok, results, next} <- pagination(response) do
       if next, do: all_children(id, settings, fun, next, acc ++ results), else: {:ok, acc ++ results}
     end
   end
 
   defp blockers(%{"type" => "relation", "relation" => related} = prop, page_id, settings, fun) when is_list(related) do
-    refs = if prop["has_more"], do: property_refs(page_id, prop["id"], settings, fun), else: {:ok, related}
+    refs = relation_values(prop, related, page_id, settings, fun, :invalid_blocked_by)
 
     with {:ok, refs} <- refs do
       {:ok,
@@ -243,7 +353,7 @@ defmodule SymphonyElixir.Notion.Client do
          id = relation_page_id(reference)
 
          case fun.("GET", "/pages/#{id}", %{}, nil, settings) do
-           {:ok, page} -> %{"id" => id, "state" => value_state(get_in(page, ["properties", "State"])), "terminal" => value_state(get_in(page, ["properties", "State"])) in settings.terminal_states}
+           {:ok, page} -> blocker(page, id, settings)
            _ -> %{"id" => id, "state" => nil, "terminal" => false}
          end
        end)}
@@ -252,35 +362,47 @@ defmodule SymphonyElixir.Notion.Client do
 
   defp blockers(_, _, _, _), do: {:error, :invalid_blocked_by}
 
+  defp blocker(page, id, settings) do
+    state = value_state(get_in(page, ["properties", "State"]))
+    %{"id" => id, "state" => state, "terminal" => state in settings.terminal_states}
+  end
+
   defp relation_page_id(%{"relation" => %{"id" => id}}) when is_binary(id), do: id
   defp relation_page_id(%{"id" => id}) when is_binary(id), do: id
   defp relation_page_id(_), do: nil
   defp property_refs(page, prop, settings, fun), do: property_refs(page, prop, settings, fun, nil, [])
 
   defp property_refs(page, prop, settings, fun, cursor, acc) do
-    with {:ok, response} <- fun.("GET", "/pages/#{page}/properties/#{prop}", maybe_cursor(%{}, cursor), nil, settings), {:ok, results, next} <- pagination(response) do
-      if next, do: property_refs(page, prop, settings, fun, next, results ++ acc), else: {:ok, Enum.reverse(results ++ acc)}
+    with {:ok, response} <-
+           fun.("GET", "/pages/#{page}/properties/#{prop}", maybe_cursor(%{}, cursor), nil, settings),
+         {:ok, results, next} <- pagination(response) do
+      property_refs_page(page, prop, settings, fun, next, results ++ acc)
     end
   end
 
+  defp property_refs_page(page, prop, settings, fun, next, results) do
+    if next, do: property_refs(page, prop, settings, fun, next, results), else: {:ok, Enum.reverse(results)}
+  end
+
   defp text_property(%{"type" => type} = p, types) do
-    if type in types do
-      {:ok, p[type] |> List.wrap() |> Enum.map(&Map.get(&1, "plain_text", "")) |> Enum.join("")}
-    else
-      {:error, :invalid_property}
-    end
+    if type in types, do: text_property_values(p[type]), else: {:error, :invalid_property}
   end
 
   defp text_property(_, _), do: {:error, :invalid_property}
 
-  defp state_property(%{"type" => "rich_text", "rich_text" => values}) when is_list(values) do
-    case Enum.map_join(values, "", &Map.get(&1, "plain_text", "")) do
-      v when is_binary(v) and v != "" -> {:ok, v}
+  defp text_property_values(values) when is_list(values) do
+    if Enum.all?(values, &is_map/1), do: {:ok, rich_text(values)}, else: {:error, :invalid_property}
+  end
+
+  defp text_property_values(_), do: {:error, :invalid_property}
+
+  defp state_property(property) do
+    case text_property(property, ["rich_text"]) do
+      {:ok, value} when value != "" -> {:ok, value}
       _ -> {:error, :invalid_state}
     end
   end
 
-  defp state_property(_), do: {:error, :invalid_state}
   defp priority_property(%{"type" => "number", "number" => n}) when is_number(n), do: {:ok, round(n)}
   defp priority_property(_), do: {:error, :invalid_priority}
 
@@ -293,17 +415,27 @@ defmodule SymphonyElixir.Notion.Client do
        end)}
 
   defp labels_property(_), do: {:error, :invalid_labels}
-  defp value_state(%{"type" => "rich_text", "rich_text" => values}) when is_list(values), do: Enum.map_join(values, "", &Map.get(&1, "plain_text", ""))
-  defp value_state(_), do: nil
-  defp child_title(%{"type" => "child_page", "child_page" => %{"title" => t}}), do: t
-  defp child_title(_), do: nil
-  defp rich_text(%{"type" => type} = block), do: block |> get_in([type, "rich_text"]) |> List.wrap() |> Enum.map(&Map.get(&1, "plain_text", "")) |> Enum.join("")
+
+  defp value_state(property) do
+    case text_property(property, ["rich_text"]) do
+      {:ok, value} -> value
+      _ -> nil
+    end
+  end
+
+  defp rich_text(values) when is_list(values), do: Enum.map_join(values, "", fn value -> Map.get(value, "plain_text") || get_in(value, ["text", "content"]) || "" end)
   defp rich_text(_), do: ""
+  defp valid_rich_text?(values) when is_list(values), do: Enum.all?(values, &(is_map(&1) and (is_binary(&1["plain_text"]) or is_binary(get_in(&1, ["text", "content"])))))
+  defp valid_rich_text?(_), do: false
   defp parent_source(%{"parent" => %{"type" => "data_source_id", "data_source_id" => id}}), do: id
   defp parent_source(_), do: nil
 
   defp pagination(%{"results" => r, "has_more" => more} = p) when is_list(r) and is_boolean(more),
-    do: if(more and not is_binary(p["next_cursor"]), do: {:error, :notion_pagination_integrity_failure}, else: {:ok, r, if(more, do: p["next_cursor"], else: nil)})
+    do:
+      if(more and not is_binary(p["next_cursor"]),
+        do: {:error, :notion_pagination_integrity_failure},
+        else: {:ok, r, if(more, do: p["next_cursor"], else: nil)}
+      )
 
   defp pagination(_), do: {:error, :notion_malformed_provider_response}
   defp maybe_cursor(map, nil), do: map
@@ -337,7 +469,9 @@ defmodule SymphonyElixir.Notion.Client do
        when is_binary(token) and is_binary(database_id), do: {:ok, settings}
 
   defp settings(%{provider: provider} = tracker) when is_map(provider) do
-    with token when is_binary(token) and token != "" <- provider["token"], url when is_binary(url) <- provider["database_url"], {:ok, id} <- database_id(url) do
+    with token when is_binary(token) and token != "" <- provider["token"],
+         url when is_binary(url) <- provider["database_url"],
+         {:ok, id} <- database_id(url) do
       {:ok, %{token: token, database_id: id, terminal_states: tracker.terminal_states || []}}
     else
       _ -> {:error, :invalid_notion_tracker_configuration}
