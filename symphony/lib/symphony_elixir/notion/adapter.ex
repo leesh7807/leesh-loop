@@ -8,9 +8,9 @@ defmodule SymphonyElixir.Notion.Adapter do
   @spec validate_config(map()) :: :ok | {:error, term()}
   def validate_config(settings) do
     with :ok <- Client.validate_settings(settings),
-         :ok <- states(settings.active_states, :missing_notion_active_states),
-         :ok <- states(settings.terminal_states, :missing_notion_terminal_states),
-         do: :ok
+         :ok <- states(settings.active_states, :missing_notion_active_states) do
+      states(settings.terminal_states, :missing_notion_terminal_states)
+    end
   end
 
   @spec fetch_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}

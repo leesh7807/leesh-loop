@@ -46,6 +46,46 @@ bar/       ← bar-loop
 
 There is no separate central project manager for coordinating multiple repositories.
 
+## Operator readiness
+
+Symphony is started through the Operator-owned bootstrap boundary:
+
+```sh
+export SYMPHONY_WORKSPACE_ROOT="$HOME/.local/share/leesh-loop/workspaces"
+./scripts/operator-bootstrap -- \
+  ./symphony/bin/symphony \
+  --i-understand-that-this-will-be-running-without-the-usual-guardrails
+```
+
+The bootstrap validates the GitHub HTTPS network and credential path, verifies the installed
+`chatgpt-shot` configuration and browser/session state, starts or recovers its Service, confirms
+the health endpoint is accepting requests, and completes one real `chatgpt-shot submit` smoke
+round trip before launching Symphony. Missing or invalid readiness stops the command before any
+tracker task is dispatched; it never performs interactive login.
+
+The ownership boundary is:
+
+```text
+Operator
+├─ workspace-root placement
+├─ GitHub credential readiness
+├─ chatgpt-shot installation
+├─ chatgpt-shot auth/session/browser lifecycle
+├─ chatgpt-shot Service lifecycle
+└─ external-service readiness validation
+
+Worker
+├─ repository work inside assigned workspace
+├─ normal Git/GitHub operations
+└─ chatgpt-shot submit "<prompt>"
+```
+
+The worker command is a read-only Service client prepared in an Operator-owned interface
+directory. It reads only the Operator's Service discovery record and invokes the already-running
+Service; it does not run `doctor`, `start`, login, browser recovery, profile repair, or access the
+`chatgpt-shot` Notion credentials. The XDG configuration, data, cache, browser profile, Service
+runtime state, and worker interface stay outside `$SYMPHONY_WORKSPACE_ROOT`.
+
 ## How It Works
 
 The Publisher takes a plan written as plain text or Markdown, normalizes it into the canonical Leesh Loop task representation, and publishes it to Notion.
@@ -79,10 +119,11 @@ Normalize
 Notion Tasks
 ```
 
-Rather than copying plan content into free-form Notion pages, it creates the shared canonical task
-representation: durable `Identifier`, `Title`, `Priority`, `Labels`, and `Blocked By` metadata,
-plus exactly one direct `Plan` child page and one direct `Workpad` child page. The Publisher and
-Notion adapter share this representation.
+It creates the shared canonical task representation: durable `Identifier`, `Title`, `State`,
+`Priority`, `Labels`, and `Blocked By` metadata plus an explicit `Plan` relation. The task page
+body is the mutable Workpad; the relation opens a separate locked Plan page containing the complete
+accepted Plan. The Publisher and Notion adapter share this representation, and comments remain a
+separate human-review surface.
 
 These are the Leesh Loop integration contracts: successful publication hands work to Symphony in
 `Ready`; changing that handoff requires coordinated Publisher and workflow changes; and the

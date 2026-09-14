@@ -4,15 +4,17 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config.js";
-import { buildPlanBlocks, buildTaskProperties, chunkText, DEFAULT_POLICY, extractPlanTitle, notionId, PublicationError, PUBLISHER_PENDING_STATE, resolvePublishDatabase, validatePlanTitle } from "../src/core.js";
+import { buildPlanBlocks, buildPlanProperties, buildTaskProperties, chunkText, DEFAULT_POLICY, extractPlanTitle, notionId, PLAN_PROPERTY, PublicationError, PUBLISHER_PENDING_STATE, resolvePublishDatabase, validatePlanTitle } from "../src/core.js";
 
 test("six-property task metadata and chunked Plan content are canonical", () => {
   const properties = buildTaskProperties(DEFAULT_POLICY, "PLAN-X", "Title");
-  assert.deepEqual(Object.keys(properties).sort(), ["Blocked By", "Identifier", "Labels", "Priority", "State", "Title"]);
+  assert.deepEqual(Object.keys(properties).sort(), ["Blocked By", "Identifier", "Labels", "Plan", "Priority", "State", "Title"]);
   assert.equal("Description" in properties, false);
   assert.equal("Plan Source" in properties, false);
   assert.equal("branch_name" in properties, false);
   assert.deepEqual(properties.State, { rich_text: [{ type: "text", text: { content: PUBLISHER_PENDING_STATE } }] });
+  assert.deepEqual(properties[PLAN_PROPERTY], { relation: [] });
+  assert.deepEqual(buildPlanProperties("PLAN-X", "Title"), { Identifier: { rich_text: [{ type: "text", text: { content: "PLAN-X" } }] }, Title: { title: [{ type: "text", text: { content: "Title" } }] } });
   assert.equal("bootstrapStates" in DEFAULT_POLICY, false);
   const blocks = buildPlanBlocks("x".repeat(4000));
   assert.equal(blocks.every((block: any) => block.type === "paragraph"), true);
@@ -34,6 +36,8 @@ test("property name collisions and malformed config are rejected", async () => {
   const directory = await mkdtemp(join(tmpdir(), "publisher-")); const file = join(directory, "c.json");
   await writeFile(file, JSON.stringify({ property_names: { identifier: "Task", title: "Task" } }));
   await assert.rejects(loadConfig(file), /unique property names/);
+  await writeFile(file, JSON.stringify({ property_names: { title: "Plan" } }));
+  await assert.rejects(loadConfig(file), /reserved Plan relation/);
   await writeFile(file, JSON.stringify({ labels: "not-list" }));
   await assert.rejects(loadConfig(file), PublicationError);
 });
