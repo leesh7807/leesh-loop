@@ -63,5 +63,13 @@ Make Leesh Loop a runnable local project environment without turning externally 
 - Reviewed HEAD: `9520dc36e56b92fc7f1fce2827c7369f05e808d2` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
 - Verdict: `FINDINGS`.
 - Accepted: Elixir exposed a string PID while Node compares numeric PIDs and acknowledgement temporary-file construction called an integer function with that string; lock ownership had a post-`mkdir` owner-record race.
+- Applied commit: `c2b67c2ccaa78d4a32f6557b37ccd0e7a8f81574`.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 4
+
+- Reviewed HEAD: `c2b67c2ccaa78d4a32f6557b37ccd0e7a8f81574` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: durable PID alone can be reused by an unrelated process before recovery/stop; signal operations must verify a startup identity first.
 - Applied commit: pending.
 - Verification: pending post-fix Node UI/publisher/Symphony formatting and lifecycle-path checks.

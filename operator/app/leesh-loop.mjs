@@ -2,7 +2,7 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { chmod, mkdir, open, readFile, readlink, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -22,6 +22,13 @@ async function atomicJson(path, value) {
 }
 async function json(path) { try { return JSON.parse(await readFile(path, 'utf8')); } catch { return null; } }
 function alive(pid) { try { process.kill(pid, 0); return true; } catch { return false; } }
+function processStartTicks(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
+    return fields[19] || null;
+  } catch { return null; }
+}
 async function remove(path) { await rm(path, { force: true }); }
 
 async function loadConfig(file) {
@@ -62,7 +69,10 @@ async function runtimeObserved(state, requireAck = true) {
   } catch { return false; }
 }
 async function terminate(state) {
-  if (state?.pid && alive(state.pid)) { process.kill(state.pid, 'SIGTERM'); for (let i = 0; i < 50 && alive(state.pid); i += 1) await sleep(100); if (alive(state.pid)) { process.kill(state.pid, 'SIGKILL'); await sleep(100); } }
+  if (state?.pid && alive(state.pid)) {
+    if (!state.process_start_ticks || await processStartTicks(state.pid) !== state.process_start_ticks) throw new Error(`refusing to signal PID ${state.pid}: durable ownership identity does not match`);
+    process.kill(state.pid, 'SIGTERM'); for (let i = 0; i < 50 && alive(state.pid); i += 1) await sleep(100); if (alive(state.pid)) { process.kill(state.pid, 'SIGKILL'); await sleep(100); }
+  }
   if (state?.pid && alive(state.pid)) throw new Error(`owned Symphony process ${state.pid} did not terminate`);
 }
 async function clear(config) { const p = paths(config); await Promise.all([remove(p.state), remove(p.ownership), remove(p.authorization), remove(p.acknowledgement)]); }
@@ -106,9 +116,11 @@ async function start(config) {
       const args = [join(root, 'operator/app/operator-bootstrap'), '--', symphony, '--port', String(port), '--i-understand-that-this-will-be-running-without-the-usual-guardrails', config.workflow_path];
       const env = { ...process.env, SYMPHONY_WORKSPACE_ROOT: config.symphony_workspace_root, SYMPHONY_GITHUB_REPOSITORY_URL: config.github_repository_url || '', SYMPHONY_DISPATCH_BARRIER: 'closed', SYMPHONY_RUNTIME_ID: runtimeId, SYMPHONY_DISPATCH_AUTHORIZATION_FILE: p.authorization, SYMPHONY_DISPATCH_ACK_FILE: p.acknowledgement, SYMPHONY_OWNERSHIP_FILE: p.ownership };
       const pid = launch(join(root, 'operator/app/owned-symphony'), args, env);
-      const ownedStarting = { ...starting, pid };
+      const process_start_ticks = await processStartTicks(pid);
+      if (!process_start_ticks) throw new Error(`could not record startup identity for owned Symphony PID ${pid}`);
+      const ownedStarting = { ...starting, pid, process_start_ticks };
       await atomicJson(p.state, ownedStarting);
-      await atomicJson(p.ownership, { project_root: root, runtime_id: runtimeId, pid, created_at: new Date().toISOString() });
+      await atomicJson(p.ownership, { project_root: root, runtime_id: runtimeId, pid, process_start_ticks, created_at: new Date().toISOString() });
       const provisional = { ...ownedStarting, status: 'provisional' }; await atomicJson(p.state, provisional);
       await waitFor(() => runtimeObserved({ ...provisional, effective: identity }, false), 'Symphony observability');
       const committed = { ...provisional, status: 'committed-disabled' }; await atomicJson(p.state, committed);
