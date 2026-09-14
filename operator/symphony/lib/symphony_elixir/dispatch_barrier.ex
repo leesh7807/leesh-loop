@@ -69,9 +69,10 @@ defmodule SymphonyElixir.DispatchBarrier do
   defp write_acknowledgement do
     with path when is_binary(path) <- System.get_env("SYMPHONY_DISPATCH_ACK_FILE"),
          runtime_id when is_binary(runtime_id) <- System.get_env("SYMPHONY_RUNTIME_ID") do
-      temporary = path <> "." <> Integer.to_string(:os.getpid()) <> ".tmp"
+      pid = :os.getpid() |> to_string() |> String.to_integer()
+      temporary = path <> "." <> Integer.to_string(pid) <> ".tmp"
       File.mkdir_p!(Path.dirname(path))
-      File.write!(temporary, Jason.encode!(%{"runtime_id" => runtime_id, "pid" => :os.getpid(), "dispatch_capable" => true}))
+      File.write!(temporary, Jason.encode!(%{"runtime_id" => runtime_id, "pid" => pid, "dispatch_capable" => true}))
       File.rename!(temporary, path)
     else
       _ -> :ok

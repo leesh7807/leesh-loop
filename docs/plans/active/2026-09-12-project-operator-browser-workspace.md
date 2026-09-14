@@ -55,5 +55,13 @@ Make Leesh Loop a runnable local project environment without turning externally 
 - Reviewed HEAD: `f88327b76921bea3e9fd6c976042fda89bf3ce97` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
 - Verdict: `FINDINGS`.
 - Accepted: the publish-surface readiness probe used JSON decoding against an HTML response; the configured Symphony command was omitted from effective-runtime compatibility.
+- Applied commit: `9520dc36e56b92fc7f1fce2827c7369f05e808d2`.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 3
+
+- Reviewed HEAD: `9520dc36e56b92fc7f1fce2827c7369f05e808d2` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: Elixir exposed a string PID while Node compares numeric PIDs and acknowledgement temporary-file construction called an integer function with that string; lock ownership had a post-`mkdir` owner-record race.
 - Applied commit: pending.
 - Verification: pending post-fix Node UI/publisher/Symphony formatting and lifecycle-path checks.

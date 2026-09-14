@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { chmod, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, open, readFile, readlink, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -34,16 +34,18 @@ async function loadConfig(file) {
 }
 async function withLock(config, action) {
   const { lock } = paths(config); await mkdir(dirname(lock), { recursive: true, mode: 0o700 });
+  const lease = String(process.pid);
   for (;;) {
-    try { await mkdir(lock, { mode: 0o700 }); await atomicJson(join(lock, 'owner.json'), { pid: process.pid, started_at: new Date().toISOString() }); break; }
+    try { await symlink(lease, lock); break; }
     catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      const owner = await json(join(lock, 'owner.json'));
-      if (!owner?.pid || !alive(owner.pid)) { await rm(lock, { recursive: true, force: true }); continue; }
+      let owner;
+      try { owner = Number(await readlink(lock)); } catch { continue; }
+      if (!Number.isInteger(owner) || owner <= 0 || !alive(owner)) { await unlink(lock).catch(() => {}); continue; }
       await sleep(50);
     }
   }
-  try { return await action(); } finally { await rm(lock, { recursive: true, force: true }); }
+  try { return await action(); } finally { if (await readlink(lock).catch(() => null) === lease) await unlink(lock).catch(() => {}); }
 }
 function effective(config, runtimeId, port) {
   return { workflow_path: config.workflow_path, notion_database_url: config.notion_database_url, symphony_workspace_root: config.symphony_workspace_root, worker_interface_identity: config.worker_interface_identity || 'operator/external/chatgpt-shot/chatgpt-shot', github_repository_url: config.github_repository_url || null, symphony_command: canonical(config.symphony_command || join(root, 'operator/app/run-symphony')), dashboard: `http://127.0.0.1:${port}`, runtime_id: runtimeId };
