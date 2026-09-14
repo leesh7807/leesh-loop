@@ -183,3 +183,8 @@ Run targeted Notion agent-tool, adapter, and dynamic-tool tests; the affected Sy
 - Findings: 두 finding을 현재 HEAD의 실제 원문과 provider mapping으로 재검증하고 모두 수용했다. 5xx `notion_provider_response`를 ambiguous로 분류하지 않아 mutation durable effect를 known failure로 오인하던 결함은 5xx 판별과 회귀 테스트로 수정했다. `provider_error`를 `inspect/1` 문자열로만 노출하던 결함은 provider response status/body와 transport/error kind를 구조화해 보존하도록 수정했다.
 - Applied commit: `59efc335830f9c973a2f3e6dad2c6cdc2665a6dd`
 - Verification: 타깃 Notion/adapter/dynamic-tool 41 tests passed; full `mix test` 321 passed, 6 skipped; changed-file `mix credo --strict`, formatter, `mix specs.check`, and `git diff --check` passed.
+- Reviewed HEAD: `286ff146318f6910415d486a34a03ecd6641df91`
+- Verdict: `FINDINGS`
+- Findings: grapheme 기반 `String.slice/3`가 combining mark가 대량 포함된 단일 grapheme을 2,000자 chunk로 잘못 취급해 500KB를 초과하는 rich-text item/block을 만들 수 있다는 finding을 재검증하고 수용했다. code point 단위 streaming chunking과 combining-mark 회귀 테스트를 적용했다.
+- Applied commit: `46f66126b4502bd5bf1f89e531823151215e7670`
+- Verification: 타깃 Notion/adapter/dynamic-tool 42 tests passed; changed-file `mix credo --strict`, formatter, and `git diff --check` passed. Full `mix test`는 322개 중 321 passed, 1 existing timing-sensitive `CoreTest` failure, 6 skipped였고 해당 테스트 단독 실행은 이전 라운드에서 통과했다.
