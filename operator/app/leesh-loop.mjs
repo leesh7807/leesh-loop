@@ -4,9 +4,11 @@ import { spawn, spawnSync } from 'node:child_process';
 import { chmod, mkdir, open, readFile, readlink, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
-const root = resolve(dirname(new URL(import.meta.url).pathname), '../..');
+const appScript = fileURLToPath(import.meta.url);
+const root = resolve(dirname(appScript), '../..');
 const appRoot = join(root, 'operator');
 const defaultConfig = join(appRoot, 'project.json');
 const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
@@ -98,7 +100,7 @@ async function ensureUi(config) {
   let unmanaged = false;
   try { await reachable(uiUrl(config)); unmanaged = true; } catch { /* start the project-local publish surface */ }
   if (unmanaged) throw new Error(`publish surface at ${uiUrl(config)} is not owned by this project`);
-  const child = spawn(process.execPath, [new URL(import.meta.url).pathname, 'serve', config.configuration_path], { cwd: root, detached: true, stdio: 'ignore', env: process.env });
+  const child = spawn(process.execPath, [appScript, 'serve', config.configuration_path], { cwd: root, detached: true, stdio: 'ignore', env: process.env });
   child.unref();
   const process_start_ticks = processStartTicks(child.pid);
   if (!process_start_ticks) throw new Error(`could not record startup identity for publish UI PID ${child.pid}`);
@@ -109,7 +111,16 @@ async function ensureUi(config) {
 async function start(config) {
   return withLock(config, async () => {
     const port = Number(config.symphony_port || 4100); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
-    if (existing) return { reused: true, pid: existing.pid, dashboard: existing.effective.dashboard };
+    if (existing) {
+      let window_error;
+      if (!existing.project_window_opened_at) {
+        try {
+          await openWindow(config, existing.effective.dashboard);
+          await atomicJson(paths(config).state, { ...existing, project_window_opened_at: new Date().toISOString() });
+        } catch (error) { window_error = String(error.message || error); }
+      }
+      return { reused: true, pid: existing.pid, dashboard: existing.effective.dashboard, ...(window_error ? { window_error } : {}) };
+    }
     ensurePublisher();
     const p = paths(config); const runtimeId = randomUUID(); const identity = effective(config, runtimeId, port);
     const starting = { status: 'starting', runtime_id: runtimeId, effective: identity, authorization_path: p.authorization, acknowledgement_path: p.acknowledgement, ownership_path: p.ownership, created_at: new Date().toISOString() };

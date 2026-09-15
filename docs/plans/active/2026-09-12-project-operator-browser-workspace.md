@@ -111,5 +111,61 @@ Make Leesh Loop a runnable local project environment without turning externally 
 - Reviewed HEAD: `486c39596547ad41c7214753ee6f3c51194d3afe` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
 - Verdict: `FINDINGS`.
 - Accepted: canonicalization occurred before absolute-path validation, making relative workflow/workspace paths valid unexpectedly.
-- Applied commit: pending.
-- Verification: pending post-fix Node UI/publisher/Symphony formatting and lifecycle-path checks.
+- Applied commit: `8b62e30`.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 10
+
+- Reviewed HEAD: `8b62e30` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: the lifecycle directory was not created before acquiring the kernel `flock` lease.
+- Applied commit: `61942d2`.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 11
+
+- Reviewed HEAD: `61942d2` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: lifecycle lease setup needed its parent directory before the external lock command could create its file.
+- Applied commit: `e803db2`.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 12
+
+- Reviewed HEAD: `e803db2` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: a Publish UI child could be live before durable UI ownership was recorded.
+- Applied commit: `5f2bb1c`.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 13
+
+- Reviewed HEAD: `5f2bb1c` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: the UI used the wrong built publisher path and did not safely hand off its startup ownership record.
+- Applied commit: `3e0b2d5`.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 14
+
+- Reviewed HEAD: `3e0b2d5` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: the parent/child Publish UI ownership handoff could reject the child that the parent had just launched.
+- Applied commit: `4456ad9`.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 15
+
+- Reviewed HEAD: `4456ad9` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: a fresh checkout could launch the UI before its TypeScript publisher distribution was built.
+- Applied commit: `e7d9b79`.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 16
+
+- Reviewed HEAD: `e7d9b794f3d56b2ea01c880e23075fe14646a441` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: compatible reuse did not recover the initial project window after a crash or launch failure before its durable open marker; URL pathname decoding broke repository roots containing spaces.
+- Applied commit: current fix commit.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
