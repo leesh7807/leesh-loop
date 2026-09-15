@@ -24,7 +24,7 @@ class PublicationFake extends NotionClient {
 
   constructor() {
     super("token");
-    this.sources.set("task-source", { id: "task-source", properties: taskSchema(), pages: new Map() });
+    this.sources.set("task-source", { id: "task-source", properties: { Name: { id: "name-id", type: "title" } }, pages: new Map() });
   }
 
   addPlanPage(identifier: string, title = "Ship it"): string {
@@ -56,7 +56,11 @@ class PublicationFake extends NotionClient {
     if (method === "PATCH" && sourceMatch) {
       const source = this.sources.get(sourceMatch[1]);
       for (const [name, definition] of Object.entries(body.properties ?? {})) {
-        source!.properties[name] = { type: Object.keys(definition as Record<string, any>)[0], ...(definition as Record<string, any>) };
+        const rename = Object.entries(source!.properties).find(([, property]: any) => property?.id === name);
+        if (rename && (definition as any).name) {
+          delete source!.properties[rename[0]];
+          source!.properties[(definition as any).name] = { ...rename[1], name: (definition as any).name };
+        } else source!.properties[name] = { type: Object.keys(definition as Record<string, any>)[0], ...(definition as Record<string, any>) };
       }
       return source;
     }
@@ -68,6 +72,7 @@ class PublicationFake extends NotionClient {
     const queryMatch = path.match(/^\/data_sources\/([^/]+)\/query$/);
     if (method === "POST" && queryMatch) {
       const source = this.sources.get(queryMatch[1]);
+      if (!body.filter) return { results: [...(source?.pages.values() ?? [])].slice(0, body.page_size), has_more: false };
       const identifier = body.filter.rich_text.equals;
       return { results: [...(source?.pages.values() ?? [])].filter((page) => propertyValue(page.properties.Identifier) === identifier), has_more: false };
     }
@@ -119,13 +124,16 @@ test("normal publisher entry point creates the two-source canonical representati
   assert.equal(result.page_id, task.id);
   assert.deepEqual([...client.sources.keys()].sort(), ["plan-source", "task-source"]);
   assert.equal(client.sources.get("task-source")!.properties[PLAN_PROPERTY].relation.data_source_id, "plan-source");
+  assert.equal("Name" in client.sources.get("task-source")!.properties, false);
+  assert.equal(client.sources.get("task-source")!.properties.Title.type, "title");
+  assert.deepEqual(client.sources.get("task-source")!.properties.State.select.options.map((option: any) => option.name), DEFAULT_POLICY.stateSeeds);
   assert.deepEqual(task.properties[PLAN_PROPERTY].relation, [{ id: planPage.id }]);
   assert.equal(propertyValue(task.properties.Identifier), propertyValue(planPage.properties.Identifier));
   assert.equal(propertyValue(planPage.properties.Identifier), result.identifier);
   assert.equal(planPage.is_locked, true);
   assert.deepEqual(planPage.children.map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "# Ship it\naccepted plan");
   assert.deepEqual(task.children, []);
-  assert.equal(task.properties.State.rich_text[0].text.content, PUBLISHER_READY_STATE);
+  assert.equal(task.properties.State.select.name, PUBLISHER_READY_STATE);
   assert.equal(client.calls.some((call) => call.method === "POST" && call.path === "/pages" && call.body.parent.type === "page_id"), false);
   assert.ok(client.calls.findIndex((call) => call.method === "PATCH" && call.path === `/pages/${planPage.id}` && call.body.is_locked === true) < client.calls.findIndex((call) => call.method === "PATCH" && call.path === `/pages/${task.id}` && call.body.properties?.[PLAN_PROPERTY]));
   assert.ok(client.calls.findIndex((call) => call.path === `/pages/${task.id}` && call.body?.properties?.State) > client.calls.findIndex((call) => call.path === `/pages/${task.id}` && call.body?.properties?.[PLAN_PROPERTY]));
@@ -138,14 +146,14 @@ test("pending recovery reuses the task and matching Plan page and completes a mi
   await assert.rejects(publishPlanFile(plan, config, DATABASE_URL, client), /Plan lock failure/);
   const taskId = client.taskPage().id;
   const planId = client.planPages()[0].id;
-  assert.equal(client.taskPage().properties.State.rich_text[0].text.content, PUBLISHER_PENDING_STATE);
+  assert.equal(client.taskPage().properties.State.select.name, PUBLISHER_PENDING_STATE);
   assert.equal(client.planPages()[0].is_locked, false);
 
   await publishPlanFile(plan, config, DATABASE_URL, client);
   assert.equal(client.taskPage().id, taskId);
   assert.equal(client.planPages()[0].id, planId);
   assert.equal(client.planPages().length, 1);
-  assert.equal(client.taskPage().properties.State.rich_text[0].text.content, PUBLISHER_READY_STATE);
+  assert.equal(client.taskPage().properties.State.select.name, PUBLISHER_READY_STATE);
   assert.equal(client.planPages()[0].is_locked, true);
 });
 
@@ -167,7 +175,7 @@ test("pending tasks related to another publication or ambiguous Plan identity ar
   const wrongPlan = wrong.addPlanPage("PLAN-OTHER", "Other");
   wrong.taskPage().properties[PLAN_PROPERTY] = { type: "relation", relation: [{ id: wrongPlan }] };
   await assert.rejects(publishPlanFile(plan, config, DATABASE_URL, wrong), /mismatched publication Identifier/);
-  assert.equal(wrong.taskPage().properties.State.rich_text[0].text.content, PUBLISHER_PENDING_STATE);
+  assert.equal(wrong.taskPage().properties.State.select.name, PUBLISHER_PENDING_STATE);
 
   const ambiguous = new PublicationFake();
   ambiguous.failNextLock = true;
@@ -176,7 +184,7 @@ test("pending tasks related to another publication or ambiguous Plan identity ar
   const duplicate = ambiguous.addPlanPage(propertyValue(matching.properties.Identifier), propertyValue(matching.properties.Title));
   ambiguous.pages.get(duplicate)!.children = structuredClone(matching.children);
   await assert.rejects(publishPlanFile(plan, config, DATABASE_URL, ambiguous), /matches 2 Plan pages/);
-  assert.equal(ambiguous.taskPage().properties.State.rich_text[0].text.content, PUBLISHER_PENDING_STATE);
+  assert.equal(ambiguous.taskPage().properties.State.select.name, PUBLISHER_PENDING_STATE);
 });
 
 test("final validation rejects a task Identifier changed before finalization", async () => {
@@ -185,7 +193,7 @@ test("final validation rejects a task Identifier changed before finalization", a
   client.mutateTaskIdentifierAfterRelation = true;
 
   await assert.rejects(publishPlanFile(plan, config, DATABASE_URL, client), /mismatched publication Identifier/);
-  assert.equal(client.taskPage().properties.State.rich_text[0].text.content, PUBLISHER_PENDING_STATE);
+  assert.equal(client.taskPage().properties.State.select.name, PUBLISHER_PENDING_STATE);
 });
 
 test("completed publications are never repaired even if Plan content is later changed", async () => {
@@ -219,7 +227,7 @@ function taskSchema(planSource?: string): Record<string, any> {
   return {
     Identifier: { type: "rich_text" },
     Title: { type: "title" },
-    State: { type: "rich_text" },
+    State: { type: "select" },
     Priority: { type: "number" },
     Labels: { type: "multi_select" },
     "Blocked By": { type: "relation", relation: { data_source_id: "task-source", single_property: {} } },

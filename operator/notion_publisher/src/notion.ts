@@ -18,6 +18,7 @@ export type Publication = { pageId: string; url?: string; complete: boolean };
 
 const richText = (value: any): string => Array.isArray(value) ? value.map((part: any) => part?.plain_text ?? part?.text?.content ?? "").join("") : "";
 const propertyText = (property: any, type: string): string | null => property?.type === type && Array.isArray(property[type]) ? richText(property[type]) : null;
+const selectText = (property: any): string | null => property?.type === "select" && (property.select === null || typeof property.select?.name === "string") ? property.select?.name ?? "" : null;
 const relationTarget = (property: any): string | null => property?.type === "relation" && typeof property.relation?.data_source_id === "string" ? property.relation.data_source_id : null;
 const relationIds = (property: any): string[] | null => {
   if (property?.type !== "relation" || !Array.isArray(property.relation)) return null;
@@ -65,26 +66,33 @@ export class NotionClient {
     for (const entry of entries) sources.push({ id: entry.id, schema: await this.request("GET", `/data_sources/${entry.id}`) });
 
     const planCandidates = sources.filter(({ schema }) => this.isPlanSchema(schema));
-    if (planCandidates.length > 1) throw new PublicationError("incompatible database: multiple structurally compatible Plan data sources exist");
+    if (planCandidates.length > 1) throw this.unsupported();
 
     const taskCandidates = sources.filter(({ id, schema }) => this.isTaskSchema(schema, id, policy));
-    const task = taskCandidates.length === 1 ? taskCandidates[0] : taskCandidates.length > 1 ? null : this.bootstrapTaskSource(sources, policy);
-    if (!task) throw new PublicationError(taskCandidates.length > 1 ? "incompatible database: multiple structurally compatible task data sources exist" : "incompatible database: no structurally identifiable task data source exists");
-
+    if (taskCandidates.length > 1) throw this.unsupported();
+    if (taskCandidates.length === 1) {
+      const task = taskCandidates[0]; const plan = planCandidates[0];
+      if (!plan || relationTarget(task.schema.properties[PLAN_PROPERTY]) !== plan.id || !hasSingleProperty(task.schema.properties[PLAN_PROPERTY].relation)) throw this.unsupported();
+      return { taskDataSourceId: task.id, planDataSourceId: plan.id };
+    }
+    const task = this.bootstrapTaskSource(sources, policy);
+    if (!task || !(await this.isEmpty(task.id))) throw this.unsupported();
     const plan = planCandidates[0] ?? await this.createPlanDataSource(databaseId);
-    this.validatePlanSchema(plan.schema);
     await this.ensureTaskSchema(task.schema, task.id, policy, plan.id);
     return { taskDataSourceId: task.id, planDataSourceId: plan.id };
   }
 
+  private unsupported(): PublicationError { return new PublicationError("The selected Notion database is not empty or does not match the canonical Leesh Loop schema.\nUse an empty database or a database already initialized with the canonical Leesh Loop schema."); }
+
+  private async isEmpty(dataSource: string): Promise<boolean> {
+    const result = await this.request("POST", `/data_sources/${dataSource}/query`, { page_size: 1 });
+    return Array.isArray(result?.results) && result.results.length === 0;
+  }
+
   private bootstrapTaskSource(sources: { id: string; schema: any }[], policy: Policy): { id: string; schema: any } | null {
-    const candidates = sources.filter(({ schema }) => {
-      const properties = schema?.properties;
-      if (!properties || this.isPlanSchema(schema)) return false;
-      if (properties[policy.title]?.type === "title") return true;
-      return Object.keys(properties).some((name) => [policy.identifier, policy.state, policy.priority, policy.labels, policy.blockedBy, PLAN_PROPERTY].includes(name));
-    });
-    return candidates.length === 1 ? candidates[0] : null;
+    const plans = sources.filter(({ schema }) => this.isPlanSchema(schema));
+    const candidates = sources.filter(({ id, schema }) => !this.isPlanSchema(schema) && this.isBootstrapPrefix(schema, id, policy, plans[0]?.id));
+    return candidates.length === 1 && sources.length === candidates.length + plans.length ? candidates[0] : null;
   }
 
   private isPlanSchema(data: any): boolean {
@@ -95,9 +103,25 @@ export class NotionClient {
 
   private isTaskSchema(data: any, dataSource: string, policy: Policy): boolean {
     const properties = data?.properties ?? {};
-    const metadata = [policy.identifier, policy.title, policy.state, policy.priority, policy.labels, policy.blockedBy].every((name) => Boolean(properties[name]));
+    const metadata = properties[policy.identifier]?.type === "rich_text" && properties[policy.title]?.type === "title" && properties[policy.state]?.type === "select" && properties[policy.priority]?.type === "number" && properties[policy.labels]?.type === "multi_select" && properties[policy.blockedBy]?.type === "relation";
     const blockedBy = properties[policy.blockedBy];
-    return metadata && properties[PLAN_PROPERTY]?.type === "relation" && blockedBy?.type === "relation" && relationTarget(blockedBy) === dataSource && hasSingleProperty(blockedBy.relation);
+    const plan = properties[PLAN_PROPERTY];
+    return metadata && plan?.type === "relation" && blockedBy?.type === "relation" && relationTarget(blockedBy) === dataSource && hasSingleProperty(blockedBy.relation) && hasSingleProperty(plan.relation);
+  }
+
+  private isBootstrapPrefix(data: any, dataSource: string, policy: Policy, planDataSource?: string): boolean {
+    const properties = data?.properties;
+    if (!properties) return false;
+    const titles = Object.entries(properties).filter(([, value]: any) => value?.type === "title");
+    if (titles.length !== 1) return false;
+    const expected: Record<string, string> = {[policy.identifier]:"rich_text", [policy.state]:"select", [policy.priority]:"number", [policy.labels]:"multi_select", [policy.blockedBy]:"relation", [PLAN_PROPERTY]:"relation"};
+    for (const [name, property] of Object.entries(properties) as [string, any][]) {
+      if (property?.type === "title") continue;
+      if (expected[name] !== property?.type) return false;
+      if (name === policy.blockedBy && (relationTarget(property) !== dataSource || !hasSingleProperty(property.relation))) return false;
+      if (name === PLAN_PROPERTY && (!planDataSource || relationTarget(property) !== planDataSource || !hasSingleProperty(property.relation))) return false;
+    }
+    return true;
   }
 
   private async createPlanDataSource(databaseId: string): Promise<{ id: string; schema: any }> {
@@ -118,7 +142,7 @@ export class NotionClient {
     return {
       [policy.identifier]: { rich_text: {} },
       [policy.title]: { title: {} },
-      [policy.state]: { rich_text: {} },
+      [policy.state]: { select: { options: policy.stateSeeds.map(name => ({ name })) } },
       [policy.priority]: { number: {} },
       [policy.labels]: { multi_select: {} },
       [policy.blockedBy]: { relation: { data_source_id: dataSource, single_property: {} } },
@@ -131,7 +155,7 @@ export class NotionClient {
     const expected: Record<string, string> = {
       [policy.identifier]: "rich_text",
       [policy.title]: "title",
-      [policy.state]: "rich_text",
+      [policy.state]: "select",
       [policy.priority]: "number",
       [policy.labels]: "multi_select",
       [policy.blockedBy]: "relation",
@@ -212,7 +236,7 @@ export class NotionClient {
     if (rows.length > 1) throw new PublicationError(`Identifier invariant violation: ${identifier} matches ${rows.length} task pages`);
     const row = rows[0];
     if (typeof row?.id !== "string") throw new PublicationError("provider/API failure: publication query returned a task without an id");
-    const state = propertyText(row.properties?.[policy.state], "rich_text");
+    const state = selectText(row.properties?.[policy.state]);
     if (state === null) throw new PublicationError("provider/API failure: publication query returned a task with malformed State");
     return { pageId: row.id, url: row.url, complete: state !== PUBLISHER_PENDING_STATE };
   }
@@ -317,6 +341,6 @@ export class NotionClient {
   }
 
   async finalizePublication(pageId: string, policy: Policy): Promise<void> {
-    await this.request("PATCH", `/pages/${pageId}`, { properties: { [policy.state]: { rich_text: [{ type: "text", text: { content: PUBLISHER_READY_STATE } }] } } });
+    await this.request("PATCH", `/pages/${pageId}`, { properties: { [policy.state]: { select: { name: PUBLISHER_READY_STATE } } } });
   }
 }
