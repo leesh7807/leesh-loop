@@ -14,12 +14,18 @@ const defaultConfig = join(appRoot, 'project.json');
 const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 const canonical = value => resolve(value);
 const stateRoot = config => canonical(config.state_directory || join(appRoot, '.runtime'));
-const paths = config => { const dir = stateRoot(config); return { dir, state: join(dir, 'runtime.json'), ui: join(dir, 'publish-ui.json'), lock: join(dir, 'lifecycle.lock'), ownership: join(dir, 'ownership.json'), authorization: join(dir, 'dispatch-authorization.json'), acknowledgement: join(dir, 'dispatch-acknowledgement.json') }; };
+const paths = config => { const dir = stateRoot(config); return { dir, state: join(dir, 'runtime.json'), ui: join(dir, 'publish-ui.json'), lock: join(dir, 'lifecycle.lock'), ownership: join(dir, 'ownership.json'), authorization: join(dir, 'dispatch-authorization.json'), acknowledgement: join(dir, 'dispatch-acknowledgement.json'), startup_status: join(dir, 'startup-status') }; };
 
 async function atomicJson(path, value) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  await rename(temporary, path);
+}
+async function atomicText(path, value) {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(temporary, `${value}\n`, { mode: 0o600 });
   await rename(temporary, path);
 }
 async function json(path) { try { return JSON.parse(await readFile(path, 'utf8')); } catch { return null; } }
@@ -68,7 +74,7 @@ async function terminate(state) {
   if (state?.pid && alive(state.pid)) throw new Error(`owned Symphony process ${state.pid} did not terminate`);
   return true;
 }
-async function clear(config) { const p = paths(config); await Promise.all([remove(p.state), remove(p.ownership), remove(p.authorization), remove(p.acknowledgement)]); }
+async function clear(config) { const p = paths(config); await Promise.all([remove(p.state), remove(p.ownership), remove(p.authorization), remove(p.acknowledgement), remove(p.startup_status)]); }
 async function reconcile(config, desired) {
   const p = paths(config); const state = await json(p.state); if (!state) return null;
   if (state.status === 'running' && await runtimeObserved(state) && compatible(state.effective, desired)) return state;
@@ -76,7 +82,15 @@ async function reconcile(config, desired) {
   await terminate(state); await clear(config); return null;
 }
 function launch(command, args, env) { const child = spawn(command, args, { cwd: root, detached: true, stdio: 'ignore', env }); child.unref(); return child.pid; }
-async function waitFor(check, description, timeoutMs = 15_000) { const deadline = Date.now() + timeoutMs; do { if (await check()) return; await sleep(100); } while (Date.now() < deadline); throw new Error(`timed out waiting for ${description}`); }
+async function waitFor(check, description, timeoutMs = 15_000, progress) {
+  const started = Date.now(), deadline = started + timeoutMs; let nextProgress = started;
+  do {
+    if (await check()) return;
+    if (progress && Date.now() >= nextProgress) { await progress(Math.floor((Date.now() - started) / 1_000)); nextProgress = Date.now() + 10_000; }
+    await sleep(100);
+  } while (Date.now() < deadline);
+  throw new Error(`timed out waiting for ${description}`);
+}
 async function openWindow(config, dashboard) {
   await ensureUi(config);
   await openProjectSurfaces(config, dashboard);
@@ -149,14 +163,15 @@ async function start(config) {
       }
       return { reused: true, pid: existing.pid, dashboard: existing.effective.dashboard, ...(window_error ? { window_error } : {}) };
     }
+    console.error('Operator: preparing Publisher and Symphony startup.');
     ensurePublisher();
     const p = paths(config); const runtimeId = randomUUID(); const identity = effective(config, runtimeId, port);
     const starting = { status: 'starting', runtime_id: runtimeId, effective: identity, authorization_path: p.authorization, acknowledgement_path: p.acknowledgement, ownership_path: p.ownership, created_at: new Date().toISOString() };
-    await atomicJson(p.state, starting); await remove(p.ownership); await remove(p.authorization); await remove(p.acknowledgement);
+    await atomicJson(p.state, starting); await remove(p.ownership); await remove(p.authorization); await remove(p.acknowledgement); await atomicText(p.startup_status, 'launching Operator readiness checks');
     try {
       const symphony = identity.symphony_command;
       const args = [join(root, 'operator/app/operator-bootstrap'), '--', symphony, '--port', String(port), '--i-understand-that-this-will-be-running-without-the-usual-guardrails', config.workflow_path];
-      const env = { ...process.env, SYMPHONY_WORKSPACE_ROOT: config.symphony_workspace_root, SYMPHONY_GITHUB_REPOSITORY_URL: config.github_repository_url || '', SYMPHONY_DISPATCH_BARRIER: 'closed', SYMPHONY_RUNTIME_ID: runtimeId, SYMPHONY_DISPATCH_AUTHORIZATION_FILE: p.authorization, SYMPHONY_DISPATCH_ACK_FILE: p.acknowledgement, SYMPHONY_OWNERSHIP_FILE: p.ownership };
+      const env = { ...process.env, SYMPHONY_WORKSPACE_ROOT: config.symphony_workspace_root, SYMPHONY_GITHUB_REPOSITORY_URL: config.github_repository_url || '', SYMPHONY_DISPATCH_BARRIER: 'closed', SYMPHONY_RUNTIME_ID: runtimeId, SYMPHONY_DISPATCH_AUTHORIZATION_FILE: p.authorization, SYMPHONY_DISPATCH_ACK_FILE: p.acknowledgement, SYMPHONY_OWNERSHIP_FILE: p.ownership, SYMPHONY_OPERATOR_STARTUP_STATUS_FILE: p.startup_status };
       const pid = launch(join(root, 'operator/app/owned-symphony'), args, env);
       const process_start_ticks = await processStartTicks(pid);
       if (!process_start_ticks) throw new Error(`could not record startup identity for owned Symphony PID ${pid}`);
@@ -164,14 +179,21 @@ async function start(config) {
       await atomicJson(p.state, ownedStarting);
       await atomicJson(p.ownership, { project_root: root, runtime_id: runtimeId, pid, process_start_ticks, created_at: new Date().toISOString() });
       const provisional = { ...ownedStarting, status: 'provisional' }; await atomicJson(p.state, provisional);
-      await waitFor(() => runtimeObserved({ ...provisional, effective: identity }, false), 'Symphony observability', config.startup_timeout_ms || 30 * 60_000);
+      let reportedStartupStatus;
+      const reportProgress = async elapsed => {
+        const status = (await readFile(p.startup_status, 'utf8').catch(() => '')).trim();
+        if (status && status !== reportedStartupStatus) { console.error(`Operator: ${status}.`); reportedStartupStatus = status; return; }
+        console.error(`Operator: still waiting for Symphony observability (${elapsed}s elapsed; current step: ${status || 'starting child process'}).`);
+      };
+      await waitFor(() => runtimeObserved({ ...provisional, effective: identity }, false), 'Symphony observability', config.startup_timeout_ms || 30 * 60_000, reportProgress);
       const committed = { ...provisional, status: 'committed-disabled' }; await atomicJson(p.state, committed);
       const running = { ...committed, status: 'running', authorized_at: new Date().toISOString() }; await atomicJson(p.state, running);
       await atomicJson(p.authorization, { state: 'running', runtime_id: runtimeId, published_at: new Date().toISOString() });
-      await waitFor(() => runtimeObserved(running, true), 'dispatch acknowledgement');
+      await atomicText(p.startup_status, 'waiting for Symphony dispatch acknowledgement');
+      await waitFor(() => runtimeObserved(running, true), 'dispatch acknowledgement', 15_000, reportProgress);
       try {
         await openWindow(config, identity.dashboard);
-        await atomicJson(p.state, { ...running, project_window_opened_at: new Date().toISOString() });
+        await atomicJson(p.state, { ...running, project_window_opened_at: new Date().toISOString() }); await remove(p.startup_status);
         return { reused: false, pid, dashboard: identity.dashboard };
       }
       catch (windowError) { return { reused: false, pid, dashboard: identity.dashboard, window_error: String(windowError.message || windowError) }; }
