@@ -6,7 +6,9 @@ export type Policy = { identifier:string; title:string; state:string; priority:s
 export const PUBLISHER_PENDING_STATE="Publisher Pending";
 export const PUBLISHER_READY_STATE="Ready";
 export const PLAN_PROPERTY="Plan";
-export const DEFAULT_STATE_SEEDS=["backlog","todo","in_progress","human_review","rework","merging","done","canceled"];
+// Keep the bootstrap options aligned with the repository workflow. Backlog is
+// intentionally included as the sole pre-Ready queue state.
+export const DEFAULT_STATE_SEEDS=["Backlog","Ready","In Progress","Human Review","Rework","Merging","Done","Cancelled"];
 export const DEFAULT_POLICY: Policy = {identifier:"Identifier",title:"Title",state:"State",priority:"Priority",labels:"Labels",blockedBy:"Blocked By",defaultPriority:3,defaultLabels:[],stateSeeds:DEFAULT_STATE_SEEDS};
 export const NOTION_RICH_TEXT_SAFE_LIMIT=1900;
 export const NOTION_TITLE_SAFE_LIMIT=1900;

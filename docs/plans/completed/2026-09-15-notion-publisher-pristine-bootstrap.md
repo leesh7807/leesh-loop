@@ -21,8 +21,9 @@ without migration. The configured database URL is the only destination identity.
 - Bootstrap creates the Plan source, task properties and required relations; it
   verifies the result before publication and may resume an exact prior prefix.
 - `State` is a Notion select. Bootstrap seeds the injected policy list; the
-  production default is `backlog`, `todo`, `in_progress`, `human_review`,
-  `rework`, `merging`, `done`, `canceled`. This is not an allowed-state enum:
+  production default is `Backlog`, `Ready`, `In Progress`, `Human Review`,
+  `Rework`, `Merging`, `Done`, `Cancelled`. `Backlog` is the sole queue-state
+  addition to the workflow vocabulary. This is not an allowed-state enum:
   runtime may write another exact State name through Notion's select path.
 - Non-canonical destinations fail with:
 

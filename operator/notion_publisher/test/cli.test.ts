@@ -182,7 +182,7 @@ test("browser CRLF Plan content publishes when Notion reads it back as LF", asyn
 
   const [planPage] = client.planPages();
   assert.equal(planPage.is_locked, true);
-  assert.equal(client.taskPage().properties.State.rich_text[0].text.content, PUBLISHER_READY_STATE);
+  assert.equal(client.taskPage().properties.State.select.name, PUBLISHER_READY_STATE);
   assert.equal(planPage.children.map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "# Browser\n\naccepted Plan");
 });
 

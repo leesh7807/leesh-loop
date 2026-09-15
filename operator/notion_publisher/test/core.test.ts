@@ -15,7 +15,7 @@ test("six-property task metadata and chunked Plan content are canonical", () => 
   assert.deepEqual(properties.State, { select: { name: PUBLISHER_PENDING_STATE } });
   assert.deepEqual(properties[PLAN_PROPERTY], { relation: [] });
   assert.deepEqual(buildPlanProperties("PLAN-X", "Title"), { Identifier: { rich_text: [{ type: "text", text: { content: "PLAN-X" } }] }, Title: { title: [{ type: "text", text: { content: "Title" } }] } });
-  assert.deepEqual(DEFAULT_POLICY.stateSeeds, ["backlog", "todo", "in_progress", "human_review", "rework", "merging", "done", "canceled"]);
+  assert.deepEqual(DEFAULT_POLICY.stateSeeds, ["Backlog", "Ready", "In Progress", "Human Review", "Rework", "Merging", "Done", "Cancelled"]);
   const blocks = buildPlanBlocks("x".repeat(4000));
   assert.equal(blocks.every((block: any) => block.type === "paragraph"), true);
   assert.equal(blocks.map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "x".repeat(4000));
