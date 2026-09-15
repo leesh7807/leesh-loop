@@ -1259,13 +1259,14 @@ defmodule SymphonyElixir.CoreTest do
     scheduling_timestamp_ms = 1_000
     requested_delay_ms = 1_000
     due_at_ms = scheduling_timestamp_ms + requested_delay_ms
-    later_observation_timestamp_ms = scheduling_timestamp_ms + 1
+    old_lower_bound_ms = 500
+    later_observation_timestamp_ms = scheduling_timestamp_ms + 501
 
     assert_due_at_matches_scheduling(due_at_ms, scheduling_timestamp_ms, requested_delay_ms)
 
     # This is the old assertion shape: its lower bound is based on a timestamp
     # taken after the fixed due time was calculated.
-    assert due_at_ms - later_observation_timestamp_ms < requested_delay_ms
+    assert due_at_ms - later_observation_timestamp_ms < old_lower_bound_ms
   end
 
   defp assert_due_at_matches_scheduling(due_at_ms, scheduled_at_ms, requested_delay_ms) do
