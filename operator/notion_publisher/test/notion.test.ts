@@ -89,6 +89,13 @@ test("rows and legacy rich-text State are unsupported without bootstrap mutation
   ]);
   await assert.rejects(legacy.ensureDatabase("db", DEFAULT_POLICY), /The selected Notion database is not empty/);
   assert.equal(legacy.calls.some((call) => call.method === "PATCH" || call.method === "POST"), false);
+
+  const arbitraryPartial = new RequestFake([
+    { data_sources: [{ id: "task-source" }] },
+    { properties: { Name: { type: "title" }, Identifier: { type: "rich_text" } } }
+  ]);
+  await assert.rejects(arbitraryPartial.ensureDatabase("db", DEFAULT_POLICY), /The selected Notion database is not empty/);
+  assert.equal(arbitraryPartial.calls.some((call) => call.method === "PATCH" || call.method === "POST"), false);
 });
 
 test("non-pristine secondary sources are rejected without creating another destination", async () => {

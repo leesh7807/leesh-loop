@@ -113,15 +113,9 @@ export class NotionClient {
     const properties = data?.properties;
     if (!properties) return false;
     const titles = Object.entries(properties).filter(([, value]: any) => value?.type === "title");
-    if (titles.length !== 1) return false;
-    const expected: Record<string, string> = {[policy.identifier]:"rich_text", [policy.state]:"select", [policy.priority]:"number", [policy.labels]:"multi_select", [policy.blockedBy]:"relation", [PLAN_PROPERTY]:"relation"};
-    for (const [name, property] of Object.entries(properties) as [string, any][]) {
-      if (property?.type === "title") continue;
-      if (expected[name] !== property?.type) return false;
-      if (name === policy.blockedBy && (relationTarget(property) !== dataSource || !hasSingleProperty(property.relation))) return false;
-      if (name === PLAN_PROPERTY && (!planDataSource || relationTarget(property) !== planDataSource || !hasSingleProperty(property.relation))) return false;
-    }
-    return true;
+    // Bootstrap first creates the Plan source, then atomically renames the title
+    // and adds every task property. Its sole intermediate task shape is title-only.
+    return titles.length === 1 && Object.keys(properties).length === 1;
   }
 
   private async createPlanDataSource(databaseId: string): Promise<{ id: string; schema: any }> {
