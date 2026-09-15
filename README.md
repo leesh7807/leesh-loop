@@ -123,7 +123,10 @@ separate human-review surface.
 make ordinary review return, bounded comment consumption, and Rework recovery
 understandable without adding a separate lifecycle database. `In Progress` resumes
 the preserved workspace; `Rework` deliberately starts a fresh task branch from the
-current `origin/main` and preserves the latest Repository Plan.
+current `origin/main` and preserves the latest Repository Plan. A human approval
+moves the task to active `Merging`, where a worker merges only the PR and exact
+HEAD delivered to that review cycle, verifies the result on remote `main`, and
+only then moves the task to `Done`.
 
 These are the Leesh Loop integration contracts: successful publication hands work to Symphony in
 `Ready`; changing that handoff requires coordinated Publisher and workflow changes; and the
