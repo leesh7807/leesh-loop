@@ -16,9 +16,11 @@ Create and maintain a plan that keeps the work aligned with the objective and ma
 
 - Do not use the plan as an execution log.
 
-- Keep active plans under `docs/plans/active/`. After the final Repository Plan comparison and before opening its Pull Request, move the delivered Plan to `docs/plans/completed/`. This repository-artifact move does not itself make the tracker task terminal; human review, merge, or rework may still follow.
+- Keep active plans under `docs/plans/active/`. Before making a Pull Request, move the plan to `docs/plans/completed/`.
 
 When reviewing the plan, check that each planned unit describes a coherent outcome in the problem domain rather than merely an implementation step.
+
+Also check that verification reaches the highest practical level of the real execution path, and that any material gap in end-to-end verification is explicit rather than silently replaced by lower-level tests.
 
 A good planned unit should:
 
@@ -36,7 +38,7 @@ The final plan should be complete enough for implementation to begin without unr
 
 ## Plan format
 
-```markdown
+```text
 # date-summary
 
 ## Objective
@@ -66,6 +68,12 @@ Do not repeat background already captured in Intent.
 ## Verification
 
 Describe the observable evidence that will show whether the objective has been achieved through the intended execution path.
+
+Prefer verification through a representative end-to-end flow that exercises the real entry point, orchestration, integrations, external effects, and authoritative readback applicable to the objective.
+
+If meaningful end-to-end verification is not possible, state exactly what cannot be exercised, why, what closest verification will be performed instead, and what material risk remains unverified.
+
+When missing infrastructure, tooling, or observability prevents representative end-to-end verification, treat enabling that verification as part of the planned work when it is reasonably within the objective's boundary.
 
 ## Verification Tools
 
