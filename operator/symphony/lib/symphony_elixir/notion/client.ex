@@ -7,9 +7,9 @@ defmodule SymphonyElixir.Notion.Client do
   @api "2025-09-03"
   @endpoint "https://api.notion.com/v1"
   @required %{
-    "Identifier" => ["rich_text", "title"],
+    "Identifier" => ["rich_text"],
     "Title" => ["title"],
-    "State" => ["rich_text"],
+    "State" => ["select"],
     "Priority" => ["number"],
     "Labels" => ["multi_select"],
     "Blocked By" => ["relation"],
@@ -205,7 +205,7 @@ defmodule SymphonyElixir.Notion.Client do
       %{
         "page_size" => 100,
         "filter" => %{
-          "or" => Enum.map(states, &%{"property" => "State", "rich_text" => %{"equals" => &1}})
+          "or" => Enum.map(states, &%{"property" => "State", "select" => %{"equals" => &1}})
         }
       }
       |> maybe_cursor(cursor)
@@ -398,8 +398,8 @@ defmodule SymphonyElixir.Notion.Client do
   defp text_property_values(_), do: {:error, :invalid_property}
 
   defp state_property(property) do
-    case text_property(property, ["rich_text"]) do
-      {:ok, value} when value != "" -> {:ok, value}
+    case property do
+      %{"type" => "select", "select" => %{"name" => value}} when is_binary(value) and value != "" -> {:ok, value}
       _ -> {:error, :invalid_state}
     end
   end
@@ -418,8 +418,8 @@ defmodule SymphonyElixir.Notion.Client do
   defp labels_property(_), do: {:error, :invalid_labels}
 
   defp value_state(property) do
-    case text_property(property, ["rich_text"]) do
-      {:ok, value} -> value
+    case property do
+      %{"type" => "select", "select" => %{"name" => value}} when is_binary(value) -> value
       _ -> nil
     end
   end

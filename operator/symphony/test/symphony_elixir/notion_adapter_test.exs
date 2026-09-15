@@ -144,7 +144,7 @@ defmodule SymphonyElixir.Notion.AdapterTest do
              Client.fetch_issues_by_states_for_test(["Ready"], notion_settings(), request)
   end
 
-  test "worker state mutation writes exact rich-text strings" do
+  test "worker state mutation writes exact select strings" do
     settings = notion_settings()
 
     response =
@@ -168,9 +168,7 @@ defmodule SymphonyElixir.Notion.AdapterTest do
     assert_receive {:state_patch,
                     %{
                       "properties" => %{
-                        "State" => %{
-                          "rich_text" => [%{"type" => "text", "text" => %{"content" => "Human Review"}}]
-                        }
+                        "State" => %{"select" => %{"name" => "Human Review"}}
                       }
                     }}
   end
@@ -181,7 +179,7 @@ defmodule SymphonyElixir.Notion.AdapterTest do
     %{
       "Identifier" => %{"type" => "rich_text"},
       "Title" => %{"type" => "title"},
-      "State" => %{"type" => "rich_text"},
+      "State" => %{"type" => "select"},
       "Priority" => %{"type" => "number"},
       "Labels" => %{"type" => "multi_select"},
       "Blocked By" => %{"type" => "relation", "relation" => %{"data_source_id" => source_id}},
@@ -198,7 +196,7 @@ defmodule SymphonyElixir.Notion.AdapterTest do
       "properties" => %{
         "Identifier" => %{"type" => "rich_text", "rich_text" => [%{"plain_text" => "PLAN-1"}]},
         "Title" => %{"type" => "title", "title" => [%{"plain_text" => "Task"}]},
-        "State" => %{"type" => "rich_text", "rich_text" => [%{"plain_text" => state}]},
+        "State" => %{"type" => "select", "select" => %{"name" => state}},
         "Priority" => %{"type" => "number", "number" => 3},
         "Labels" => %{"type" => "multi_select", "multi_select" => []},
         "Blocked By" => %{"type" => "relation", "relation" => []},

@@ -76,9 +76,7 @@ defmodule SymphonyElixir.Notion.AgentTool do
                %{},
                %{
                  "properties" => %{
-                   "State" => %{
-                     "rich_text" => [%{"type" => "text", "text" => %{"content" => state}}]
-                   }
+                  "State" => %{"select" => %{"name" => state}}
                  }
                },
                settings

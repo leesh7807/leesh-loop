@@ -12,10 +12,10 @@ test("six-property task metadata and chunked Plan content are canonical", () => 
   assert.equal("Description" in properties, false);
   assert.equal("Plan Source" in properties, false);
   assert.equal("branch_name" in properties, false);
-  assert.deepEqual(properties.State, { rich_text: [{ type: "text", text: { content: PUBLISHER_PENDING_STATE } }] });
+  assert.deepEqual(properties.State, { select: { name: PUBLISHER_PENDING_STATE } });
   assert.deepEqual(properties[PLAN_PROPERTY], { relation: [] });
   assert.deepEqual(buildPlanProperties("PLAN-X", "Title"), { Identifier: { rich_text: [{ type: "text", text: { content: "PLAN-X" } }] }, Title: { title: [{ type: "text", text: { content: "Title" } }] } });
-  assert.equal("bootstrapStates" in DEFAULT_POLICY, false);
+  assert.deepEqual(DEFAULT_POLICY.stateSeeds, ["backlog", "todo", "in_progress", "human_review", "rework", "merging", "done", "canceled"]);
   const blocks = buildPlanBlocks("x".repeat(4000));
   assert.equal(blocks.every((block: any) => block.type === "paragraph"), true);
   assert.equal(blocks.map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "x".repeat(4000));
@@ -25,9 +25,9 @@ test("six-property task metadata and chunked Plan content are canonical", () => 
 
 test("typed config keeps only durable task policy", async () => {
   const directory = await mkdtemp(join(tmpdir(), "publisher-")); const file = join(directory, "c.json");
-  await writeFile(file, JSON.stringify({ labels: [" symphony "], priority: null, property_names: { blocked_by: "Dependencies" } }));
+  await writeFile(file, JSON.stringify({ labels: [" symphony "], priority: null, state_seeds: ["todo", "working", "review", "done"], property_names: { blocked_by: "Dependencies" } }));
   const { policy } = await loadConfig(file);
-  assert.equal(policy.defaultPriority, null); assert.deepEqual(policy.defaultLabels, ["symphony"]); assert.equal(policy.blockedBy, "Dependencies");
+  assert.equal(policy.defaultPriority, null); assert.deepEqual(policy.defaultLabels, ["symphony"]); assert.deepEqual(policy.stateSeeds, ["todo", "working", "review", "done"]); assert.equal(policy.blockedBy, "Dependencies");
   await writeFile(file, JSON.stringify({ state: "Rework" }));
   await assert.rejects(loadConfig(file), /unknown configuration key/);
   await writeFile(file, JSON.stringify({ plan_source: "https://example.com" }));
@@ -42,6 +42,8 @@ test("property name collisions and malformed config are rejected", async () => {
   await assert.rejects(loadConfig(file), /reserved Plan relation/);
   await writeFile(file, JSON.stringify({ labels: "not-list" }));
   await assert.rejects(loadConfig(file), PublicationError);
+  await writeFile(file, JSON.stringify({ state_seeds: [""] }));
+  await assert.rejects(loadConfig(file), /non-empty/);
 });
 
 test("title, destination, and rich text boundaries are validated", () => {
