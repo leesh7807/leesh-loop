@@ -11,7 +11,7 @@ tracker:
   provider:
     database_url: $NOTION_DATABASE_URL
     token: $NOTION_TOKEN
-  active_states: [Ready, In Progress, Rework]
+  active_states: [Ready, In Progress, Rework, Merging]
   terminal_states: [Done, Cancelled]
 ```
 
