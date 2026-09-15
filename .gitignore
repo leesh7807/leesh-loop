@@ -10,6 +10,10 @@
 operator/.runtime/
 operator/project.json
 
+# Legacy component locations moved beneath operator/
+/symphony/
+/notion_publisher/
+
 # Temporary files
 tmp/
 .tmp/
