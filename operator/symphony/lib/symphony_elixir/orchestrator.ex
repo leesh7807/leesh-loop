@@ -1046,7 +1046,8 @@ defmodule SymphonyElixir.Orchestrator do
     delay_ms = retry_delay(next_attempt, metadata)
     old_timer = Map.get(previous_retry, :timer_ref)
     retry_token = make_ref()
-    due_at_ms = System.monotonic_time(:millisecond) + delay_ms
+    scheduled_at_ms = System.monotonic_time(:millisecond)
+    due_at_ms = scheduled_at_ms + delay_ms
     identifier = pick_retry_identifier(issue_id, previous_retry, metadata)
     issue_url = pick_retry_issue_url(previous_retry, metadata)
     error = pick_retry_error(previous_retry, metadata)
@@ -1070,6 +1071,7 @@ defmodule SymphonyElixir.Orchestrator do
             attempt: next_attempt,
             timer_ref: timer_ref,
             retry_token: retry_token,
+            scheduled_at_ms: scheduled_at_ms,
             due_at_ms: due_at_ms,
             identifier: identifier,
             issue_url: issue_url,
