@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { validateWorkspaceFiles } from './workspace-files.mjs';
+import { normalizeWorkspaceFiles, validateWorkspaceFiles } from './workspace-files.mjs';
 
 const appScript = fileURLToPath(import.meta.url);
 const root = resolve(dirname(appScript), '../..');
@@ -50,14 +50,16 @@ function processStartTicks(pid) {
 }
 async function remove(path) { await rm(path, { force: true }); }
 
-async function loadConfig(file) {
+async function loadConfig(file, { validateWorkspaceFileSources = true } = {}) {
   const config = await json(canonical(file));
   if (!config || typeof config !== 'object') throw new Error(`missing or invalid project configuration: ${file}`);
   for (const key of ['workflow_path', 'notion_database_url', 'symphony_workspace_root']) if (typeof config[key] !== 'string' || !config[key]) throw new Error(`project configuration requires ${key}`);
   if (!isAbsolute(config.workflow_path) || !isAbsolute(config.symphony_workspace_root)) throw new Error('workflow_path and symphony_workspace_root must be absolute');
   if (config.startup_timeout_ms !== undefined && (!Number.isSafeInteger(config.startup_timeout_ms) || config.startup_timeout_ms <= 0)) throw new Error('startup_timeout_ms must be a positive integer');
   if (config.browser_acknowledgement_timeout_ms !== undefined && (!Number.isSafeInteger(config.browser_acknowledgement_timeout_ms) || config.browser_acknowledgement_timeout_ms <= 0)) throw new Error('browser_acknowledgement_timeout_ms must be a positive integer');
-  const workspace_files = await validateWorkspaceFiles(config.workspace_files);
+  const workspace_files = validateWorkspaceFileSources
+    ? await validateWorkspaceFiles(config.workspace_files)
+    : normalizeWorkspaceFiles(config.workspace_files);
   const resolved = { ...config, workflow_path: canonical(config.workflow_path), symphony_workspace_root: canonical(config.symphony_workspace_root), workspace_files, configuration_path: canonical(file) };
   return resolved;
 }
@@ -242,7 +244,7 @@ const locked = args[0] === '__locked';
 const [command, configFile = defaultConfig] = locked ? args.slice(1) : args;
 if (process.argv[1] && resolve(process.argv[1]) === appScript && !['start', 'stop', 'serve'].includes(command)) { console.error('Usage: leesh-loop <start|stop|serve> [project-config.json]'); process.exitCode = 2; }
 else if (process.argv[1] && resolve(process.argv[1]) === appScript) {
-  loadConfig(configFile).then(async config => {
+  loadConfig(configFile, { validateWorkspaceFileSources: command === 'start' }).then(async config => {
     if (!locked && ['start', 'stop'].includes(command)) {
       await mkdir(stateRoot(config), { recursive: true, mode: 0o700 });
       const lockPath = join(stateRoot(config), 'lifecycle.flock');

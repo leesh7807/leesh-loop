@@ -10,6 +10,7 @@ import { materializeWorkspaceFiles, validateWorkspaceFiles } from '../workspace-
 
 const execFile = promisify(execute);
 const root = join(import.meta.dirname, '../../..');
+const cli = join(root, 'operator', 'app', 'leesh-loop.mjs');
 const workflow = join(root, 'WORKFLOW.md');
 
 async function fixture(t) {
@@ -59,6 +60,16 @@ test('workspace-file configuration rejects invalid paths and destination collisi
   await assert.rejects(loadConfig(await projectConfig(directory, workspaceRoot, [join(directory, 'missing')])), /does not exist/);
   await assert.rejects(loadConfig(await projectConfig(directory, workspaceRoot, [otherDirectory])), /not a regular file/);
   await assert.rejects(loadConfig(await projectConfig(directory, workspaceRoot, [first, second])), /conflicting destination basename/);
+});
+
+test('stop accepts an invalidated workspace-file source so a live runtime remains recoverable', async t => {
+  const { directory, workspaceRoot } = await fixture(t);
+  const missingSource = join(directory, '.env');
+  const config = await projectConfig(directory, workspaceRoot, [missingSource]);
+  const contents = JSON.parse(await readFile(config, 'utf8'));
+  contents.state_directory = join(directory, 'runtime');
+  await writeFile(config, JSON.stringify(contents));
+  await execFile(process.execPath, [cli, 'stop', config]);
 });
 
 test('workspace files participate in effective runtime identity', async t => {
