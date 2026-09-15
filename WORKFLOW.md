@@ -23,6 +23,7 @@ hooks:
   # the preserved workspace; Human Review -> Rework is the documented reset exception.
   after_create: |
     git clone https://github.com/leesh7807/leesh-loop.git .
+    node operator/app/workspace-files.mjs "$PWD"
     (cd operator/notion_publisher && npm ci)
     if command -v mise >/dev/null 2>&1; then
       (cd operator/symphony && mise trust && mise exec -- mix deps.get)
