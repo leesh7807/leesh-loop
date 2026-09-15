@@ -4,5 +4,6 @@
   "symphony_workspace_root": "/absolute/path/to/leesh-loop-workspaces",
   "github_repository_url": "https://github.com/owner/repository.git",
   "symphony_port": 4100,
-  "ui_port": 4310
+  "ui_port": 4310,
+  "browser_acknowledgement_timeout_ms": 1000
 }

@@ -2,7 +2,7 @@
 
 ## Objective
 
-Deliver the initial single-repository Leesh Loop Operator and project browser workspace. The Operator owns configuration, lifecycle serialization, readiness, crash-recoverable owned Symphony runtime state, dispatch authorization, and browser-window lifecycle. It must retain the established Operator-readiness and worker-boundary contracts.
+Deliver the initial single-repository Leesh Loop Operator and project browser workspace. The Operator owns configuration, lifecycle serialization, readiness, crash-recoverable owned Symphony runtime state, dispatch authorization, and project-surface handoff. It must retain the established Operator-readiness and worker-boundary contracts.
 
 ## Definitions
 
@@ -18,9 +18,9 @@ Make Leesh Loop a runnable local project environment without turning externally 
 - Store non-secret local project configuration and durable lifecycle state under an Operator state directory. Configuration, rather than `WORKFLOW.md`, is authoritative for workflow path, Notion database URL, Symphony workspace root, repository details, and declared external prerequisites.
 - Use one abandoned-owner-recoverable lifecycle lease for `start` and `stop`. Under that lease reconcile incomplete state, validate/reuse only compatible acknowledged `running` state, or converge to `none` before a fresh launch.
 - Preserve all current bootstrap readiness behavior before spawning Symphony. The external Operator CLI handles doctor, Service readiness/recovery, and smoke submission; the copied worker client remains submit-only and receives only the prepared discovery/interface bindings.
-- Spawn Symphony with a durable ownership record and dispatch disabled. Validate a live PID and its observability endpoint, commit `committed-disabled`, atomically publish `running`, wait for runtime acknowledgement, then open the project window. Pre-authorization failure terminates the owned child and never opens a window.
+- Spawn Symphony with a durable ownership record and dispatch disabled. Validate a live PID and its observability endpoint, commit `committed-disabled`, atomically publish `running`, wait for runtime acknowledgement, then hand off the project surfaces. Pre-authorization failure terminates the owned child and never opens a project surface.
 - Reuse only an alive, observability-verified, acknowledged, configuration-compatible `running` runtime. A live incompatible running runtime requires explicit `stop`; incomplete, failed, dead, or unacknowledged state is cleaned before a fresh start.
-- Provide a monochrome local publish page with a large Plan field, Publish action, Notion link, dashboard link, and textual result. Open it with the Notion database and Symphony dashboard in one browser window only after acknowledgement; do not recreate user-closed tabs.
+- Provide a monochrome local publish page with a large Plan field, Publish action, Notion link, dashboard link, and textual result. After Publish readiness and Symphony dispatch acknowledgement, open the Publish surface, Notion database, and Symphony dashboard through Linux `xdg-open`; the desktop owns browser selection, window placement, and tab placement. Do not discover Chrome/Chromium executable names. `LEESH_LOOP_BROWSER_COMMAND` remains the authoritative explicit override and does not fall back to `xdg-open` on failure. Dispatch all three default-path requests before their bounded acknowledgement waits; an early successful exit or a request still running at the bound is acknowledged, while spawn failure, early non-zero exit, or signal termination is not. Record `project_window_opened_at` only after all three acknowledgements and do not recreate user-closed surfaces after that durable marker exists.
 
 ## Verification
 
@@ -28,7 +28,7 @@ Make Leesh Loop a runnable local project environment without turning externally 
 2. Lifecycle tests cover lock contention/abandoned lease recovery, each durable state, process cleanup, no duplicate runtime, compatible reuse, incompatible-running rejection, and stop convergence.
 3. A runnable task cannot be claimed, mutated, or dispatched while provisional or committed-disabled; durable `running` is the first possible authorization and acknowledgement is required for reuse/window opening.
 4. Runtime identity checks compare canonical workflow, Notion binding, workspace root, worker interface, process, and dashboard; crashes at each recorded state recover deterministically on later lifecycle action.
-5. The intended Operator CLI path starts a project, checks observability/acknowledgement, opens the three tabs, publishes a Plan through the existing publisher, and leaves the external Service untouched on stop.
+5. The intended Operator CLI path starts a project, checks observability/acknowledgement, dispatches the Publish surface, Notion database, and Symphony dashboard through the system default browser, publishes a Plan through the existing publisher, and leaves the external Service untouched on stop.
 6. Focused unit/integration tests, `npm test`, applicable Symphony tests, shell syntax checks, `git diff --check`, and an exact-HEAD `chatgpt-shot` independent review pass.
 
 ## Verification Tools
@@ -37,10 +37,18 @@ Make Leesh Loop a runnable local project environment without turning externally 
 - Symphony observability JSON API and process inspection: dashboard/process identity and dispatch acknowledgement.
 - Existing bootstrap plus external `chatgpt-shot doctor`, Service health, and real smoke submit: preserved readiness and ownership boundary.
 - Node and Mix test suites with fault injection: barrier, lifecycle lock, failure cleanup, publisher path, and unchanged worker contract.
-- Browser opener test seam/manual browser inspection: initial three-tab project window and minimal publish page.
+- Browser opener test seam/manual browser inspection: the three project-surface URLs, parallel default-path dispatch, bounded acknowledgement and failures, override precedence, durable browser marker/retry/reuse behavior, and minimal publish page.
 - `git diff --check` and independent exact-HEAD `chatgpt-shot submit` review: artifact integrity and independent finding disposition.
 
 ## chatgpt-shot review log
+
+### Round 19
+
+- Reviewed HEAD: `9863e3e3d2df9e94f657ccb61718ca139cd6d109` on [PR #25](https://github.com/leesh7807/leesh-loop/pull/25).
+- Verdict: `PASS`.
+- Accepted/rejected findings: none reported.
+- Applied commit: `9863e3e3d2df9e94f657ccb61718ca139cd6d109`.
+- Verification: operator UI/browser-opener tests (2/2), publisher tests (18/18), Node syntax, shell syntax, and `git diff --check` passed.
 
 ### Round 1
 

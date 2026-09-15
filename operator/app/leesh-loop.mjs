@@ -39,6 +39,7 @@ async function loadConfig(file) {
   for (const key of ['workflow_path', 'notion_database_url', 'symphony_workspace_root']) if (typeof config[key] !== 'string' || !config[key]) throw new Error(`project configuration requires ${key}`);
   if (!isAbsolute(config.workflow_path) || !isAbsolute(config.symphony_workspace_root)) throw new Error('workflow_path and symphony_workspace_root must be absolute');
   if (config.startup_timeout_ms !== undefined && (!Number.isSafeInteger(config.startup_timeout_ms) || config.startup_timeout_ms <= 0)) throw new Error('startup_timeout_ms must be a positive integer');
+  if (config.browser_acknowledgement_timeout_ms !== undefined && (!Number.isSafeInteger(config.browser_acknowledgement_timeout_ms) || config.browser_acknowledgement_timeout_ms <= 0)) throw new Error('browser_acknowledgement_timeout_ms must be a positive integer');
   const resolved = { ...config, workflow_path: canonical(config.workflow_path), symphony_workspace_root: canonical(config.symphony_workspace_root), configuration_path: canonical(file) };
   return resolved;
 }
@@ -78,15 +79,40 @@ function launch(command, args, env) { const child = spawn(command, args, { cwd: 
 async function waitFor(check, description, timeoutMs = 15_000) { const deadline = Date.now() + timeoutMs; do { if (await check()) return; await sleep(100); } while (Date.now() < deadline); throw new Error(`timed out waiting for ${description}`); }
 async function openWindow(config, dashboard) {
   await ensureUi(config);
+  await openProjectSurfaces(config, dashboard);
+}
+function projectSurfaces(config, dashboard) { return [uiUrl(config), config.notion_database_url, dashboard]; }
+function browserAcknowledgementTimeout(config) { return config.browser_acknowledgement_timeout_ms || 1_000; }
+async function openProjectSurfaces(config, dashboard) {
+  const surfaces = projectSurfaces(config, dashboard);
   if (process.env.LEESH_LOOP_BROWSER_COMMAND) {
-    if (await spawnBrowser(process.env.LEESH_LOOP_BROWSER_COMMAND, [uiUrl(config), config.notion_database_url, dashboard])) return;
+    if (await spawnBrowser(process.env.LEESH_LOOP_BROWSER_COMMAND, surfaces)) return;
     throw new Error(`could not launch ${process.env.LEESH_LOOP_BROWSER_COMMAND}`);
   }
-  const candidates = ['google-chrome', 'chromium', 'chromium-browser'];
-  for (const browser of candidates) if (await spawnBrowser(browser, ['--new-window', uiUrl(config), config.notion_database_url, dashboard])) return;
-  throw new Error('no supported browser is available for the project window');
+  // Hand every surface to the desktop before waiting: one opener may intentionally stay alive.
+  const requests = await Promise.all(surfaces.map(url => dispatchBrowser('xdg-open', [url])));
+  await Promise.all(requests.map(request => acknowledgeBrowser(request, browserAcknowledgementTimeout(config))));
 }
 function spawnBrowser(command, args) { return new Promise(resolveBrowser => { const child = spawn(command, args, { detached: true, stdio: 'ignore' }); child.once('error', () => resolveBrowser(false)); child.once('spawn', () => { child.unref(); resolveBrowser(true); }); }); }
+function dispatchBrowser(command, args) {
+  return new Promise((resolveBrowser, rejectBrowser) => {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+    let settleExit;
+    const exit = new Promise(resolveExit => { settleExit = resolveExit; });
+    child.once('exit', (code, signal) => settleExit({ code, signal }));
+    child.once('error', error => rejectBrowser(new Error(`could not launch ${command}: ${error.message}`)));
+    child.once('spawn', () => { child.unref(); resolveBrowser({ command, args, exit }); });
+  });
+}
+async function acknowledgeBrowser(request, timeoutMs) {
+  let timeout;
+  const result = await Promise.race([request.exit, new Promise(resolveTimeout => { timeout = setTimeout(() => resolveTimeout(null), timeoutMs); })]);
+  clearTimeout(timeout);
+  if (!result) return;
+  if (result.code === 0 && result.signal === null) return;
+  const outcome = result.signal ? `was terminated by ${result.signal}` : `exited with status ${result.code}`;
+  throw new Error(`${request.command} ${request.args.join(' ')} ${outcome}`);
+}
 function uiPort(config) { return Number(config.ui_port || 4310); }
 function ensurePublisher() { const publisher = join(root, 'operator/notion_publisher'); if (existsSync(join(publisher, 'dist/src/cli.js'))) return; for (const args of [['ci'], ['run', 'build']]) { const result = spawnSync('npm', args, { cwd: publisher, stdio: 'inherit' }); if (result.status !== 0) throw new Error(`publisher preparation failed: npm ${args.join(' ')}`); } }
 function uiUrl(config) { return `http://127.0.0.1:${uiPort(config)}`; }
@@ -161,8 +187,8 @@ async function serve(config) { const existing = await json(paths(config).ui), pr
 const args = process.argv.slice(2);
 const locked = args[0] === '__locked';
 const [command, configFile = defaultConfig] = locked ? args.slice(1) : args;
-if (!['start', 'stop', 'serve'].includes(command)) { console.error('Usage: leesh-loop <start|stop|serve> [project-config.json]'); process.exitCode = 2; }
-else {
+if (process.argv[1] && resolve(process.argv[1]) === appScript && !['start', 'stop', 'serve'].includes(command)) { console.error('Usage: leesh-loop <start|stop|serve> [project-config.json]'); process.exitCode = 2; }
+else if (process.argv[1] && resolve(process.argv[1]) === appScript) {
   loadConfig(configFile).then(async config => {
     if (!locked && ['start', 'stop'].includes(command)) {
       await mkdir(stateRoot(config), { recursive: true, mode: 0o700 });
@@ -175,3 +201,5 @@ else {
     return command === 'start' ? start(config) : command === 'stop' ? stop(config) : serve(config);
   }).then(value => { if (value) console.log(JSON.stringify(value)); }).catch(error => { console.error(`Operator failed: ${error.message}`); process.exitCode = 1; });
 }
+
+export { acknowledgeBrowser, dispatchBrowser, openProjectSurfaces, projectSurfaces };

@@ -39,7 +39,7 @@ There is no separate central project manager for coordinating multiple repositor
 
 ## Operator readiness
 
-The Operator owns project configuration, lifecycle state, readiness, Symphony startup, and the project browser window. Copy `operator/project.example.json` to `operator/project.json`, set absolute paths, then use the intended entry point:
+The Operator owns project configuration, lifecycle state, readiness, Symphony startup, and the project browser workspace. Copy `operator/project.example.json` to `operator/project.json`, set absolute paths, then use the intended entry point:
 
 ```sh
 node operator/app/leesh-loop.mjs start operator/project.json
@@ -92,6 +92,8 @@ sets `State` to `Ready` after the canonical representation is complete and valid
 state vocabulary remains in `WORKFLOW.md` and Symphony.
 
 Symphony starts observable but dispatch-disabled. Only after the Operator publishes durable `running` authorization and Symphony writes its dispatch acknowledgement can it find runnable tasks in Notion and run agents in isolated workspaces. Repeated `start` reuses only a compatible acknowledged running runtime; use `node operator/app/leesh-loop.mjs stop operator/project.json` before replacing a live incompatible runtime. Stopping never stops the external `chatgpt-shot` Service.
+
+After that readiness and dispatch-acknowledgement boundary, `start` opens the local Plan Publish surface, configured Notion database, and Symphony dashboard. On Linux the default path sends each URL to `xdg-open`, so the desktop uses its system default browser; Leesh Loop does not require `google-chrome`, `chromium`, or `chromium-browser` to exist. Browser, window, and tab placement are owned by the desktop environment. Set `LEESH_LOOP_BROWSER_COMMAND` to explicitly replace this default path; it receives the three project-surface URLs and does not fall back to `xdg-open` if it fails.
 
 Agents work against the target repository according to its `WORKFLOW.md`, then write results and state back to Notion.
 
