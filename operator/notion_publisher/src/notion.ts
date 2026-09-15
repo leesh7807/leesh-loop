@@ -77,7 +77,9 @@ export class NotionClient {
     }
     const task = this.bootstrapTaskSource(sources, policy);
     if (!task || !(await this.isEmpty(task.id))) throw this.unsupported();
-    const plan = planCandidates[0] ?? await this.createPlanDataSource(databaseId);
+    const existingPlan = planCandidates[0];
+    if (existingPlan && !(await this.isEmpty(existingPlan.id))) throw this.unsupported();
+    const plan = existingPlan ?? await this.createPlanDataSource(databaseId);
     await this.ensureTaskSchema(task.schema, task.id, policy, plan.id);
     return { taskDataSourceId: task.id, planDataSourceId: plan.id };
   }

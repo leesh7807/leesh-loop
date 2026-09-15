@@ -65,6 +65,7 @@ test("an exact bootstrap prefix resumes without creating a replacement Plan sour
     { properties: { Name: { id: "name-id", type: "title" } } },
     { properties: planSchema.properties },
     { results: [], has_more: false },
+    { results: [], has_more: false },
     {},
     { properties: taskSchema("plan-source") }
   ]);
@@ -72,6 +73,18 @@ test("an exact bootstrap prefix resumes without creating a replacement Plan sour
   assert.deepEqual(await client.ensureDatabase("db", DEFAULT_POLICY), { taskDataSourceId: "task-source", planDataSourceId: "plan-source" });
   assert.equal(client.calls.some((call) => call.method === "POST" && call.path === "/data_sources"), false);
   assert.equal(client.calls.filter((call) => call.method === "PATCH" && call.path === "/data_sources/task-source").length, 1);
+});
+
+test("a populated partial-bootstrap Plan source is rejected before task mutation", async () => {
+  const client = new RequestFake([
+    { data_sources: [{ id: "task-source" }, { id: "plan-source" }] },
+    { properties: { Name: { type: "title" } } },
+    { properties: planSchema.properties },
+    { results: [], has_more: false },
+    { results: [{ id: "existing-plan" }], has_more: false }
+  ]);
+  await assert.rejects(client.ensureDatabase("db", DEFAULT_POLICY), /The selected Notion database is not empty/);
+  assert.equal(client.calls.some((call) => call.method === "PATCH" || (call.method === "POST" && call.path === "/data_sources")), false);
 });
 
 test("rows and legacy rich-text State are unsupported without bootstrap mutations", async () => {
