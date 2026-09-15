@@ -4,7 +4,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config.js";
-import { buildPlanBlocks, buildPlanProperties, buildTaskProperties, chunkText, DEFAULT_POLICY, extractPlanTitle, notionId, PLAN_PROPERTY, PublicationError, PUBLISHER_PENDING_STATE, resolvePublishDatabase, validatePlanTitle } from "../src/core.js";
+import { buildPlanBlocks, buildPlanProperties, buildTaskProperties, chunkText, DEFAULT_POLICY, extractPlanTitle, notionId, normalizePlanText, PLAN_PROPERTY, PublicationError, PUBLISHER_PENDING_STATE, resolvePublishDatabase, validatePlanTitle } from "../src/core.js";
 
 test("six-property task metadata and chunked Plan content are canonical", () => {
   const properties = buildTaskProperties(DEFAULT_POLICY, "PLAN-X", "Title");
@@ -19,6 +19,8 @@ test("six-property task metadata and chunked Plan content are canonical", () => 
   const blocks = buildPlanBlocks("x".repeat(4000));
   assert.equal(blocks.every((block: any) => block.type === "paragraph"), true);
   assert.equal(blocks.map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "x".repeat(4000));
+  assert.equal(normalizePlanText("first\r\nsecond\rthird\nfourth"), "first\nsecond\nthird\nfourth");
+  assert.equal(buildPlanBlocks("# Browser\r\naccepted").map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "# Browser\naccepted");
 });
 
 test("typed config keeps only durable task policy", async () => {

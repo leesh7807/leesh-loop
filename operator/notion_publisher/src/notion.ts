@@ -6,7 +6,8 @@ import {
   PUBLISHER_PENDING_STATE,
   PUBLISHER_READY_STATE,
   buildPlanBlocks,
-  buildPlanProperties
+  buildPlanProperties,
+  normalizePlanText
 } from "./core.js";
 
 const PLAN_IDENTIFIER = "Identifier";
@@ -17,6 +18,7 @@ export type DatabaseBinding = { taskDataSourceId: string; planDataSourceId: stri
 export type Publication = { pageId: string; url?: string; complete: boolean };
 
 const richText = (value: any): string => Array.isArray(value) ? value.map((part: any) => part?.plain_text ?? part?.text?.content ?? "").join("") : "";
+const planText = (blocks: any[]): string => blocks.map((block) => block?.type === "paragraph" ? richText(block.paragraph?.rich_text) : "").join("");
 const propertyText = (property: any, type: string): string | null => property?.type === type && Array.isArray(property[type]) ? richText(property[type]) : null;
 const relationTarget = (property: any): string | null => property?.type === "relation" && typeof property.relation?.data_source_id === "string" ? property.relation.data_source_id : null;
 const relationIds = (property: any): string[] | null => {
@@ -253,16 +255,18 @@ export class NotionClient {
   }
 
   private async ensurePlanContent(planPageId: string, plan: string): Promise<void> {
-    const expected = buildPlanBlocks(plan) as any[];
+    const expected = normalizePlanText(plan);
     const existing = await this.listChildren(planPageId);
-    if (existing.length > expected.length || existing.some((block, index) => block?.type !== "paragraph" || richText(block.paragraph?.rich_text) !== richText(expected[index].paragraph.rich_text))) throw new PublicationError("pending Plan content differs from the accepted Plan");
-    if (existing.length < expected.length) await this.appendBlocks(planPageId, expected.slice(existing.length));
+    if (existing.some((block) => block?.type !== "paragraph")) throw new PublicationError("pending Plan content differs from the accepted Plan");
+    const actual = planText(existing);
+    if (!expected.startsWith(actual)) throw new PublicationError("pending Plan content differs from the accepted Plan");
+    if (actual.length < expected.length) await this.appendBlocks(planPageId, buildPlanBlocks(expected.slice(actual.length)));
   }
 
   private async validatePlanContent(planPageId: string, plan: string): Promise<void> {
-    const expected = buildPlanBlocks(plan) as any[];
+    const expected = normalizePlanText(plan);
     const actual = await this.listChildren(planPageId);
-    if (actual.length !== expected.length || actual.some((block, index) => block?.type !== "paragraph" || richText(block.paragraph?.rich_text) !== richText(expected[index].paragraph.rich_text))) throw new PublicationError("canonical Plan page does not contain the complete accepted Plan");
+    if (actual.some((block) => block?.type !== "paragraph") || planText(actual) !== expected) throw new PublicationError("canonical Plan page does not contain the complete accepted Plan");
   }
 
   async lockPlanPage(planPageId: string): Promise<void> {

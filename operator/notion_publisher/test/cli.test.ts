@@ -21,6 +21,7 @@ class PublicationFake extends NotionClient {
   failNextLock = false;
   failNextRelation = false;
   mutateTaskIdentifierAfterRelation = false;
+  normalizeAppendedPlanLineEndings = false;
 
   constructor() {
     super("token");
@@ -94,7 +95,13 @@ class PublicationFake extends NotionClient {
     const blocksMatch = path.match(/^\/blocks\/([^/]+)\/children/);
     if (method === "GET" && blocksMatch) return { results: this.pages.get(blocksMatch[1])?.children ?? [], has_more: false };
     if (method === "PATCH" && blocksMatch) {
-      this.pages.get(blocksMatch[1])?.children.push(...body.children);
+      const children = this.normalizeAppendedPlanLineEndings
+        ? structuredClone(body.children).map((block: any) => {
+          if (block?.type === "paragraph") for (const part of block.paragraph?.rich_text ?? []) if (typeof part?.text?.content === "string") part.text.content = part.text.content.replace(/\r\n?|\n/g, "\n");
+          return block;
+        })
+        : body.children;
+      this.pages.get(blocksMatch[1])?.children.push(...children);
       return { results: body.children };
     }
     throw new Error(`unexpected ${method} ${path}`);
@@ -157,6 +164,18 @@ test("pending recovery restores relation after a provider failure without duplic
   await publishPlanFile(plan, config, DATABASE_URL, client);
   assert.equal(client.planPages().length, 1);
   assert.equal(client.taskPage().properties[PLAN_PROPERTY].relation.length, 1);
+});
+
+test("browser CRLF Plan content publishes when Notion reads it back as LF", async () => {
+  const client = new PublicationFake();
+  client.normalizeAppendedPlanLineEndings = true;
+
+  await publish({ plan: "# Browser\r\n\r\naccepted Plan", databaseUrl: DATABASE_URL, client, config: { policy: DEFAULT_POLICY } });
+
+  const [planPage] = client.planPages();
+  assert.equal(planPage.is_locked, true);
+  assert.equal(client.taskPage().properties.State.rich_text[0].text.content, PUBLISHER_READY_STATE);
+  assert.equal(planPage.children.map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "# Browser\n\naccepted Plan");
 });
 
 test("pending tasks related to another publication or ambiguous Plan identity are rejected", async () => {
