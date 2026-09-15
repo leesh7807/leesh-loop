@@ -19,15 +19,6 @@ fail() {
   exit 1
 }
 
-startup_status_file=${SYMPHONY_OPERATOR_STARTUP_STATUS_FILE:-}
-report() {
-  [ -n "$startup_status_file" ] || return 0
-  startup_status_directory=$(dirname -- "$startup_status_file")
-  mkdir -p -- "$startup_status_directory" || return 0
-  startup_status_temporary="${startup_status_file}.$$.tmp"
-  printf '%s\n' "$1" >"$startup_status_temporary" && mv -f -- "$startup_status_temporary" "$startup_status_file"
-}
-
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 repository_root=$(CDPATH= cd -- "$script_dir/../.." && pwd -P)
 worker_client=$repository_root/operator/external/chatgpt-shot/chatgpt-shot
@@ -36,7 +27,6 @@ case "${1:-}" in
   -h|--help) usage ;;
 esac
 
-report 'validating workspace and local prerequisites'
 workspace_root=${SYMPHONY_WORKSPACE_ROOT:-}
 [ -n "$workspace_root" ] || fail 'SYMPHONY_WORKSPACE_ROOT must be set by the Operator.'
 case "$workspace_root" in
@@ -105,7 +95,6 @@ for state_path in "$chatgpt_config_root" "$chatgpt_data_root" "$chatgpt_cache_ro
   [ -r "$state_path" ] && [ -w "$state_path" ] || fail "Operator-owned chatgpt-shot state is not usable: $state_path"
 done
 
-report 'checking GitHub network and credential readiness'
 github_repository_url=${SYMPHONY_GITHUB_REPOSITORY_URL:-}
 if [ -z "$github_repository_url" ]; then
   origin_url=$(git -C "$repository_root" remote get-url origin 2>/dev/null || true)
@@ -150,7 +139,6 @@ unset credential_response credential_username credential_password github_helpers
 GH_PROMPT_DISABLED=1 gh api --hostname github.com user >/dev/null 2>&1 || fail 'authenticated GitHub API probe failed.'
 GIT_TERMINAL_PROMPT=0 git -c credential.interactive=never ls-remote "$github_repository_url" HEAD >/dev/null 2>&1 || fail 'authenticated HTTPS Git probe failed.'
 
-report 'checking chatgpt-shot configuration and browser session'
 if ! chatgpt-shot doctor >/dev/null 2>&1; then
   fail 'chatgpt-shot doctor failed; repair authentication, browser/session state, or Invocation configuration as Operator.'
 fi
@@ -199,7 +187,6 @@ request.on('error', () => { process.exitCode = 1; });
 NODE
 }
 
-report 'checking chatgpt-shot Service health'
 if ! service_accepting; then
   if [ -e "$chatgpt_discovery_path" ]; then
     chatgpt-shot stop >/dev/null 2>&1 || true
@@ -216,7 +203,6 @@ fi
 
 service_accepting || fail 'chatgpt-shot Service is not healthy and accepting requests.'
 
-report 'submitting chatgpt-shot smoke invocation'
 smoke_prompt=${SYMPHONY_CHATGPT_SHOT_SMOKE_PROMPT:-'Operator readiness smoke check. Reply with exactly READY.'}
 smoke_result=$(mktemp "${TMPDIR:-/tmp}/symphony-chatgpt-shot-smoke.XXXXXX")
 trap 'rm -f -- "$smoke_result"' EXIT HUP INT TERM
@@ -227,7 +213,6 @@ fi
 [ -s "$smoke_result" ] || fail 'chatgpt-shot submit smoke invocation returned an empty Result.'
 service_accepting || fail 'chatgpt-shot Service stopped accepting requests after the smoke invocation.'
 
-report 'preparing worker interface and readiness record'
 mkdir -p -- "$worker_interface_root" || fail "cannot create worker interface directory: $worker_interface_root"
 cp -- "$worker_client" "$worker_interface_root/chatgpt-shot" || fail 'cannot prepare the worker-facing chatgpt-shot interface.'
 chmod 755 -- "$worker_interface_root/chatgpt-shot" || fail 'cannot make the worker-facing chatgpt-shot interface executable.'
@@ -276,5 +261,4 @@ fi
 export CHATGPT_SHOT_WORKER_DISCOVERY_PATH=$chatgpt_discovery_path
 export SYMPHONY_OPERATOR_READINESS_FILE=$readiness_file
 export CHATGPT_SHOT_WORKER_INTERFACE_ROOT=$worker_interface_root
-report 'starting Symphony process'
 exec "$@"
