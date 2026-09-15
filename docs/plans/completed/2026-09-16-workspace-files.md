@@ -31,3 +31,11 @@ The highest local verification stops at the actual `after_create` hook command w
 - Operator Node tests: configuration, runtime identity, materializer, and hook-order regression coverage.
 - Temporary filesystem fixtures: isolated sources, workspaces, clone content, and collision cases.
 - `npm test` and `git diff --check`: repository checks and patch hygiene.
+
+## chatgpt-shot review log
+
+- Reviewed HEAD: `f705a081109f183032b9b77e9cdfc0d4562c2242`
+- Verdict: FINDINGS
+- `[high]` accepted: source revalidation was incorrectly applied to `stop`; an invalidated source must prevent new-workspace startup, not lifecycle recovery.
+- Applied commit: `af261d8f91f76e6ff9fc78587b611280897a8fc1`
+- Verification: `node --test operator/app/test/*.test.mjs` (11 passing); Node syntax checks; `git diff --check`.
