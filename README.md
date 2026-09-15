@@ -5,17 +5,7 @@ Leesh Loop is a local agent execution loop for a single software repository.
 It publishes plans written as plain text or Markdown to a Notion task surface, then uses [OpenAI Symphony](https://github.com/openai/symphony) to execute runnable tasks with agents.
 
 ```text
-Plan
-  ↓
-Publisher
-  ↓
-Notion Tasks
-  ↓
-Symphony
-  ↓
-Agent Work
-  ↓
-State / Result
+Plan → Operator Publisher → Notion Tasks → Operator Symphony → Agent Work → State / Result
 ```
 
 Leesh Loop does not live inside the target repository or wrap it.
@@ -29,10 +19,11 @@ foo/
     ...
 
 foo-loop/
-    publisher
-    Symphony
-    runtime state
-    browser UI
+    operator/
+        app/
+        notion_publisher/
+        symphony/
+        external/chatgpt-shot/
 ```
 
 `foo-loop` accesses and operates `foo` from outside the repository.
@@ -48,16 +39,16 @@ There is no separate central project manager for coordinating multiple repositor
 
 ## Operator readiness
 
-Symphony is started through the Operator-owned bootstrap boundary:
+The Operator owns project configuration, lifecycle state, readiness, Symphony startup, and the project browser window. Copy `operator/project.example.json` to `operator/project.json`, set absolute paths, then use the intended entry point:
 
 ```sh
-export SYMPHONY_WORKSPACE_ROOT="$HOME/.local/share/leesh-loop/workspaces"
-./scripts/operator-bootstrap -- \
-  ./symphony/bin/symphony \
-  --i-understand-that-this-will-be-running-without-the-usual-guardrails
+node operator/app/leesh-loop.mjs start operator/project.json
 ```
 
-The bootstrap validates the GitHub HTTPS network and credential path, verifies the installed
+The bundled development launcher uses `mise exec -- mix run`; install the pinned toolchain and
+run `mise exec -- mix deps.get` from `operator/symphony` before the first start.
+
+Before spawning Symphony, the bootstrap validates the GitHub HTTPS network and credential path, verifies the installed
 `chatgpt-shot` configuration and browser/session state, starts or recovers its Service, confirms
 the health endpoint is accepting requests, and completes one real `chatgpt-shot submit` smoke
 round trip before launching Symphony. Missing or invalid readiness stops the command before any
@@ -80,7 +71,7 @@ Worker
 └─ chatgpt-shot submit "<prompt>"
 ```
 
-The worker command is a read-only Service client prepared in an Operator-owned interface
+The worker command is a submit-only Service client prepared in an Operator-owned interface
 directory. It reads only the Operator's Service discovery record and invokes the already-running
 Service; it does not run `doctor`, `start`, login, browser recovery, profile repair, or access the
 `chatgpt-shot` Notion credentials. The XDG configuration, data, cache, browser profile, Service
@@ -100,7 +91,7 @@ sets `State` to `Ready` after the canonical representation is complete and valid
 `State` property stores provider-native strings as free-form rich text; the repository's workflow
 state vocabulary remains in `WORKFLOW.md` and Symphony.
 
-Symphony finds runnable tasks in Notion and runs agents in isolated workspaces.
+Symphony starts observable but dispatch-disabled. Only after the Operator publishes durable `running` authorization and Symphony writes its dispatch acknowledgement can it find runnable tasks in Notion and run agents in isolated workspaces. Repeated `start` reuses only a compatible acknowledged running runtime; use `node operator/app/leesh-loop.mjs stop operator/project.json` before replacing a live incompatible runtime. Stopping never stops the external `chatgpt-shot` Service.
 
 Agents work against the target repository according to its `WORKFLOW.md`, then write results and state back to Notion.
 

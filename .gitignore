@@ -7,6 +7,8 @@
 .env
 .env.*
 !.env.example
+operator/.runtime/
+operator/project.json
 
 # Temporary files
 tmp/

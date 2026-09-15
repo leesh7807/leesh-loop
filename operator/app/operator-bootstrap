@@ -3,13 +3,13 @@ set -eu
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: scripts/operator-bootstrap [--] [command [argument ...]]
+Usage: operator/app/operator-bootstrap [--] [command [argument ...]]
 
 Validate Operator readiness, prepare the chatgpt-shot Service, and optionally
 execute a command with the worker-facing chatgpt-shot interface enabled.
 
 The command form is the supported Symphony entry point, for example:
-  scripts/operator-bootstrap -- ./symphony/bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails
+  operator/app/operator-bootstrap -- operator/symphony/bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails
 USAGE
   exit 2
 }
@@ -20,7 +20,8 @@ fail() {
 }
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
-repository_root=$(CDPATH= cd -- "$script_dir/.." && pwd -P)
+repository_root=$(CDPATH= cd -- "$script_dir/../.." && pwd -P)
+worker_client=$repository_root/operator/external/chatgpt-shot/chatgpt-shot
 
 case "${1:-}" in
   -h|--help) usage ;;
@@ -51,7 +52,7 @@ mkdir -p -- "$workspace_root" || fail "cannot create workspace root: $workspace_
 [ -w "$workspace_root" ] || fail "workspace root is not writable by the Operator: $workspace_root"
 
 command -v node >/dev/null 2>&1 || fail 'node is required for the prepared worker interface.'
-[ -x "$script_dir/chatgpt-shot" ] || fail 'the worker-facing chatgpt-shot interface is missing or not executable.'
+[ -x "$worker_client" ] || fail 'the worker-facing chatgpt-shot interface is missing or not executable.'
 command -v chatgpt-shot >/dev/null 2>&1 || fail 'chatgpt-shot is not installed or is not on the Operator PATH.'
 command -v git >/dev/null 2>&1 || fail 'git is required for GitHub readiness.'
 command -v gh >/dev/null 2>&1 || fail 'gh is required for GitHub authentication readiness.'
@@ -213,7 +214,7 @@ fi
 service_accepting || fail 'chatgpt-shot Service stopped accepting requests after the smoke invocation.'
 
 mkdir -p -- "$worker_interface_root" || fail "cannot create worker interface directory: $worker_interface_root"
-cp -- "$script_dir/chatgpt-shot" "$worker_interface_root/chatgpt-shot" || fail 'cannot prepare the worker-facing chatgpt-shot interface.'
+cp -- "$worker_client" "$worker_interface_root/chatgpt-shot" || fail 'cannot prepare the worker-facing chatgpt-shot interface.'
 chmod 755 -- "$worker_interface_root/chatgpt-shot" || fail 'cannot make the worker-facing chatgpt-shot interface executable.'
 
 readiness_file=${SYMPHONY_OPERATOR_READINESS_FILE:-$chatgpt_cache_root/operator-readiness.json}

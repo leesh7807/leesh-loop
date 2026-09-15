@@ -22,11 +22,11 @@ hooks:
   # the preserved workspace; Human Review -> Rework is the documented reset exception.
   after_create: |
     git clone https://github.com/leesh7807/leesh-loop.git .
-    (cd notion_publisher && npm ci)
+    (cd operator/notion_publisher && npm ci)
     if command -v mise >/dev/null 2>&1; then
-      (cd symphony && mise trust && mise exec -- mix deps.get)
+      (cd operator/symphony && mise trust && mise exec -- mix deps.get)
     else
-      (cd symphony && mix deps.get)
+      (cd operator/symphony && mix deps.get)
     fi
 agent:
   max_turns: 20
@@ -57,15 +57,15 @@ Read `AGENTS.md`, then apply [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLAT
 
 ## Workspace and task surface
 
-The `after_create` hook clones this repository and installs its worker dependencies before the agent starts. Work only in the Symphony-provided workspace. Do not modify `symphony/` unless the Accepted Plan specifically requires it.
+The `after_create` hook clones this repository and installs its worker dependencies before the agent starts. Work only in the Symphony-provided workspace. Do not modify `operator/symphony/` unless the Accepted Plan specifically requires it.
 
-Start this workflow through `scripts/operator-bootstrap`. It owns the dedicated
+Start this workflow through `operator/app/operator-bootstrap`. It owns the dedicated
 `$SYMPHONY_WORKSPACE_ROOT`, GitHub HTTPS credential readiness, and the complete `chatgpt-shot`
 installation/authentication/browser/Service readiness sequence. It runs one real Operator-side
 `chatgpt-shot submit` smoke invocation and only then starts the requested Symphony command.
 
 The worker-facing `chatgpt-shot submit "<prompt>"` command resolves to the repository's
-`scripts/chatgpt-shot` client copied to the Operator-owned interface directory through the
+`operator/external/chatgpt-shot/chatgpt-shot` client copied to the Operator-owned interface directory through the
 `codex.command` PATH prefix. That client reads only the Operator-published Service discovery
 record, calls the already-running local Service, and never starts or repairs it.
 `$XDG_CONFIG_HOME/chatgpt-shot`, `$XDG_DATA_HOME/chatgpt-shot`,

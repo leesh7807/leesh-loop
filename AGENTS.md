@@ -2,7 +2,7 @@
 
 ## Symphony boundary
 
-- Do not modify `symphony/` during unrelated coordination-repository work.
+- Do not modify `operator/symphony/` during unrelated coordination-repository work.
 - Preserve workspace isolation and path safety, tracker credential isolation, concurrency, retry,
   and reconciliation semantics when changing the runner.
 - Keep tracker-adapter reads separate from agent-side dynamic-tool mutations.
