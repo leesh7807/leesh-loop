@@ -31,8 +31,6 @@ hooks:
 agent:
   max_turns: 20
 codex:
-  # The Operator launch wrapper supplies CHATGPT_SHOT_WORKER_INTERFACE_ROOT and
-  # CHATGPT_SHOT_WORKER_DISCOVERY_PATH before Symphony starts.
   command: 'env PATH="$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:$PATH" codex app-server'
 ---
 
@@ -59,22 +57,15 @@ Read `AGENTS.md`, then apply [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLAT
 
 The `after_create` hook clones this repository and installs its worker dependencies before the agent starts. Work only in the Symphony-provided workspace. Do not modify `operator/symphony/` unless the Accepted Plan specifically requires it.
 
-Start this workflow through `operator/app/operator-bootstrap`. It owns the dedicated
-`$SYMPHONY_WORKSPACE_ROOT`, GitHub HTTPS credential readiness, and the complete `chatgpt-shot`
-installation/authentication/browser/Service readiness sequence. It runs one real Operator-side
-`chatgpt-shot submit` smoke invocation and only then starts the requested Symphony command.
+The execution environment provides the worker-facing `chatgpt-shot` command.
 
-The worker-facing `chatgpt-shot submit "<prompt>"` command resolves to the repository's
-`operator/external/chatgpt-shot/chatgpt-shot` client copied to the Operator-owned interface directory through the
-`codex.command` PATH prefix. That client reads only the Operator-published Service discovery
-record, calls the already-running local Service, and never starts or repairs it.
-`$XDG_CONFIG_HOME/chatgpt-shot`, `$XDG_DATA_HOME/chatgpt-shot`,
-`$XDG_CACHE_HOME/chatgpt-shot`, the browser profile, Service lifecycle state, and Notion
-credentials remain Operator-owned and outside the worker workspace.
+Use only `chatgpt-shot submit "<prompt>"`.
+
+Do not start, stop, authenticate, repair, or otherwise manage the external `chatgpt-shot` Service.
 
 Use the Notion task surface for the Accepted Plan, Workpad, and state changes. Write the Workpad in Korean; preserve code, commands, identifiers, paths, API names, and quotations verbatim where accuracy requires it. `notion_task_read_workpad` reads only the complete canonical Workpad of this bound task; use it rather than arbitrary Notion access.
 
-If the task surface itself or its authentication is unavailable, it cannot record a Workpad entry or transition its own state. Do not claim that a same-surface handoff occurred and do not invent a fallback mutation channel. End with the concrete external-access blocker in the worker result; the operator must restore access or perform the provider-side handoff. This is an integration/access failure outside normal worker execution, not a repository-defined recovery lifecycle.
+If the task surface itself or its authentication is unavailable, it cannot record a Workpad entry or transition its own state. Do not claim that a same-surface handoff occurred and do not invent a fallback mutation channel. End with the concrete external-access blocker in the worker result. This is an integration/access failure outside normal worker execution, not a repository-defined recovery lifecycle.
 
 ## Repository state and delivery
 
