@@ -169,3 +169,11 @@ Make Leesh Loop a runnable local project environment without turning externally 
 - Accepted: compatible reuse did not recover the initial project window after a crash or launch failure before its durable open marker; URL pathname decoding broke repository roots containing spaces.
 - Applied commit: current fix commit.
 - Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.
+
+### Round 17
+
+- Reviewed HEAD: `f1238c40753e1a3797dcbe3436330cc1830efe32` on [PR #21](https://github.com/leesh7807/leesh-loop/pull/21).
+- Verdict: `FINDINGS`.
+- Accepted: the 15-second observability wait incorrectly included bootstrap readiness and the smoke submit; reused runtime start did not recover a dead Publish UI when the browser-open marker existed.
+- Applied commit: current fix commit.
+- Verification: Node UI test, publisher tests (18/18), Symphony formatter, Node syntax, and `git diff --check` passed.

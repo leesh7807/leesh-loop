@@ -38,6 +38,7 @@ async function loadConfig(file) {
   if (!config || typeof config !== 'object') throw new Error(`missing or invalid project configuration: ${file}`);
   for (const key of ['workflow_path', 'notion_database_url', 'symphony_workspace_root']) if (typeof config[key] !== 'string' || !config[key]) throw new Error(`project configuration requires ${key}`);
   if (!isAbsolute(config.workflow_path) || !isAbsolute(config.symphony_workspace_root)) throw new Error('workflow_path and symphony_workspace_root must be absolute');
+  if (config.startup_timeout_ms !== undefined && (!Number.isSafeInteger(config.startup_timeout_ms) || config.startup_timeout_ms <= 0)) throw new Error('startup_timeout_ms must be a positive integer');
   const resolved = { ...config, workflow_path: canonical(config.workflow_path), symphony_workspace_root: canonical(config.symphony_workspace_root), configuration_path: canonical(file) };
   return resolved;
 }
@@ -74,7 +75,7 @@ async function reconcile(config, desired) {
   await terminate(state); await clear(config); return null;
 }
 function launch(command, args, env) { const child = spawn(command, args, { cwd: root, detached: true, stdio: 'ignore', env }); child.unref(); return child.pid; }
-async function waitFor(check, description) { for (let i = 0; i < 150; i += 1) { if (await check()) return; await sleep(100); } throw new Error(`timed out waiting for ${description}`); }
+async function waitFor(check, description, timeoutMs = 15_000) { const deadline = Date.now() + timeoutMs; do { if (await check()) return; await sleep(100); } while (Date.now() < deadline); throw new Error(`timed out waiting for ${description}`); }
 async function openWindow(config, dashboard) {
   await ensureUi(config);
   if (process.env.LEESH_LOOP_BROWSER_COMMAND) {
@@ -113,6 +114,7 @@ async function start(config) {
     const port = Number(config.symphony_port || 4100); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
     if (existing) {
       let window_error;
+      try { await ensureUi(config); } catch (error) { window_error = String(error.message || error); }
       if (!existing.project_window_opened_at) {
         try {
           await openWindow(config, existing.effective.dashboard);
@@ -136,7 +138,7 @@ async function start(config) {
       await atomicJson(p.state, ownedStarting);
       await atomicJson(p.ownership, { project_root: root, runtime_id: runtimeId, pid, process_start_ticks, created_at: new Date().toISOString() });
       const provisional = { ...ownedStarting, status: 'provisional' }; await atomicJson(p.state, provisional);
-      await waitFor(() => runtimeObserved({ ...provisional, effective: identity }, false), 'Symphony observability');
+      await waitFor(() => runtimeObserved({ ...provisional, effective: identity }, false), 'Symphony observability', config.startup_timeout_ms || 30 * 60_000);
       const committed = { ...provisional, status: 'committed-disabled' }; await atomicJson(p.state, committed);
       const running = { ...committed, status: 'running', authorized_at: new Date().toISOString() }; await atomicJson(p.state, running);
       await atomicJson(p.authorization, { state: 'running', runtime_id: runtimeId, published_at: new Date().toISOString() });
