@@ -48,6 +48,24 @@ test("a pristine title-only source is bootstrapped, including title rename and S
   assert.deepEqual(client.calls[5].body.properties["name-id"], { title: {}, name: "Title" });
 });
 
+test("a pristine title property may have a canonical non-Title name", async () => {
+  const task = { id: "task-source", properties: { State: { id: "state-title-id", type: "title" } } };
+  const client = new RequestFake([
+    { data_sources: [{ id: "task-source" }] },
+    task,
+    { results: [], has_more: false },
+    { id: "plan-source", properties: planSchema.properties },
+    { properties: planSchema.properties },
+    {},
+    { properties: taskSchema("plan-source") }
+  ]);
+
+  assert.deepEqual(await client.ensureDatabase("db", DEFAULT_POLICY), { taskDataSourceId: "task-source", planDataSourceId: "plan-source" });
+  const patch = client.calls.find((call) => call.method === "PATCH" && call.path === "/data_sources/task-source");
+  assert.deepEqual(patch.body.properties["state-title-id"], { title: {}, name: "Title" });
+  assert.deepEqual(patch.body.properties.State, { select: { options: DEFAULT_POLICY.stateSeeds.map(name => ({ name })) } });
+});
+
 test("existing canonical sources are selected structurally and extras are preserved", async () => {
   const client = new RequestFake([
     { data_sources: [{ id: "plan-source", name: "Tasks" }, { id: "task-source", name: "Not Plans" }] },

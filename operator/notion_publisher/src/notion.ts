@@ -174,6 +174,7 @@ export class NotionClient {
       const [name, property] = titleEntry;
       missing[property.id ?? name] = { title: {}, name: policy.title };
       properties[policy.title] = { ...property, name: policy.title };
+      delete properties[name];
     }
 
     for (const [name, definition] of Object.entries(definitions)) {
