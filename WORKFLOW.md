@@ -33,7 +33,12 @@ hooks:
 agent:
   max_turns: 20
 codex:
-  command: 'env PATH="$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:$PATH" codex app-server'
+  command: >-
+    env PATH="$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:$PATH"
+    codex
+    --config model="gpt-5.6-luna"
+    --config model_reasoning_effort="xhigh"
+    app-server
 ---
 
 # Leesh Loop repository workflow
