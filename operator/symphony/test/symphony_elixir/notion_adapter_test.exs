@@ -51,6 +51,14 @@ defmodule SymphonyElixir.Notion.AdapterTest do
     assert_received {:notion_request, "GET", "/blocks/plan/children", _, _, _}
   end
 
+  test "Backlog is a valid observed task state and remains provider-dispatchable only by blocker rules" do
+    request = recording_request(self(), task: task_page("Backlog"))
+
+    assert {:ok, [issue]} = Client.fetch_issues_by_ids_for_test(["task"], notion_settings(), request)
+    assert issue.state == "Backlog"
+    assert issue.dispatchable
+  end
+
   test "Plan source is selected by relation target, not by display name or order" do
     request =
       recording_request(self(),

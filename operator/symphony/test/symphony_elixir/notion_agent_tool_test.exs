@@ -26,6 +26,14 @@ defmodule SymphonyElixir.Notion.AgentToolTest do
     assert_received {:workpad_append, %{"children" => [%{"type" => "paragraph", "paragraph" => %{"rich_text" => [%{"text" => %{"content" => "실행 결과"}}]}}]}}
   end
 
+  test "workpad preserves the delivery PR URL verbatim" do
+    url = "https://github.com/leesh7807/leesh-loop/pull/42"
+
+    assert append_body("delivered_pr: #{url}")
+           |> rich_text_items()
+           |> Enum.map_join("", &get_in(&1, ["text", "content"])) == "delivered_pr: #{url}"
+  end
+
   test "rich-text chunking preserves exact text without transport paragraph boundaries" do
     exact_boundary = String.duplicate("a", 2_000)
     assert append_body(exact_boundary)["children"] |> length() == 1

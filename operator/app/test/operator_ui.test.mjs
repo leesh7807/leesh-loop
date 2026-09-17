@@ -4,10 +4,26 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
-import { openProjectSurfaces } from '../leesh-loop.mjs';
+import { openProjectSurfaces, readRequestBody } from '../leesh-loop.mjs';
 
 const root = resolve(import.meta.dirname, '../../..');
 const cli = join(root, 'operator/app/leesh-loop.mjs');
+
+test('publish request decoding preserves Unicode across byte chunk boundaries', async () => {
+  const plan = '# 한국어 😀 café — 𐐷\nentity text: &#x1F600; & <tag>';
+  const bytes = Buffer.from(plan, 'utf8');
+  const emojiOffset = bytes.indexOf(Buffer.from('😀', 'utf8'));
+  const request = (async function* () {
+    yield bytes.subarray(0, emojiOffset + 1);
+    yield bytes.subarray(emojiOffset + 1);
+  })();
+
+  assert.equal(await readRequestBody(request), plan);
+  await assert.rejects(
+    readRequestBody((async function* () { yield Buffer.from([0x23, 0xf0, 0x28, 0x8c, 0xbc]); })()),
+    /encoding|UTF-8/i
+  );
+});
 
 test('the publish surface exposes the configured external links without custom styling', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-ui-'));
@@ -28,6 +44,9 @@ test('the publish surface exposes the configured external links without custom s
   assert.equal(response?.status, 200);
   const page = await response.text();
   assert.match(page, /Leesh Loop Publish/);
+  assert.match(page, /<meta charset="utf-8">/i);
+  assert.match(page, /<form accept-charset="UTF-8" method="post">/i);
+  assert.match(response.headers.get('content-type') || '', /text\/html; charset=utf-8/i);
   assert.match(page, /https:\/\/www.notion.so\/example/);
   assert.match(page, /Symphony Dashboard/);
   assert.doesNotMatch(page, /<style|stylesheet/i);
