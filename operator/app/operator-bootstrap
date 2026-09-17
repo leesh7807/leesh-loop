@@ -218,13 +218,47 @@ service_accepting || fail 'chatgpt-shot Service is not healthy and accepting req
 
 report 'submitting chatgpt-shot smoke Job'
 smoke_prompt=${SYMPHONY_CHATGPT_SHOT_SMOKE_PROMPT:-'Operator readiness smoke check. Reply with exactly READY.'}
-smoke_job_id=$(mktemp "${TMPDIR:-/tmp}/symphony-chatgpt-shot-smoke.XXXXXX")
-trap 'rm -f -- "$smoke_job_id"' EXIT HUP INT TERM
+smoke_job_id_file=$(mktemp "${TMPDIR:-/tmp}/symphony-chatgpt-shot-smoke-id.XXXXXX")
+smoke_snapshot=$(mktemp "${TMPDIR:-/tmp}/symphony-chatgpt-shot-smoke-snapshot.XXXXXX")
+trap 'rm -f -- "$smoke_job_id_file" "$smoke_snapshot"' EXIT HUP INT TERM
 
-if ! chatgpt-shot submit "$smoke_prompt" >"$smoke_job_id"; then
+if ! chatgpt-shot submit "$smoke_prompt" >"$smoke_job_id_file"; then
   fail 'chatgpt-shot submit smoke Job failed before returning a Job ID.'
 fi
-[ -s "$smoke_job_id" ] || fail 'chatgpt-shot submit smoke Job returned an empty Job ID.'
+[ -s "$smoke_job_id_file" ] || fail 'chatgpt-shot submit smoke Job returned an empty Job ID.'
+smoke_job_id=$(tr -d '[:space:]' <"$smoke_job_id_file")
+[ -n "$smoke_job_id" ] || fail 'chatgpt-shot submit smoke Job returned an empty Job ID.'
+while :; do
+  if ! chatgpt-shot jobs "$smoke_job_id" >"$smoke_snapshot"; then
+    fail 'chatgpt-shot smoke Job could not be read after submission.'
+  fi
+  smoke_state=$(node - "$smoke_snapshot" <<'NODE'
+const fs = require('node:fs');
+const snapshot = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (typeof snapshot.state !== 'string' || !Object.prototype.hasOwnProperty.call(snapshot, 'result') || !Object.prototype.hasOwnProperty.call(snapshot, 'error')) process.exit(1);
+process.stdout.write(snapshot.state);
+NODE
+  ) || fail 'chatgpt-shot smoke Job returned an invalid snapshot.'
+  case "$smoke_state" in
+    completed)
+      node - "$smoke_snapshot" <<'NODE' || fail 'chatgpt-shot smoke Job completed without a Result.'
+const fs = require('node:fs');
+const snapshot = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (typeof snapshot.result !== 'string' || snapshot.result.length === 0) process.exit(1);
+NODE
+      break
+      ;;
+    failed)
+      fail 'chatgpt-shot smoke Job reached failed State.'
+      ;;
+    pending|in_progress)
+      sleep 1
+      ;;
+    *)
+      fail "chatgpt-shot smoke Job returned unsupported State: $smoke_state"
+      ;;
+  esac
+done
 service_accepting || fail 'chatgpt-shot Service stopped accepting requests after the smoke invocation.'
 
 report 'preparing worker interface and readiness record'
@@ -244,7 +278,7 @@ mkdir -p -- "$readiness_directory" || fail "cannot create readiness state direct
 chmod 700 -- "$readiness_directory" 2>/dev/null || true
 
 readiness_tmp=$(mktemp "${readiness_file}.XXXXXX") || fail "cannot create readiness state: $readiness_file"
-trap 'rm -f -- "$smoke_job_id" "$readiness_tmp"' EXIT HUP INT TERM
+trap 'rm -f -- "$smoke_job_id_file" "$smoke_snapshot" "$readiness_tmp"' EXIT HUP INT TERM
 umask 077
 node - "$readiness_tmp" "$workspace_root" "$repository_root" "$github_repository_url" "$chatgpt_discovery_path" "$worker_interface_root" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" <<'NODE' || fail "cannot write readiness state: $readiness_file"
 const fs = require('node:fs');
