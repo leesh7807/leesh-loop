@@ -27,7 +27,9 @@ async function projectConfig(directory, workspaceRoot, workspaceFiles) {
   const config = {
     workflow_path: join(root, 'WORKFLOW.md'),
     notion_database_url: 'https://notion.example/database',
-    symphony_workspace_root: workspaceRoot
+    symphony_workspace_root: workspaceRoot,
+    github_repository_url: 'https://github.com/example/repository.git',
+    github_base_branch: 'main'
   };
   if (workspaceFiles !== undefined) config.workspace_files = workspaceFiles;
   await writeFile(path, JSON.stringify(config));
@@ -81,6 +83,38 @@ test('workspace files participate in effective runtime identity', async t => {
   const configA = await loadConfig(await projectConfig(directory, workspaceRoot, [first]));
   const configB = await loadConfig(await projectConfig(directory, workspaceRoot, [second]));
   assert.notDeepEqual(effective(configA, 'same-runtime', 4100), effective(configB, 'same-runtime', 4100));
+});
+
+test('Git target binding is required and participates in effective runtime identity', async t => {
+  const { directory, workspaceRoot } = await fixture(t);
+  const configPath = await projectConfig(directory, workspaceRoot);
+  const contents = JSON.parse(await readFile(configPath, 'utf8'));
+  for (const key of ['github_repository_url', 'github_base_branch']) {
+    const missing = { ...contents };
+    delete missing[key];
+    await writeFile(configPath, JSON.stringify(missing));
+    await assert.rejects(loadConfig(configPath), new RegExp(`project configuration requires ${key}`));
+  }
+
+  await writeFile(configPath, JSON.stringify(contents));
+  const baseChanged = { ...contents, github_base_branch: 'e2e/other-run' };
+  const repositoryChanged = { ...contents, github_repository_url: 'https://github.com/other/repository.git' };
+  const first = await loadConfig(configPath);
+  await writeFile(configPath, JSON.stringify(baseChanged));
+  const second = await loadConfig(configPath);
+  await writeFile(configPath, JSON.stringify(repositoryChanged));
+  const third = await loadConfig(configPath);
+  assert.notDeepEqual(effective(first, 'same-runtime', 4100), effective(second, 'same-runtime', 4100));
+  assert.notDeepEqual(effective(first, 'same-runtime', 4100), effective(third, 'same-runtime', 4100));
+});
+
+test('Git target binding rejects invalid branch names before startup', async t => {
+  const { directory, workspaceRoot } = await fixture(t);
+  const configPath = await projectConfig(directory, workspaceRoot);
+  const contents = JSON.parse(await readFile(configPath, 'utf8'));
+  contents.github_base_branch = 'invalid..branch';
+  await writeFile(configPath, JSON.stringify(contents));
+  await assert.rejects(loadConfig(configPath), /not a valid Git branch name/);
 });
 
 test('materializer copies bytes after clone without changing unrelated workspace content', async t => {
@@ -142,10 +176,10 @@ test('the actual after_create materialization command runs after clone and befor
   await execFile('git', ['remote', 'add', 'origin', remote], { cwd: seed });
   await execFile('git', ['push', 'origin', 'HEAD:main'], { cwd: seed });
   const contents = await readFile(workflow, 'utf8');
-  assert.match(contents, /git clone https:\/\/github\.com\/leesh7807\/leesh-loop\.git \.\n    node operator\/app\/workspace-files\.mjs "\$PWD"\n    \(cd operator\/notion_publisher/);
-  await execFile('sh', ['-ec', 'git clone "$1" .\nnode operator/app/workspace-files.mjs "$PWD"\ntest "$(cat .env)" = AFTER_CREATE_SENTINEL\ntest "$(cat cloned.txt)" = "repository clone completed"', 'after_create', remote], {
+  assert.match(contents, /git clone --branch "\$SYMPHONY_GITHUB_BASE_BRANCH" "\$SYMPHONY_GITHUB_REPOSITORY_URL" \.\n    node operator\/app\/workspace-files\.mjs "\$PWD"\n    \(cd operator\/notion_publisher/);
+  await execFile('sh', ['-ec', ': "${SYMPHONY_GITHUB_REPOSITORY_URL:?}"\n: "${SYMPHONY_GITHUB_BASE_BRANCH:?}"\ngit clone --branch "$SYMPHONY_GITHUB_BASE_BRANCH" "$SYMPHONY_GITHUB_REPOSITORY_URL" .\nnode operator/app/workspace-files.mjs "$PWD"\ntest "$(cat .env)" = AFTER_CREATE_SENTINEL\ntest "$(cat cloned.txt)" = "repository clone completed"', 'after_create'], {
     cwd: workspace,
-    env: { ...process.env, SYMPHONY_WORKSPACE_ROOT: workspaceRoot, LEESH_LOOP_WORKSPACE_FILES: JSON.stringify([source]) }
+    env: { ...process.env, SYMPHONY_WORKSPACE_ROOT: workspaceRoot, LEESH_LOOP_WORKSPACE_FILES: JSON.stringify([source]), SYMPHONY_GITHUB_REPOSITORY_URL: remote, SYMPHONY_GITHUB_BASE_BRANCH: 'main' }
   });
   assert.equal(await readFile(join(workspace, '.env'), 'utf8'), 'AFTER_CREATE_SENTINEL\n');
 });
