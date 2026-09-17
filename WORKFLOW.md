@@ -5,6 +5,8 @@ tracker:
   kind: notion
   provider:
     database_url: $LEESH_LOOP_NOTION_DATABASE_URL
+  # Backlog is a normal non-dispatch state and therefore intentionally stays
+  # outside the active state set below.
   active_states:
     - Ready
     - In Progress
@@ -78,6 +80,8 @@ If the task surface itself or its authentication is unavailable, it cannot recor
 
 The repository state vocabulary is:
 
+- `Backlog` is a normal non-active, non-terminal waiting state. It is valid for
+  storing work before execution approval, but it is never a dispatch candidate.
 - `Ready`, `In Progress`, `Rework`, and `Merging` are active states. Move `Ready` work to `In Progress` before implementation; use `Rework` only for the human-selected review-rejection path. `Merging` is only the human-authorized phase for merging the exact delivery from the preceding `Human Review`; it never authorizes general implementation or an arbitrary branch merge.
 - `Human Review` is the single non-active, non-terminal human pause state. A human may select `In Progress`, `Rework`, or `Merging` from it. Comments never constitute approval or dispatch. Workers use it after a validated PR, for a human-required blocker, or when independent review cannot continue; record `reason: review` or `reason: blocker` in the Workpad. A worker must never transition a task into `Rework` or `Merging`.
 - `Done` and `Cancelled` are terminal states. Move to `Done` only after the approved delivery has actually been merged through its GitHub PR and the resulting remote `main` state has been verified. Never use terminal state merely because implementation, verification, independent review, or a successful merge command finished.
@@ -94,7 +98,7 @@ Use only these lifecycle entries, retaining ordinary context around them:
 Human Review
 cycle: N
 reason: review | blocker
-delivered_pr: <PR URL or number | none>
+delivered_pr: <full GitHub PR URL | none>
 delivered_head: <HEAD | none>
 comment_baseline: <comment-id | none>
 
@@ -138,7 +142,7 @@ If the Approved delivery is already merged, do not accept merged status alone. V
 
 For a human-required blocker, including an unestablished/changed Approved delivery, merged-head mismatch, merge conflict, ambiguous result, or GitHub/access failure, record the concrete condition, current repository state, required human action, workspace/validation state, and remaining work; prepare `Human Review` with `reason: blocker`; transition to `Human Review`; confirm authoritative readback; and stop. A merge failure must never produce `Done`, and merge recovery must never autonomously choose `Rework`. If the Notion surface is unavailable, report that concrete access failure rather than claiming a state transition.
 
-Create a task branch, make only task-related commits, push it, and open a PR against `main`; never merge directly to `main`. Before opening the PR, inspect the final diff and status, run applicable repository checks and `git diff --check`, compare the actual result with the Repository Plan as required by the reusable template, apply any needed durable correction, and move the delivered Plan to `docs/plans/completed/`. That move does not make the task terminal. Record material verification, contract decisions, root causes, and artifact changes as PR comments when a PR exists.
+Create a task branch, make only task-related commits, push it, and open a PR against `main`; never merge directly to `main`. After the delivery PR exists, record its full GitHub URL in the existing `delivered_pr` Workpad marker; keep it `none` until a real PR exists and do not synthesize a placeholder. Preserve that same PR identity for Human Review, review, and merging. Before opening the PR, inspect the final diff and status, run applicable repository checks and `git diff --check`, compare the actual result with the Repository Plan as required by the reusable template, apply any needed durable correction, and move the delivered Plan to `docs/plans/completed/`. That move does not make the task terminal. Record material verification, contract decisions, root causes, and artifact changes as PR comments when a PR exists.
 
 ## Independent `chatgpt-shot` review gate
 

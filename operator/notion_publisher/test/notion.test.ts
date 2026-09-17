@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { NotionClient } from "../src/notion.js";
-import { DEFAULT_POLICY, PLAN_PROPERTY, PUBLISHER_PENDING_STATE } from "../src/core.js";
+import { buildPlanBlocks, DEFAULT_POLICY, PLAN_PROPERTY, PUBLISHER_PENDING_STATE } from "../src/core.js";
 
 const planSchema = { properties: { Identifier: { type: "rich_text" }, Title: { type: "title" } } };
 
@@ -183,6 +183,25 @@ test("finalization, relation wiring, and page locking use their provider-native 
     { properties: { [PLAN_PROPERTY]: { relation: [{ id: "plan-page" }] } } },
     { properties: { State: { select: { name: "Ready" } } } }
   ]);
+});
+
+test("provider payload keeps Unicode text literal across rich-text chunk boundaries", async () => {
+  let wireBody = "";
+  const client = new NotionClient("token", async (_url, init) => {
+    wireBody = String(init?.body ?? "");
+    return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+  });
+  const plan = `# 원문 😀 café — 𐐷\n${"x".repeat(1890)}🙂 끝\nentity text: &#x1F600; & <tag>`;
+
+  await client.appendBlocks("plan-page", buildPlanBlocks(plan));
+
+  const payload = JSON.parse(wireBody);
+  const actual = payload.children
+    .map((block: any) => block.paragraph.rich_text.map((part: any) => part.text.content).join(""))
+    .join("");
+  assert.equal(actual, plan);
+  assert.equal(actual.includes("�"), false);
+  assert.equal(actual.includes("&#x1F600;"), true);
 });
 
 test("provider failures and malformed pagination remain explicit", async () => {

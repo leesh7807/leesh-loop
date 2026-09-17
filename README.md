@@ -90,7 +90,8 @@ Repository Plan remains the durable execution contract rather than a running log
 The Publisher owns publication state only: it creates incomplete tasks as `Publisher Pending` and
 sets `State` to `Ready` after the canonical representation is complete and validated. The Notion
 `State` is a Notion select property. New databases are seeded with the repository workflow's
-state vocabulary plus `Backlog`; the publisher may additionally use its transient `Publisher Pending`
+state vocabulary plus `Backlog`; `Backlog` is a normal non-active, non-terminal waiting state
+and is never dispatched. The publisher may additionally use its transient `Publisher Pending`
 state while a task is being constructed.
 
 Symphony starts observable but dispatch-disabled. Only after the Operator publishes durable `running` authorization and Symphony writes its dispatch acknowledgement can it find runnable tasks in Notion and run agents in isolated workspaces. Repeated `start` reuses only a compatible acknowledged running runtime; use `node operator/app/leesh-loop.mjs stop operator/project.json` before replacing a live incompatible runtime. Stopping never stops the external `chatgpt-shot` Service.

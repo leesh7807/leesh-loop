@@ -807,6 +807,26 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Orchestrator.should_dispatch_issue_for_test(issue, state)
   end
 
+  test "Backlog is observed as a valid non-dispatch state" do
+    state = %Orchestrator.State{
+      max_concurrent_agents: 3,
+      running: %{},
+      claimed: MapSet.new(),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    issue = %Issue{
+      id: "backlog-1",
+      identifier: "MT-1004",
+      title: "Waiting for approval",
+      state: "Backlog",
+      dispatchable: true
+    }
+
+    refute Orchestrator.should_dispatch_issue_for_test(issue, state)
+  end
+
   test "dispatch revalidation skips an issue when provider routing changes" do
     stale_issue = %Issue{
       id: "blocked-2",

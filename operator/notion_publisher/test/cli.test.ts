@@ -186,6 +186,21 @@ test("browser CRLF Plan content publishes when Notion reads it back as LF", asyn
   assert.equal(planPage.children.map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "# Browser\n\naccepted Plan");
 });
 
+test("publisher preserves Unicode and literal entity-looking text across chunked Plan blocks", async () => {
+  const expected = `# 원문 😀 café — 𐐷\n${"x".repeat(1890)}🙂 끝\nentity text: &#x1F600; & <tag>`;
+  const { plan, config } = await inputs(expected);
+  const client = new PublicationFake();
+
+  await publishPlanFile(plan, config, DATABASE_URL, client);
+
+  const actual = client.planPages()[0].children
+    .map((block: any) => block.paragraph.rich_text.map((part: any) => part.text.content).join(""))
+    .join("");
+  assert.equal(actual, expected);
+  assert.equal(actual.includes("�"), false);
+  assert.equal(actual.includes("&#x1F600;"), true);
+});
+
 test("pending tasks related to another publication or ambiguous Plan identity are rejected", async () => {
   const { plan, config } = await inputs("# Binding\naccepted");
   const wrong = new PublicationFake();
