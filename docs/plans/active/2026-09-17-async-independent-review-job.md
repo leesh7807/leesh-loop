@@ -185,3 +185,14 @@ Review target 자체를 잘못 제출한 경우는 Job failure와 구분한다. 
 
 ## chatgpt-shot review log
 
+### Round 1
+
+- Reviewed HEAD: `636ba3fca1ad65f04f3e806926105a664c612ff1` on [PR #30](https://github.com/leesh7807/leesh-loop/pull/30).
+- Verdict: `FINDINGS`.
+- Accepted the readiness finding: after async submission, Operator smoke readiness checked only
+  that a Job ID existed and did not preserve the previous terminal Result verification. Updated
+  bootstrap to read the same Job until `completed`/`failed` and require a non-empty completed
+  Result. This is readiness verification, not a worker-side review lifecycle or retry policy.
+- Applied commit: `c372f3f63f883b4c73b67db2ca32ac4e323bcb99`.
+- Verification: `sh -n`, operator app tests (13/13), Notion publisher tests (23/23), and
+  `git diff --check` passed.
