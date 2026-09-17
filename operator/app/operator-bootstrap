@@ -216,15 +216,15 @@ fi
 
 service_accepting || fail 'chatgpt-shot Service is not healthy and accepting requests.'
 
-report 'submitting chatgpt-shot smoke invocation'
+report 'submitting chatgpt-shot smoke Job'
 smoke_prompt=${SYMPHONY_CHATGPT_SHOT_SMOKE_PROMPT:-'Operator readiness smoke check. Reply with exactly READY.'}
-smoke_result=$(mktemp "${TMPDIR:-/tmp}/symphony-chatgpt-shot-smoke.XXXXXX")
-trap 'rm -f -- "$smoke_result"' EXIT HUP INT TERM
+smoke_job_id=$(mktemp "${TMPDIR:-/tmp}/symphony-chatgpt-shot-smoke.XXXXXX")
+trap 'rm -f -- "$smoke_job_id"' EXIT HUP INT TERM
 
-if ! chatgpt-shot submit "$smoke_prompt" >"$smoke_result"; then
-  fail 'chatgpt-shot submit smoke invocation failed; inspect its Invocation before any resubmission.'
+if ! chatgpt-shot submit "$smoke_prompt" >"$smoke_job_id"; then
+  fail 'chatgpt-shot submit smoke Job failed before returning a Job ID.'
 fi
-[ -s "$smoke_result" ] || fail 'chatgpt-shot submit smoke invocation returned an empty Result.'
+[ -s "$smoke_job_id" ] || fail 'chatgpt-shot submit smoke Job returned an empty Job ID.'
 service_accepting || fail 'chatgpt-shot Service stopped accepting requests after the smoke invocation.'
 
 report 'preparing worker interface and readiness record'
@@ -244,7 +244,7 @@ mkdir -p -- "$readiness_directory" || fail "cannot create readiness state direct
 chmod 700 -- "$readiness_directory" 2>/dev/null || true
 
 readiness_tmp=$(mktemp "${readiness_file}.XXXXXX") || fail "cannot create readiness state: $readiness_file"
-trap 'rm -f -- "$smoke_result" "$readiness_tmp"' EXIT HUP INT TERM
+trap 'rm -f -- "$smoke_job_id" "$readiness_tmp"' EXIT HUP INT TERM
 umask 077
 node - "$readiness_tmp" "$workspace_root" "$repository_root" "$github_repository_url" "$chatgpt_discovery_path" "$worker_interface_root" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" <<'NODE' || fail "cannot write readiness state: $readiness_file"
 const fs = require('node:fs');

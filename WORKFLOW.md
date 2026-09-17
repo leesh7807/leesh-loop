@@ -66,7 +66,7 @@ The `after_create` hook clones this repository and installs its worker dependenc
 
 The execution environment provides the worker-facing `chatgpt-shot` command.
 
-Use only `chatgpt-shot submit "<prompt>"`.
+Use only `chatgpt-shot submit "<prompt>"` and `chatgpt-shot jobs <job-id>`.
 
 Do not start, stop, authenticate, repair, or otherwise manage the external `chatgpt-shot` Service.
 
@@ -142,7 +142,7 @@ Create a task branch, make only task-related commits, push it, and open a PR aga
 
 ## Independent `chatgpt-shot` review gate
 
-After implementation and ordinary repository verification, obtain the current PR URL and `git rev-parse HEAD`, then submit this request through the supported public interface `chatgpt-shot submit` and use its completed stdout Result:
+After implementation and ordinary repository verification, obtain the current PR URL and `git rev-parse HEAD`, then submit this request through `chatgpt-shot submit "<prompt>"`. Treat the command's stdout as the Review Job ID, not as the review Result.
 
 ```text
 PR <PR_URL>의 HEAD <HEAD_SHA>를 코드 리뷰하라.
@@ -172,11 +172,22 @@ finding이 없으면 `# Findings`는 `None.`으로 출력하라.
 
 The bracketed block is optional. Include it only when the Accepted Plan explicitly specifies additional review criteria. Do not invent or infer criteria; otherwise omit the block.
 
-Give the request enough Accepted Plan and changed-result context to judge the objective, as well as the PR and HEAD identity. Record each review target, result, finding, evidence-based acceptance or rejection, fix, post-fix verification, and re-review result in the Korean Workpad. Do not copy the full transcript into the Repository Plan.
+After submission succeeds, poll `chatgpt-shot jobs <job-id>` every 30 seconds until the Review Job reaches a terminal State.
 
-Treat findings as review input, not automatic edit commands. Independently validate each finding against the current HEAD and its execution path. Fix only a material actionable finding with concrete evidence and observable impact; rerun affected verification, commit/push, and review the new HEAD. Record a rejection reason without editing for findings that are not valid. Repeat until the Result is `PASS`, or all findings are resolved/rejected and no accepted fix produced a new HEAD.
+- `pending`: wait 30 seconds and poll the same Job again.
+- `in_progress`: wait 30 seconds and poll the same Job again.
+- `completed`: use the Job's `result` as the independent review Result.
+- `failed`: use the existing independent-review blocker handoff described below.
 
-If `chatgpt-shot` does not complete normally, it has not passed this gate. Record the failure reason and current implementation/verification state in the Korean Workpad, move the task to `Human Review` with `reason: blocker`, confirm readback, and stop. Do not create an automatic recovery or failure-code retry policy. For `SUBMISSION_UNCERTAIN`, `INVOCATION_CANCELLED`, or `EXECUTION_TIMEOUT`, inspect the Notion Invocation before any resubmission.
+Do not submit another Review Job for the same review target while the current Job is `pending` or `in_progress`.
+
+Give the request enough Accepted Plan and changed-result context to judge the objective, as well as the PR and HEAD identity. Record each review target, Review Job ID, completed Result, finding, evidence-based acceptance or rejection, fix, post-fix verification, and re-review result in the Korean Workpad. Do not copy the full transcript into the Repository Plan.
+
+Treat findings as review input, not automatic edit commands. Independently validate each finding against the current HEAD and its execution path. Fix only a material actionable finding with concrete evidence and observable impact; rerun affected verification, commit/push, and submit a new Review Job for the new HEAD. Record a rejection reason without editing for findings that are not valid. If a completed Review Job targeted the wrong PR, HEAD, or other review identity, correct the review target and submit a new Review Job. Treat this as a new review request, not as retry or recovery of the completed Job. Repeat until the Result is `PASS`, or all findings are resolved/rejected and no accepted fix produced a new HEAD.
+
+If the Review Job reaches `failed`, it has not passed this gate. Record the Job Error and current implementation/verification state in the Korean Workpad, move the task to `Human Review` with `reason: blocker`, confirm authoritative readback, and stop.
+
+If `chatgpt-shot submit` fails before returning a Job ID, use the existing submission-failure blocker handoff: record the failure reason and current implementation/verification state in the Korean Workpad, move the task to `Human Review` with `reason: blocker`, confirm authoritative readback, and stop. Do not create an automatic recovery or failure-code retry policy.
 
 After a passing review gate, move the task to `Human Review` with authoritative readback. A human may return it to `In Progress` or `Rework`; then follow the corresponding continuation/reset contract, perform the required verification and independent review again, and return it to `Human Review`. A human may instead select `Merging`, which follows the approved-delivery merge contract above.
 

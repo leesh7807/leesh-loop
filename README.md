@@ -50,8 +50,8 @@ run `mise exec -- mix deps.get` from `operator/symphony` before the first start.
 
 Before spawning Symphony, the bootstrap validates the GitHub HTTPS network and credential path, verifies the installed
 `chatgpt-shot` configuration and browser/session state, starts or recovers its Service, confirms
-the health endpoint is accepting requests, and completes one real `chatgpt-shot submit` smoke
-round trip before launching Symphony. Missing or invalid readiness stops the command before any
+the health endpoint is accepting requests, and performs one real `chatgpt-shot submit` smoke
+submission before launching Symphony. Missing or invalid readiness stops the command before any
 tracker task is dispatched; it never performs interactive login.
 
 The ownership boundary is:
@@ -68,12 +68,13 @@ Operator
 Worker
 ├─ repository work inside assigned workspace
 ├─ normal Git/GitHub operations
-└─ chatgpt-shot submit "<prompt>"
+├─ chatgpt-shot submit "<prompt>"
+└─ chatgpt-shot jobs <job-id>
 ```
 
-The worker command is a submit-only Service client prepared in an Operator-owned interface
-directory. It reads only the Operator's Service discovery record and invokes the already-running
-Service; it does not run `doctor`, `start`, login, browser recovery, profile repair, or access the
+The worker command is a restricted Service client prepared in an Operator-owned interface
+directory. It supports only review Job submission and readback through `submit` and `jobs`; it
+does not run `doctor`, `start`, login, browser recovery, profile repair, or access the
 `chatgpt-shot` Notion credentials. The XDG configuration, data, cache, browser profile, Service
 runtime state, and worker interface stay outside `$SYMPHONY_WORKSPACE_ROOT`.
 
