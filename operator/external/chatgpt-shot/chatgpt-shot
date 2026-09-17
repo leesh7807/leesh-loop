@@ -2,17 +2,28 @@
 set -eu
 
 usage() {
-  printf '%s\n' 'Usage: chatgpt-shot submit "<prompt>"' >&2
+  printf '%s\n' 'Usage:' '  chatgpt-shot submit "<prompt>"' '  chatgpt-shot jobs <job-id>' >&2
   exit 2
 }
 
-if [ "$#" -ne 2 ] || [ "$1" != "submit" ]; then
-  usage
-fi
-
-case "$2" in
-  *[![:space:]]*) ;;
-  *) usage ;;
+case "${1:-}" in
+  submit)
+    [ "$#" -eq 2 ] || usage
+    case "$2" in
+      *[![:space:]]*) ;;
+      *) usage ;;
+    esac
+    action=submit
+    value=$2
+    ;;
+  jobs)
+    [ "$#" -eq 2 ] || usage
+    action=jobs
+    value=$2
+    ;;
+  *)
+    usage
+    ;;
 esac
 
 if [ -n "${CHATGPT_SHOT_WORKER_DISCOVERY_PATH:-}" ]; then
@@ -31,12 +42,19 @@ case "$discovery_path" in
     ;;
 esac
 
-exec node - "$discovery_path" "$2" <<'NODE'
+exec node - "$discovery_path" "$action" "$value" <<'NODE'
 const fs = require('node:fs');
 const http = require('node:http');
 
 const discoveryPath = process.argv[2];
-const prompt = process.argv[3];
+const action = process.argv[3];
+const value = process.argv[4];
+const jobId = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+if (action === 'jobs' && !jobId.test(value)) {
+  process.stderr.write('CONFIG_INVALID: Usage: chatgpt-shot jobs <job-id>\n');
+  process.exit(2);
+}
 
 let record;
 try {
@@ -51,14 +69,16 @@ if (record?.host !== '127.0.0.1' || !Number.isInteger(record.port) || record.por
   process.exit(1);
 }
 
+const body = action === 'submit' ? JSON.stringify({ prompt: value }) : undefined;
+const path = action === 'submit' ? '/jobs' : `/jobs/${encodeURIComponent(value)}`;
 const request = http.request({
   host: record.host,
   port: record.port,
-  path: '/submit',
-  method: 'POST',
+  path,
+  method: action === 'submit' ? 'POST' : 'GET',
   headers: {
     authorization: `Bearer ${record.credential}`,
-    'content-type': 'application/json'
+    ...(body ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } : {})
   }
 }, response => {
   let body = '';
@@ -76,19 +96,27 @@ const request = http.request({
 
     if (response.statusCode !== 200) {
       const code = typeof payload.code === 'string' ? payload.code : 'INVOCATION_FAILED';
-      const message = typeof payload.message === 'string' ? payload.message : 'Service submit failed.';
+      const message = typeof payload.message === 'string' ? payload.message : 'Service request failed.';
       process.stderr.write(`${code}: ${message}\n`);
       process.exitCode = 1;
       return;
     }
 
-    if (typeof payload.result !== 'string') {
-      process.stderr.write('INVOCATION_FAILED: Prepared chatgpt-shot Service returned no Result.\n');
-      process.exitCode = 1;
-      return;
+    if (action === 'submit') {
+      if (typeof payload.id !== 'string' || !jobId.test(payload.id)) {
+        process.stderr.write('INVOCATION_FAILED: Prepared chatgpt-shot Service returned no Job ID.\n');
+        process.exitCode = 1;
+        return;
+      }
+      process.stdout.write(`${payload.id}\n`);
+    } else {
+      if (typeof payload.id !== 'string' || typeof payload.state !== 'string' || !Object.prototype.hasOwnProperty.call(payload, 'result') || !Object.prototype.hasOwnProperty.call(payload, 'error')) {
+        process.stderr.write('INVOCATION_FAILED: Prepared chatgpt-shot Service returned an invalid Job snapshot.\n');
+        process.exitCode = 1;
+        return;
+      }
+      process.stdout.write(`${JSON.stringify(payload)}\n`);
     }
-
-    process.stdout.write(`${payload.result}\n`);
   });
 });
 
@@ -97,5 +125,5 @@ request.on('error', error => {
   process.exitCode = 1;
 });
 
-request.end(JSON.stringify({ prompt }));
+if (body) request.end(body); else request.end();
 NODE
