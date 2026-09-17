@@ -4,7 +4,7 @@ Create and maintain a plan that keeps the work aligned with the objective and ma
 
 - Name each plan document using the format `date-summary`.
 
-- Use the confirmed objective, intent, repository conventions, and available evidence to settle decisions that could change the outcome.
+- Use the confirmed objective, intent, repository conventions, and available evidence to settle decisions that could change the outcome, externally observable behavior, contracts, responsibilities, boundaries, or verification. Include implementation details only when they are necessary to preserve one of those decisions or to make the intended work unambiguous.
 
 - Do not invent reasons, tradeoffs, or justifications for the user.
 
@@ -34,7 +34,11 @@ Do not split the plan just to make the work easier for an agent.
 
 If you cannot turn a planned unit into a clear executable issue, check whether you understand its scope and domain boundary well enough.
 
-The final plan should be complete enough for implementation to begin without unresolved planning decisions that could change the objective or its boundaries.
+The final plan should resolve the decisions necessary to preserve the objective, intended behavior, contracts, responsibilities, boundaries, and verification. It should identify the implementation details that are necessary to carry those decisions into execution, without prescribing incidental implementation choices that can safely be left to the executor.
+
+Write in Korean.
+
+KISS, YANGI, DRY is core principle.
 
 ## Plan format
 
@@ -61,6 +65,8 @@ Do not repeat decisions or implementation requirements here.
 
 Record the decisions, assumptions, and defaults that define the objective or its boundaries.
 
+Include implementation details only where they are necessary to express or preserve a decision, contract, responsibility, boundary, or required verification. Prefer stating what must remain true over prescribing incidental internal structure or execution steps.
+
 Include rationale, constraints, alternatives, or accepted tradeoffs only when they are needed to understand a recorded decision.
 
 Do not repeat background already captured in Intent.
@@ -69,7 +75,9 @@ Do not repeat background already captured in Intent.
 
 Describe the observable evidence that will show whether the objective has been achieved through the intended execution path.
 
-Prefer verification through a representative end-to-end flow that exercises the real entry point, orchestration, integrations, external effects, and authoritative readback applicable to the objective.
+Prefer verification through a representative end-to-end flow that exercises the real entry point, orchestration, integrations, required external effects, and authoritative readback applicable to the objective. Make required external effects explicit in the plan rather than leaving them implicit or substituting lower-level verification.
+
+Treat the inability to perform representative end-to-end verification as a planning problem, not merely a verification limitation, when it leaves the objective or a central guarantee unverified through the real execution path.
 
 If meaningful end-to-end verification is not possible, state exactly what cannot be exercised, why, what closest verification will be performed instead, and what material risk remains unverified.
 
