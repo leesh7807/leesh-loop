@@ -33,6 +33,8 @@ test('the publish surface exposes the configured external links without custom s
     workflow_path: join(root, 'WORKFLOW.md'),
     notion_database_url: 'https://www.notion.so/example',
     symphony_workspace_root: join(directory, 'workspaces'),
+    github_repository_url: 'https://github.com/example/repository.git',
+    github_base_branch: 'main',
     ui_port: port
   }));
   const child = spawn(process.execPath, [cli, 'serve', config], { stdio: 'ignore' });

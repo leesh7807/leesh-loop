@@ -107,15 +107,9 @@ done
 
 report 'checking GitHub network and credential readiness'
 github_repository_url=${SYMPHONY_GITHUB_REPOSITORY_URL:-}
-if [ -z "$github_repository_url" ]; then
-  origin_url=$(git -C "$repository_root" remote get-url origin 2>/dev/null || true)
-  case "$origin_url" in
-    https://github.com/*) github_repository_url=$origin_url ;;
-    git@github.com:*) github_repository_url=https://github.com/${origin_url#git@github.com:} ;;
-    ssh://git@github.com/*) github_repository_url=https://github.com/${origin_url#ssh://git@github.com/} ;;
-    *) fail "origin must identify a GitHub repository usable over HTTPS: ${origin_url:-missing}" ;;
-  esac
-fi
+[ -n "$github_repository_url" ] || fail 'SYMPHONY_GITHUB_REPOSITORY_URL must be configured by the Project.'
+github_base_branch=${SYMPHONY_GITHUB_BASE_BRANCH:-}
+[ -n "$github_base_branch" ] || fail 'SYMPHONY_GITHUB_BASE_BRANCH must be configured by the Project.'
 case "$github_repository_url" in
   https://github.com/*) ;;
   *) fail "GitHub readiness requires an HTTPS repository URL: $github_repository_url" ;;
@@ -149,6 +143,10 @@ unset credential_response credential_username credential_password github_helpers
 
 GH_PROMPT_DISABLED=1 gh api --hostname github.com user >/dev/null 2>&1 || fail 'authenticated GitHub API probe failed.'
 GIT_TERMINAL_PROMPT=0 git -c credential.interactive=never ls-remote "$github_repository_url" HEAD >/dev/null 2>&1 || fail 'authenticated HTTPS Git probe failed.'
+
+report 'ensuring configured base branch exists'
+github_base_commit=$(node "$repository_root/operator/app/git-target.mjs" "$github_repository_url" "$github_base_branch") ||
+  fail 'configured Git target branch bootstrap failed; dispatch is not allowed.'
 
 report 'checking chatgpt-shot configuration and browser session'
 if ! chatgpt-shot doctor >/dev/null 2>&1; then
@@ -262,6 +260,8 @@ done
 service_accepting || fail 'chatgpt-shot Service stopped accepting requests after the smoke invocation.'
 
 report 'preparing worker interface and readiness record'
+github_base_commit=$(node "$repository_root/operator/app/git-target.mjs" read "$github_repository_url" "$github_base_branch") ||
+  fail 'configured base branch readback failed before readiness evidence was recorded.'
 mkdir -p -- "$worker_interface_root" || fail "cannot create worker interface directory: $worker_interface_root"
 cp -- "$worker_client" "$worker_interface_root/chatgpt-shot" || fail 'cannot prepare the worker-facing chatgpt-shot interface.'
 chmod 755 -- "$worker_interface_root/chatgpt-shot" || fail 'cannot make the worker-facing chatgpt-shot interface executable.'
@@ -280,14 +280,16 @@ chmod 700 -- "$readiness_directory" 2>/dev/null || true
 readiness_tmp=$(mktemp "${readiness_file}.XXXXXX") || fail "cannot create readiness state: $readiness_file"
 trap 'rm -f -- "$smoke_job_id_file" "$smoke_snapshot" "$readiness_tmp"' EXIT HUP INT TERM
 umask 077
-node - "$readiness_tmp" "$workspace_root" "$repository_root" "$github_repository_url" "$chatgpt_discovery_path" "$worker_interface_root" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" <<'NODE' || fail "cannot write readiness state: $readiness_file"
+node - "$readiness_tmp" "$workspace_root" "$repository_root" "$github_repository_url" "$github_base_branch" "$github_base_commit" "$chatgpt_discovery_path" "$worker_interface_root" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" <<'NODE' || fail "cannot write readiness state: $readiness_file"
 const fs = require('node:fs');
 
-const [, , outputPath, workspaceRoot, repositoryRoot, githubRepositoryUrl, discoveryPath, interfaceRoot, preparedAt] = process.argv;
+const [, , outputPath, workspaceRoot, repositoryRoot, githubRepositoryUrl, githubBaseBranch, githubBaseCommit, discoveryPath, interfaceRoot, preparedAt] = process.argv;
 fs.writeFileSync(outputPath, JSON.stringify({
   workspace_root: workspaceRoot,
   repository_root: repositoryRoot,
   github_repository_url: githubRepositoryUrl,
+  github_base_branch: githubBaseBranch,
+  github_base_commit: githubBaseCommit,
   chatgpt_shot_discovery_path: discoveryPath,
   worker_interface_root: interfaceRoot,
   prepared_at: preparedAt

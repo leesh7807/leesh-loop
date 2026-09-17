@@ -24,7 +24,9 @@ hooks:
   # Symphony executes this only for a newly-created workspace. Continuations use
   # the preserved workspace; Human Review -> Rework is the documented reset exception.
   after_create: |
-    git clone https://github.com/leesh7807/leesh-loop.git .
+    : "${SYMPHONY_GITHUB_REPOSITORY_URL:?SYMPHONY_GITHUB_REPOSITORY_URL is required}"
+    : "${SYMPHONY_GITHUB_BASE_BRANCH:?SYMPHONY_GITHUB_BASE_BRANCH is required}"
+    git clone --branch "$SYMPHONY_GITHUB_BASE_BRANCH" "$SYMPHONY_GITHUB_REPOSITORY_URL" .
     node operator/app/workspace-files.mjs "$PWD"
     (cd operator/notion_publisher && npm ci)
     if command -v mise >/dev/null 2>&1; then
@@ -64,7 +66,7 @@ Read `AGENTS.md`, then apply [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLAT
 
 ## Workspace and task surface
 
-The `after_create` hook clones this repository and installs its worker dependencies before the agent starts. Work only in the Symphony-provided workspace. Do not modify `operator/symphony/` unless the Accepted Plan specifically requires it.
+The `after_create` hook clones the configured repository and installs its worker dependencies before the agent starts. Work only in the Symphony-provided workspace. Do not modify `operator/symphony/` unless the Accepted Plan specifically requires it.
 
 The execution environment provides the worker-facing `chatgpt-shot` command.
 
@@ -84,7 +86,7 @@ The repository state vocabulary is:
   storing work before execution approval, but it is never a dispatch candidate.
 - `Ready`, `In Progress`, `Rework`, and `Merging` are active states. Move `Ready` work to `In Progress` before implementation; use `Rework` only for the human-selected review-rejection path. `Merging` is only the human-authorized phase for merging the exact delivery from the preceding `Human Review`; it never authorizes general implementation or an arbitrary branch merge.
 - `Human Review` is the single non-active, non-terminal human pause state. A human may select `In Progress`, `Rework`, or `Merging` from it. Comments never constitute approval or dispatch. Workers use it after a validated PR, for a human-required blocker, or when independent review cannot continue; record `reason: review` or `reason: blocker` in the Workpad. A worker must never transition a task into `Rework` or `Merging`.
-- `Done` and `Cancelled` are terminal states. Move to `Done` only after the approved delivery has actually been merged through its GitHub PR and the resulting remote `main` state has been verified. Never use terminal state merely because implementation, verification, independent review, or a successful merge command finished.
+- `Done` and `Cancelled` are terminal states. Move to `Done` only after the approved delivery has actually been merged through its GitHub PR and the resulting remote configured base has been verified. Never use terminal state merely because implementation, verification, independent review, or a successful merge command finished.
 
 ## Dispatch reconstruction and live Workpad
 
@@ -98,7 +100,7 @@ Use only these lifecycle entries, retaining ordinary context around them:
 Human Review
 cycle: N
 reason: review | blocker
-delivered_pr: <full GitHub PR URL | none>
+delivered_pr: <PR URL or number | none>
 delivered_head: <HEAD | none>
 comment_baseline: <comment-id | none>
 
@@ -115,7 +117,7 @@ through_comment: <comment-id | none>
 
 Rework Reset Complete
 cycle: N
-origin_main: <resolved-commit>
+origin_base: <resolved-remote-base-commit>
 
 Merging
 cycle: N
@@ -124,7 +126,7 @@ approved_head: <HEAD | none>
 attempt: <not-started | merged | recovered | blocker>
 merged_pr: <PR URL or number | none>
 merged_head: <HEAD | none>
-main: <remote-main commit | none>
+remote_base: <configured-base remote commit | none>
 blocker: <concrete condition | none>
 ```
 
@@ -132,17 +134,19 @@ Prepare each independent Human Review interval with the next monotonically incre
 
 Comments alone never dispatch, mutate State, imply continuation/Rework, or approve a merge. At the first `In Progress` or `Rework` observation after the latest unconsumed Human Review cycle, first reuse an existing `Review Input`; otherwise read provider-ordered comments once, fix `through_comment` to the latest currently visible comment, and append immutable bounded input for `(comment_baseline, through_comment]`. Use `mode: continue` for `In Progress` and `mode: rework` for `Rework`. If a non-`none` baseline cannot be located despite later comments, surface that ambiguity rather than guessing. Retries reuse the same input and never widen it with later comments. `Merging` consumes no Review Input: its authorization is the observed State selected by the human under this lifecycle contract.
 
-`Human Review → In Progress` resumes the preserved workspace, branch, Plan, and valid work after reconciliation. `Human Review → Rework` rejects the approach: first materialize `mode: rework`, read the exact latest Repository Plan, fetch current `origin/main`, and check `Rework Reset Complete` for that cycle. If absent, recreate implementation state and a fresh task branch from fetched `origin/main`, restore the current Plan to `docs/plans/active/<date-summary>.md` (including a Plan currently under `completed/`), append/confirm `Rework Reset Complete`, and only then implement. Do not reset again when that cycle's marker already exists. If reset/restoration cannot be established, do not dispatch Rework.
+`Human Review → In Progress` resumes the preserved workspace, branch, Plan, and valid work after reconciliation. The configured Git target is the Project's `github_repository_url` and `github_base_branch`, exposed as `SYMPHONY_GITHUB_REPOSITORY_URL` and `SYMPHONY_GITHUB_BASE_BRANCH`; neither may be inferred from the checkout, a default branch, or a fallback branch. `Human Review → Rework` rejects the approach: first materialize `mode: rework`, read the exact latest Repository Plan, fetch the current remote configured base, and check `Rework Reset Complete` for that cycle. If absent, run `git fetch origin "$SYMPHONY_GITHUB_BASE_BRANCH"`, resolve `refs/remotes/origin/$SYMPHONY_GITHUB_BASE_BRANCH`, recreate implementation state and a fresh task branch from that exact commit, restore the current Plan to `docs/plans/active/<date-summary>.md` (including a Plan currently under `completed/`), append/confirm `Rework Reset Complete` with `origin_base`, and only then implement. Do not reset again when that cycle's marker already exists. If reset/restoration cannot be established, do not dispatch Rework.
 
 `Human Review → Merging` preserves the delivered workspace, branch, and Plan; it must not perform the Rework reset. On every Merging dispatch or retry, reconstruct the current State, Workpad, workspace/Git state, and immediately preceding Human Review cycle before any repository mutation. Establish the Approved delivery from that cycle's `delivered_pr` and `delivered_head`; if either identity cannot be established, record a concrete `Merging` blocker and use the blocker handoff below. This workflow relies on the documented State lifecycle and does not reconstruct or reject arbitrary manual transitions that bypass it.
 
-Before issuing a merge, inspect the Approved delivery through GitHub. If it is not already merged, require that the PR exists, targets `main`, and has the exact approved Delivered HEAD. A changed head is an unreviewed replacement and must not be merged. Use the repository's normal GitHub PR merge path, never a direct push to `main`. After a successful merge operation, independently verify that the merged PR is the Approved delivery, its actual merged/source head is exactly the approved Delivered HEAD, and the resulting merge is visible on fetched remote `main`. Record the verified merged identity and remote-main commit in `Merging`, then transition `Merging → Done` and confirm authoritative State readback.
+Before issuing a merge, inspect the Approved delivery through GitHub. If it is not already merged, require that the PR exists, targets the configured base branch, and has the exact approved Delivered HEAD. A changed head is an unreviewed replacement and must not be merged. Use the repository's normal GitHub PR merge path, never a direct push to the configured base branch. After a successful merge operation, fetch the configured base again and independently verify that the merged PR is the Approved delivery, its actual merged/source head is exactly the approved Delivered HEAD, and the GitHub-reported merge result is present on fetched remote configured base. Record the verified merged identity and remote configured-base commit in `Merging`, then transition `Merging → Done` and confirm authoritative State readback.
 
-If the Approved delivery is already merged, do not accept merged status alone. Verify that it is the Delivered PR, its actual merged/source head equals the approved Delivered HEAD, its resulting merge is present on fetched remote `main`, and no later unreviewed PR head was merged. Only then record `attempt: recovered`; do not attempt a second merge, and complete the same verified `Merging → Done` transition. If the PR is already merged at another head, record both heads and the observed repository state as a blocker; do not transition to `Done`.
+If the Approved delivery is already merged, do not accept merged status alone. Verify that it is the Delivered PR, its target is the configured base branch, its actual merged/source head equals the approved Delivered HEAD, its resulting merge is present on fetched remote configured base, and no later unreviewed PR head was merged. Only then record `attempt: recovered`; do not attempt a second merge, and complete the same verified `Merging → Done` transition. If the PR is already merged at another head, record both heads and the observed repository state as a blocker; do not transition to `Done`.
 
-For a human-required blocker, including an unestablished/changed Approved delivery, merged-head mismatch, merge conflict, ambiguous result, or GitHub/access failure, record the concrete condition, current repository state, required human action, workspace/validation state, and remaining work; prepare `Human Review` with `reason: blocker`; transition to `Human Review`; confirm authoritative readback; and stop. A merge failure must never produce `Done`, and merge recovery must never autonomously choose `Rework`. If the Notion surface is unavailable, report that concrete access failure rather than claiming a state transition.
+For a human-required blocker, including a missing Approved PR or HEAD, a PR base/source-head mismatch, merge conflict, GitHub/auth/access failure, ambiguous merge result, merged identity mismatch, absent merge result on fetched remote configured base, or configured-base fetch/readback failure, record the concrete condition, current repository state, required human action, workspace/validation state, and remaining work; prepare `Human Review` with `reason: blocker`; transition to `Human Review`; confirm authoritative readback; and stop. Do not select an alternate PR, perform an arbitrary repair merge, direct-push the configured base, or choose Rework automatically. A merge failure must never produce `Done`, and merge recovery must never autonomously choose `Rework`. If the Notion surface is unavailable, report that concrete access failure rather than claiming a state transition.
 
-Create a task branch, make only task-related commits, push it, and open a PR against `main`; never merge directly to `main`. After the delivery PR exists, record its full GitHub URL in the existing `delivered_pr` Workpad marker; keep it `none` until a real PR exists and do not synthesize a placeholder. Preserve that same PR identity for Human Review, review, and merging. Before opening the PR, inspect the final diff and status, run applicable repository checks and `git diff --check`, compare the actual result with the Repository Plan as required by the reusable template, apply any needed durable correction, and move the delivered Plan to `docs/plans/completed/`. That move does not make the task terminal. Record material verification, contract decisions, root causes, and artifact changes as PR comments when a PR exists.
+Before starting a new implementation, fetch the latest configured remote base with `git fetch origin "$SYMPHONY_GITHUB_BASE_BRANCH"` and resolve `refs/remotes/origin/$SYMPHONY_GITHUB_BASE_BRANCH`; if either operation fails, do not create a task branch from local HEAD or stale state. Create the task branch from that exact commit, make only task-related commits, and push only the task branch. Create the delivery PR with an explicit `gh pr create --base "$SYMPHONY_GITHUB_BASE_BRANCH" ...`; never direct-push or direct-merge to the configured base branch. Before recording a Human Review delivery, read the PR back from GitHub and require that it exists, targets the configured base branch, sources the delivered task branch, and currently points at the exact `delivered_head`; otherwise no valid delivery exists. Record its full GitHub URL in the existing `delivered_pr` Workpad marker; keep it `none` until a real PR exists and do not synthesize a placeholder. Preserve that same PR identity for Human Review, review, and merging. Before opening the PR, inspect the final diff and status, run applicable repository checks and `git diff --check`, compare the actual result with the Repository Plan as required by the reusable template, apply any needed durable correction, and move the delivered Plan to `docs/plans/completed/`. That move does not make the task terminal. Record material verification, contract decisions, root causes, and artifact changes as PR comments when a PR exists.
+
+The Operator owns branch bootstrap before dispatch: it validates the configured repository and branch, reads an existing configured base without changing it, or creates a missing configured base from the repository default branch's current remote HEAD and performs an authoritative readback. A missing or unreadable default HEAD, branch creation failure, or readback failure blocks readiness. The default branch is only a bootstrap seed; workspace creation, task branches, Rework, PRs, Merging, and Done verification use the configured base. New workspaces must have `origin` equal to the configured repository, the configured base checked out, and the clone-time configured-base commit as `HEAD`. Continuations preserve their workspace and do not clone or reset it. Legacy `origin_main` is equivalent to `origin_base`, and legacy `main` is equivalent to `remote_base`, only when the configured base branch is exactly `main`; otherwise those legacy markers are not evidence for the current base, and history is not rewritten.
 
 ## Independent `chatgpt-shot` review gate
 
