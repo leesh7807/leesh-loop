@@ -171,3 +171,9 @@ Live provider verification이 불가능하면 실제 provider payload와 publica
  별도 워크트리 브랜치에서 계획 복사해서 수행. 작업과 로컬 검증을 마친 뒤 `chatgpt-shot` 리뷰 루프를 수행하라.
 
 ## chatgpt-shot review log
+
+- 리뷰한 HEAD: `7334143e4821d4933aa1e79362d1d45078dc1ad5` (Job `bb10d09a-93d8-45b5-8b0e-1ba18939c694`)
+- verdict: `FINDINGS`
+- `[medium]` Publish UI의 문서/폼 인코딩 미지정으로 브라우저 form 제출 전에 Unicode가 numeric entity로 변형될 수 있다는 finding을 수용했다. 현재 `page()`와 GET 응답 원문에 charset 선언이 없고, 서버 decode는 이미 변형된 ASCII entity를 복구할 수 없음을 확인했다.
+- 적용한 커밋: 수정 커밋 준비 중
+- 검증 결과: `node --test operator/app/test/operator_ui.test.mjs` 통과, `git diff --check` 통과

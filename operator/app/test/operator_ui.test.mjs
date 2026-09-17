@@ -44,6 +44,9 @@ test('the publish surface exposes the configured external links without custom s
   assert.equal(response?.status, 200);
   const page = await response.text();
   assert.match(page, /Leesh Loop Publish/);
+  assert.match(page, /<meta charset="utf-8">/i);
+  assert.match(page, /<form accept-charset="UTF-8" method="post">/i);
+  assert.match(response.headers.get('content-type') || '', /text\/html; charset=utf-8/i);
   assert.match(page, /https:\/\/www.notion.so\/example/);
   assert.match(page, /Symphony Dashboard/);
   assert.doesNotMatch(page, /<style|stylesheet/i);
