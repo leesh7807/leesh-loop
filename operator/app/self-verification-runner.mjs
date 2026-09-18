@@ -345,6 +345,14 @@ async function main() {
     process.stdout.write(`${JSON.stringify(await runner.finalize())}\n`);
     return;
   }
+  if (admitted.resumed && admitted.run.authoritative_task?.id) {
+    const current = await runner.readState();
+    if (['Done', 'Cancelled'].includes(current.state)) {
+      await runner.ensureRuntimeConfig();
+      process.stdout.write(`${JSON.stringify(await runner.finalize())}\n`);
+      return;
+    }
+  }
   await runner.ensureRuntimeConfig();
   await runner.publish(get('--plan'));
   await runner.startProduction();

@@ -386,6 +386,17 @@ async function dashboardOwnership(dashboard, identifier) {
   return payload.status === 'running' || payload.status === 'retrying' || payload.status === 'blocked' ? [payload] : [];
 }
 
+async function dispatchCoordinationRoot(args) {
+  const explicit = argument(args, '--dispatch-coordination-root', false);
+  if (explicit) return explicit;
+  const projectConfigPath = argument(args, '--project-config', false);
+  if (projectConfigPath) {
+    const config = JSON.parse(await readFile(projectConfigPath, 'utf8'));
+    if (typeof config.state_directory === 'string' && config.state_directory) return join(config.state_directory, 'dispatch-coordination');
+  }
+  return process.env.SYMPHONY_DISPATCH_COORDINATION_ROOT;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const command = args.shift();
@@ -403,6 +414,9 @@ async function main() {
   if (command === 'close-stranded') {
     const dashboard = argument(args, '--dashboard');
     const identifier = argument(args, '--issue-identifier');
+    const coordinationRoot = await dispatchCoordinationRoot(args);
+    if (!coordinationRoot) throw new Error('close-stranded requires --dispatch-coordination-root, --project-config, or SYMPHONY_DISPATCH_COORDINATION_ROOT');
+    operator.dispatchCoordinationRoot = coordinationRoot;
     return operator.closeStrandedTask({ taskId: argument(args, '--task-id'), expectedIdentifier: identifier, terminalState: argument(args, '--terminal-state', false) || 'Cancelled', readExecutionOwnership: () => dashboardOwnership(dashboard, identifier) });
   }
   throw new Error('Usage: production-operator <approve|verify-merging|close-stranded> --database-url URL ...');
