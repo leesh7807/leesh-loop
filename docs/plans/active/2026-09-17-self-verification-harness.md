@@ -127,8 +127,9 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 
 ## chatgpt-shot review log
 
-- 리뷰한 HEAD: 없음
-- verdict: 구현 및 PR 생성 후 지정 HEAD로 리뷰 예정
-- finding 수용/기각: 없음
-- 적용한 커밋: 없음
-- 검증 결과: 아직 수행 전
+- 리뷰한 HEAD: `e7d92df8424fdaa77b2671052794f945d8c2f3e5`
+- PR: `https://github.com/leesh7807/leesh-loop/pull/33`
+- verdict: `BLOCKED` — `chatgpt-shot submit`가 `CHATGPT_AUTH_REQUIRED`로 Job을 만들기 전에 실패했다. 사용자 인증 없이는 재시도하지 않는다.
+- finding 수용/기각: 리뷰 결과 문서가 생성되지 않아 finding 없음/수용/기각을 판정하지 않았다.
+- 적용한 커밋: `e7d92df8424fdaa77b2671052794f945d8c2f3e5` (구현)
+- 검증 결과: Node app 33 passed, Publisher 25 passed, Symphony 331 passed/6 skipped, modified Elixir format check passed, `git diff --check` passed. 인증 blocker로 요구된 독립 리뷰는 미완료다.
