@@ -123,7 +123,7 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - finalization/readback: lifecycle evidence에는 admission과 readiness failure가 남았고, `admission_safe=true`, `task_dispatchable=false`, ownership 없음, workspace 없음으로 확인했다. temporary base는 harness cleanup 후 remote에서 absent readback되었고 run bundle은 finalized 및 `collection complete`로 durable하게 남았다. 이는 production workflow 성공을 의미하지 않으며, 인증 blocker를 포함한 실패 경로의 finalization이다.
 - artifact preservation 구현: 성공 경로에서는 GitHub PR patch를 run-scoped durable artifact file과 SHA-256 metadata로 보존한다. workspace/task branch/temporary base cleanup 이후에도 result representation을 재확인할 수 있게 했다.
 - authority check: Runner/Observer는 worker/Tracker state를 직접 mutate하지 않고, Human Review approval과 stranded closure는 일반 Production Operator capability를 통해서만 수행한다. Lifecycle evidence는 best-effort observer이고 production scheduler authority가 아니다.
-- 검증 결과: Node app 전체 40 tests passed; Publisher 26 tests passed; Symphony 전체 333 tests passed, 6 skipped; modified Elixir files format check passed; repository baseline의 unrelated `operator/symphony/lib/symphony_elixir/notion/agent_tool.ex` format drift는 수정하지 않았다; `git diff --check` passed.
+- 검증 결과: Node app 전체 41 tests passed; Publisher 26 tests passed; Symphony 전체 333 tests passed, 6 skipped; modified Elixir files format check passed; repository baseline의 unrelated `operator/symphony/lib/symphony_elixir/notion/agent_tool.ex` format drift는 수정하지 않았다; `git diff --check` passed.
 
 ## chatgpt-shot review log
 
@@ -175,3 +175,12 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - 기각 finding: 없음.
 - 적용한 커밋: `2bc2616fcac0e62d746c2b61eb732b0d4d7d0fb5`
 - 검증 결과: Node app 40 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, format/syntax/`git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
+
+- 리뷰한 HEAD: `bdbda228c557fcd95a3c0e74bcb208dbc5794162`
+- Review Job: `31d944de-08d7-4f1f-b173-ae3fb2036aab`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - cleanup 완료와 finalized 기록 사이 crash 후 temporary base 재생성: 수용. destructive harness cleanup 전에 `finalization.phase=cleanup_started`를 durable하게 기록하고, 다음 invocation은 일반 execution을 재시작하지 않고 cleanup finalization recovery를 수행하도록 수정했다.
+- 기각 finding: 없음.
+- 적용한 커밋: `c239824dbd9fa5674381e66c9499db0c292febc8`
+- 검증 결과: Node app 41 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, cleanup interruption regression 및 format/syntax/`git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
