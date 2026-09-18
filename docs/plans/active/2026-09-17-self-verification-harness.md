@@ -131,5 +131,5 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - PR: `https://github.com/leesh7807/leesh-loop/pull/33`
 - verdict: `BLOCKED` — `chatgpt-shot submit`가 `CHATGPT_AUTH_REQUIRED`로 Job을 만들기 전에 실패했다. 사용자 인증 없이는 재시도하지 않는다.
 - finding 수용/기각: 리뷰 결과 문서가 생성되지 않아 finding 없음/수용/기각을 판정하지 않았다.
-- 적용한 커밋: `e7d92df8424fdaa77b2671052794f945d8c2f3e5` (구현)
-- 검증 결과: Node app 33 passed, Publisher 25 passed, Symphony 331 passed/6 skipped, modified Elixir format check passed, `git diff --check` passed. 인증 blocker로 요구된 독립 리뷰는 미완료다.
+- 적용한 커밋: `e7d92df8424fdaa77b2671052794f945d8c2f3e5` (구현), `795a3d101dacc8b3c4859bbed3f899785e8d129b` (review blocker log), `3f650d4` (scheduler ownership race에서 stranded-closure fence를 되돌리는 후속 안전성 수정)
+- 검증 결과: Node app 33 passed, Publisher 25 passed, Symphony 331 passed/6 skipped, modified Elixir format check passed, `git diff --check` passed. 후속 race 수정은 Node 관련 13 tests와 syntax/diff 검사를 추가 통과했다. 인증 blocker로 지정 HEAD 및 후속 HEAD의 독립 리뷰는 미완료다.
