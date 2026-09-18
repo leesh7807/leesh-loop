@@ -258,3 +258,12 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - 기각 finding: 없음.
 - 적용한 커밋: `fd986b04d0f12b0862e985556445e5f04fcc90fa`
 - 검증 결과: Node app 전체 46 passed, stale admission lock 동시 복구 회귀를 포함한 self-verification 15 passed, `git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
+
+- 리뷰한 HEAD: `8832c9488b9f8011e4b26d76e155984220c605c6`
+- Review Job: `f419b32f-84fa-4566-b51a-05c3e9cca5e4`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - owner metadata 기록 전 100ms stale 판정으로 살아 있는 lock을 reclaim할 수 있음: 수용. SelfVerification, Production Operator task/dispatch lock, Elixir dispatch lock을 공통적으로 완성·fsync한 candidate를 hard-link로 no-replace publish하도록 변경해 공개 lock path에는 완전한 owner record만 나타나게 했다. 기존 directory marker는 migration/recovery 대상으로 atomic rename 처리한다.
+- 기각 finding: 없음.
+- 적용한 커밋: `f828dfce11d41af822d71208efd14f3be91f141c`
+- 검증 결과: Node app 전체 46 passed, Symphony 333 passed/6 skipped, Node syntax, Elixir format, `git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
