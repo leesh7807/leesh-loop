@@ -276,3 +276,12 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - 기각 finding: 없음.
 - 적용한 커밋: `0f8e018a0da17bf23148b8f2dc52a12c057540d5`
 - 검증 결과: Node app 전체 46 passed, Symphony 333 passed/6 skipped, Node syntax, Elixir format, `git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
+
+- 리뷰한 HEAD: `521c25a5cd7fe51d861cb53bbfbad3491ee4752f`
+- Review Job: `df184e6b-e3df-4b08-8698-c3fa5ebfe80e`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - stale lock 복원 중 제3의 owner가 진입하면 기존 holder와 동시에 실행할 수 있음: 수용. pathname 기반 stale reclaim/복원 자체를 제거하고, Node와 Elixir가 동일한 Linux kernel `flock` lock을 non-blocking으로 획득하도록 전환했다. 프로세스 crash/stop 시 kernel이 lock을 자동 해제하므로 stale owner 판정과 복원 race가 사라진다.
+- 기각 finding: 없음.
+- 적용한 커밋: `01e6fa826d20b77c889dc474caa55ebe25885d53`
+- 검증 결과: Node app 전체 46 passed, Symphony 333 passed/6 skipped, Node syntax, Elixir format, `git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
