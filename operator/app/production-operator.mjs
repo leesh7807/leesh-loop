@@ -299,7 +299,9 @@ export class NotionProductionOperator {
     const source = await this.resolveTaskDataSource();
     const current = await this.readTask(taskId, source);
     const approvedHead = propertyText(current.page.properties, propertyNames.approvedHead).toLowerCase();
+    const approvedPr = propertyText(current.page.properties, propertyNames.approvedPr);
     if (stateOf(current.page) !== 'Merging' || !validSha(approvedHead)) throw new Error('Merging task has no valid approved HEAD');
+    if (!approvedPr || String(deliveredPr) !== approvedPr) throw new Error('Merging PR does not match the approved PR identity');
     const pullRequest = await readPullRequest(deliveredPr);
     const currentHead = normalizeSha(pullRequest.headOid || pullRequest.headRefOid);
     if (this.configuredBase && pullRequest.baseRefName !== this.configuredBase) throw new Error(`Merging PR targets ${pullRequest.baseRefName || 'unknown'} instead of configured base ${this.configuredBase}`);

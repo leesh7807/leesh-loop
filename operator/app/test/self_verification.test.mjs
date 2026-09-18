@@ -149,6 +149,19 @@ test('finalization durably marks cleanup before destructive harness cleanup and 
   assert.equal(resumed.finalized, true);
 });
 
+test('cleanup evidence gaps are not overwritten by the pre-cleanup complete disposition', async t => {
+  const store = new SelfVerificationStore(await fixture(t), 'https://app.notion.com/p/3df8a265862580cfb1ebda7e3337d9fa');
+  await store.admit({ bindingFactory: async runId => binding(runId) });
+  await store.setCollectionDisposition('complete', { checkpoint: 'terminal' });
+  const result = await store.finalize({
+    authoritativeReadback: async () => ({ admission_safe: true, task_dispatchable: false, execution_owners: [], conflicting_ownership: [], workspace_absent: true }),
+    cleanupHarness: async () => { await store.noteEvidenceGap({ kind: 'late_cleanup_evidence_loss' }); return { ok: true }; }
+  });
+  assert.equal(result.finalized, false);
+  assert.equal(result.reason, 'collection_is_recoverable_incomplete');
+  assert.equal((await store.read()).collection_disposition.value, 'incomplete');
+});
+
 test('finalized runs retain separate evidence bundles before the next admission', async t => {
   const directory = await fixture(t);
   const database = 'https://app.notion.com/p/3df8a265862580cfb1ebda7e3337d9fa';

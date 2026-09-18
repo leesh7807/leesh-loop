@@ -350,7 +350,11 @@ export class SelfVerificationStore {
     if (!cleanupRun || cleanupRun.finalization?.finalized === true) return { run: cleanupRun, finalized: true, resumed: true };
     const cleanup = await cleanupHarness(cleanupRun);
     if (!cleanup || cleanup.ok !== true) return { run: await this.read(), finalized: false, reason: 'harness_cleanup_failed', cleanup };
-    const finalDisposition = disposition === 'incomplete' && irrecoverableCollection ? 'irrecoverable collection failure' : disposition || 'complete';
+    const afterCleanup = await this.read();
+    const dispositionAfterCleanup = afterCleanup.collection_disposition?.value || afterCleanup.collection_disposition;
+    const irrecoverableAfterCleanup = irrecoverableCollection || Boolean(afterCleanup.evidence?.gaps?.some(gap => gap.irrecoverable === true));
+    if (dispositionAfterCleanup === 'incomplete' && !irrecoverableAfterCleanup) return { run: afterCleanup, finalized: false, reason: 'collection_is_recoverable_incomplete' };
+    const finalDisposition = dispositionAfterCleanup === 'incomplete' && irrecoverableAfterCleanup ? 'irrecoverable collection failure' : dispositionAfterCleanup || 'complete';
     const finalized = await withLock(this.paths.lock, async () => {
       const current = await this.read();
       if (!current || current.finalization?.finalized === true) return current;

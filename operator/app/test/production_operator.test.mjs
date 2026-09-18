@@ -104,12 +104,20 @@ test('Human Review approval rejects PASS text embedded in a FINDINGS review', as
 
 test('Merging rejects a changed PR HEAD and transitions to Rework instead of reusing stale approval', async () => {
   const fake = fakeNotion('Ready');
-  fake.current.properties = { ...page('Merging').properties, 'Approved HEAD': { type: 'rich_text', rich_text: [{ plain_text: headA }] } };
+  fake.current.properties = { ...page('Merging').properties, 'Approved HEAD': { type: 'rich_text', rich_text: [{ plain_text: headA }] }, 'Approved PR': { type: 'rich_text', rich_text: [{ plain_text: '1' }] } };
   const operator = new NotionProductionOperator({ token: 'token', databaseUrl, fetcher: fake.fetcher });
   const result = await operator.verifyMergingApproval({ taskId: 'task', deliveredPr: '1', readPullRequest: async () => ({ headRefOid: headB }) });
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'stale_approval');
   assert.equal(fake.current.properties.State.select.name, 'Rework');
+});
+
+test('Merging rejects an alternate PR identity even when its source HEAD matches', async () => {
+  const fake = fakeNotion('Ready');
+  fake.current.properties = { ...page('Merging').properties, 'Approved HEAD': { type: 'rich_text', rich_text: [{ plain_text: headA }] }, 'Approved PR': { type: 'rich_text', rich_text: [{ plain_text: '1' }] } };
+  const operator = new NotionProductionOperator({ token: 'token', databaseUrl, fetcher: fake.fetcher });
+  await assert.rejects(() => operator.verifyMergingApproval({ taskId: 'task', deliveredPr: '2', readPullRequest: async () => ({ headRefOid: headA }) }), /approved PR identity/);
+  assert.equal(fake.current.properties.State.select.name, 'Merging');
 });
 
 test('stranded closure fences dispatch before terminal transition and refuses a scheduler-ownership race', async () => {
