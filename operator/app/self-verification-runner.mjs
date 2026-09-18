@@ -87,7 +87,7 @@ export class SelfVerificationRunner {
     if (!this.run?.run_id) await this.admit();
     const run = await this.store.read();
     const sourcePlan = await readFile(resolve(planPath), 'utf8');
-    const scopedPlanPath = join(this.store.directory, 'run-plan.md');
+    const scopedPlanPath = join(dirname(this.store.paths.runRecord), 'run-plan.md');
     const runMarker = `<!-- leesh-loop self-verification run: ${run.run_id} -->`;
     const expectedPlanSha = run.logical_task?.scoped_plan_sha256;
     let scopedPlan;
@@ -219,7 +219,7 @@ export class SelfVerificationRunner {
           const event = JSON.parse(line);
           if (event.run_id !== this.run.run_id) continue;
           this.writer.record({ kind: 'symphony_lifecycle', event });
-        } catch { await this.store.noteEvidenceGap({ kind: 'malformed_lifecycle_evidence' }); }
+        } catch { await this.store.noteEvidenceGap({ kind: 'malformed_lifecycle_evidence', irrecoverable: true }); }
       }
       await this.writer.flush();
     } catch (error) {
