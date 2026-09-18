@@ -106,6 +106,15 @@ test('slow or failed evidence persistence does not block production and becomes 
   assert.equal(run.evidence.dropped_count, 1);
 });
 
+test('a later evidence gap downgrades an object-valued complete disposition', async t => {
+  const store = new SelfVerificationStore(await fixture(t), 'https://app.notion.com/p/3df8a265862580cfb1ebda7e3337d9fa');
+  await store.admit({ bindingFactory: async runId => binding(runId) });
+  await store.setCollectionDisposition('complete', { checkpoint: 'terminal' });
+  await store.noteEvidenceGap({ kind: 'late_cleanup_evidence_loss' });
+  const run = await store.read();
+  assert.equal(run.collection_disposition.value, 'incomplete');
+});
+
 test('finalization requires authoritative admission-safe closure and preserves irrecoverable collection failure', async t => {
   const store = new SelfVerificationStore(await fixture(t), 'https://app.notion.com/p/3df8a265862580cfb1ebda7e3337d9fa');
   await store.admit({ bindingFactory: async runId => binding(runId) });

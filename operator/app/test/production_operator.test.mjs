@@ -72,12 +72,34 @@ test('Human Review approval does not retain an approval when the PR head changes
   const operator = new NotionProductionOperator({
     token: 'token', databaseUrl, fetcher: fake.fetcher,
     readPullRequest: async () => ({ state: 'OPEN', headRefOid: ++reads === 1 ? headA : headB }),
-    readReviewJob: async () => ({ id: 'job-1', state: 'completed', targetHead: headA, result: 'PASS' })
+    readReviewJob: async () => ({ id: 'job-1', state: 'completed', targetHead: headA, result: '# Verdict\n\nPASS' })
   });
   const result = await operator.approveHumanReview({ taskId: 'task', deliveredPr: '1', deliveredHead: headA, reviewTargetHead: headA, reviewJobId: 'job-1' });
   assert.equal(result.outcome, 'stale_approval');
   assert.equal(fake.current.properties.State.select.name, 'Rework');
   assert.deepEqual(fake.current.properties['Approved HEAD'].rich_text, []);
+});
+
+test('Human Review approval rejects a review Job without an authoritative target HEAD', async () => {
+  const fake = fakeNotion();
+  const operator = new NotionProductionOperator({
+    token: 'token', databaseUrl, fetcher: fake.fetcher,
+    readPullRequest: async () => ({ state: 'OPEN', headRefOid: headA }),
+    readReviewJob: async () => ({ id: 'job-1', state: 'completed', result: '# Verdict\n\nPASS' })
+  });
+  await assert.rejects(() => operator.approveHumanReview({ taskId: 'task', deliveredPr: '1', deliveredHead: headA, reviewTargetHead: headA, reviewJobId: 'job-1' }), /authoritative target HEAD/);
+  assert.equal(fake.current.properties.State.select.name, 'Human Review');
+});
+
+test('Human Review approval rejects PASS text embedded in a FINDINGS review', async () => {
+  const fake = fakeNotion();
+  const operator = new NotionProductionOperator({
+    token: 'token', databaseUrl, fetcher: fake.fetcher,
+    readPullRequest: async () => ({ state: 'OPEN', headRefOid: headA }),
+    readReviewJob: async () => ({ id: 'job-1', state: 'completed', targetHead: headA, result: '# Verdict\n\nFINDINGS\n\n- [high] PASS is mentioned here' })
+  });
+  await assert.rejects(() => operator.approveHumanReview({ taskId: 'task', deliveredPr: '1', deliveredHead: headA, reviewTargetHead: headA, reviewJobId: 'job-1' }), /completed PASS/);
+  assert.equal(fake.current.properties.State.select.name, 'Human Review');
 });
 
 test('Merging rejects a changed PR HEAD and transitions to Rework instead of reusing stale approval', async () => {
@@ -109,6 +131,13 @@ test('stranded closure fences dispatch before terminal transition and refuses a 
   assert.deepEqual(raceFake.current.properties['Dispatch Fence']?.rich_text || [], []);
 });
 
+test('stranded closure validates the dashboard identifier against the immutable task identity', async () => {
+  const fake = fakeNotion('Ready');
+  const operator = new NotionProductionOperator({ token: 'token', databaseUrl, fetcher: fake.fetcher });
+  await assert.rejects(() => operator.closeStrandedTask({ taskId: 'task', expectedIdentifier: 'OTHER-1', readExecutionOwnership: async () => [] }), /identifier mismatch/);
+  assert.equal(fake.current.properties.State.select.name, 'Ready');
+});
+
 test('production Operator recovers a stale cross-process lock after a crash', async t => {
   const lockRoot = await mkdtemp(join(tmpdir(), 'leesh-loop-operator-lock-'));
   t.after(() => rm(lockRoot, { recursive: true, force: true }));
@@ -120,7 +149,7 @@ test('production Operator recovers a stale cross-process lock after a crash', as
   const operator = new NotionProductionOperator({
     token: 'token', databaseUrl, fetcher: fake.fetcher, operatorLockRoot: lockRoot,
     readPullRequest: async () => ({ state: 'OPEN', headRefOid: headA }),
-    readReviewJob: async () => ({ id: 'job-1', state: 'completed', targetHead: headA, result: 'PASS' })
+    readReviewJob: async () => ({ id: 'job-1', state: 'completed', targetHead: headA, result: '# Verdict\n\nPASS' })
   });
   const result = await operator.approveHumanReview({ taskId: 'task', deliveredPr: '1', deliveredHead: headA, reviewTargetHead: headA, reviewJobId: 'job-1' });
   assert.equal(result.outcome, 'approved');

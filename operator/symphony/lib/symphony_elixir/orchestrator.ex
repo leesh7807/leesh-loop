@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, LifecycleEvidence, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, DispatchCoordination, LifecycleEvidence, StatusDashboard, Tracker, Workspace}
   alias SymphonyElixir.Tracker.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -968,6 +968,37 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp do_dispatch_issue(%State{} = state, issue, attempt, preferred_worker_host) do
+    result =
+      DispatchCoordination.with_lock(issue.identifier, fn ->
+        case refresh_issue_for_dispatch(issue) do
+          {:ok, %Issue{} = refreshed_issue} ->
+            dispatch_after_coordination(state, refreshed_issue, attempt, preferred_worker_host)
+
+          {:skip, reason} ->
+            LifecycleEvidence.record(:dispatch_skipped, %{issue_id: issue.id, identifier: issue.identifier, reason: "stale_or_fenced_issue", detail: inspect(reason)})
+            state
+
+          {:error, reason} ->
+            LifecycleEvidence.record(:tracker_reconciliation_failed, %{scope: "dispatch_coordination_refresh", issue_id: issue.id, identifier: issue.identifier, reason: inspect(reason)})
+            state
+        end
+      end)
+
+    case result do
+      {:ok, next_state} ->
+        next_state
+
+      {:busy, path} ->
+        LifecycleEvidence.record(:dispatch_skipped, %{issue_id: issue.id, identifier: issue.identifier, reason: "dispatch_coordination_busy", coordination_path: path})
+        schedule_dispatch_coordination_retry(state, issue, attempt, preferred_worker_host)
+
+      {:error, reason} ->
+        LifecycleEvidence.record(:tracker_reconciliation_failed, %{scope: "dispatch_coordination_lock", issue_id: issue.id, identifier: issue.identifier, reason: inspect(reason)})
+        schedule_dispatch_coordination_retry(state, issue, attempt, preferred_worker_host)
+    end
+  end
+
+  defp dispatch_after_coordination(%State{} = state, issue, attempt, preferred_worker_host) do
     recipient = self()
     LifecycleEvidence.record(:dispatch_candidate, %{issue_id: issue.id, identifier: issue.identifier, attempt: attempt})
 
@@ -979,6 +1010,19 @@ defmodule SymphonyElixir.Orchestrator do
 
       worker_host ->
         spawn_issue_on_worker_host(state, issue, attempt, recipient, worker_host)
+    end
+  end
+
+  defp schedule_dispatch_coordination_retry(%State{} = state, issue, attempt, preferred_worker_host) do
+    if is_integer(attempt) do
+      schedule_issue_retry(state, issue.id, attempt + 1, %{
+        identifier: issue.identifier,
+        issue_url: issue.url,
+        error: "dispatch coordination unavailable",
+        worker_host: preferred_worker_host
+      })
+    else
+      state
     end
   end
 

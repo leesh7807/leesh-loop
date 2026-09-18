@@ -293,7 +293,11 @@ export class SelfVerificationStore {
       run.evidence = run.evidence || { event_count: 0, dropped_count: 0, gaps: [] };
       run.evidence.dropped_count = (run.evidence.dropped_count || 0) + 1;
       run.evidence.gaps = [...(run.evidence.gaps || []), { at: isoNow(), ...gap }];
-      if (!run.collection_disposition || run.collection_disposition === 'complete') run.collection_disposition = 'incomplete';
+      const disposition = run.collection_disposition?.value || run.collection_disposition;
+      if (!disposition || disposition === 'complete') {
+        if (run.collection_disposition && typeof run.collection_disposition === 'object') run.collection_disposition.value = 'incomplete';
+        else run.collection_disposition = 'incomplete';
+      }
       return run;
     });
   }

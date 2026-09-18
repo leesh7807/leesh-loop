@@ -12,6 +12,7 @@ const requiredTaskProperties = ['Identifier', 'Title', 'State', 'Priority', 'Lab
 const propertyNames = { approvedHead: 'Approved HEAD', approvedReviewJob: 'Approved Review Job', approvedPr: 'Approved PR', dispatchFence: 'Dispatch Fence', closureReason: 'Closure Reason' };
 const localLocks = new Map();
 const operatorLockPollMs = 25;
+const dispatchLockWaitMs = 30_000;
 
 function processAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -106,8 +107,53 @@ async function withTaskLock(key, operation, root = process.env.LEESH_LOOP_OPERAT
   }
 }
 
+async function withDispatchLock(identifier, operation, root = process.env.SYMPHONY_DISPATCH_COORDINATION_ROOT) {
+  if (!root) return operation();
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const lockPath = join(root, `${createHash('sha256').update(String(identifier)).digest('hex')}.lock`);
+  const started = Date.now();
+  while (true) {
+    let handle;
+    try {
+      handle = await open(lockPath, 'wx', 0o600);
+      await handle.writeFile(JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
+      await handle.sync();
+      break;
+    } catch (error) {
+      if (handle) await handle.close().catch(() => {});
+      if (error?.code !== 'EEXIST') throw error;
+      let owner = null;
+      try { owner = JSON.parse(await readFile(lockPath, 'utf8')); } catch (readError) { if (readError?.code !== 'ENOENT' && !(readError instanceof SyntaxError)) throw readError; }
+      if (owner && !processAlive(owner.pid)) {
+        await rm(lockPath, { force: true });
+        continue;
+      }
+      if (!owner) {
+        try {
+          const metadata = await stat(lockPath);
+          if (Date.now() - metadata.mtimeMs > operatorLockPollMs * 4) {
+            await rm(lockPath, { force: true });
+            continue;
+          }
+        } catch (statError) {
+          if (statError?.code !== 'ENOENT') throw statError;
+          continue;
+        }
+      }
+      if (Date.now() - started > dispatchLockWaitMs) throw new Error(`timed out waiting for dispatch coordination lock: ${identifier}`);
+      await new Promise(resolve => setTimeout(resolve, operatorLockPollMs));
+    }
+  }
+  try { return await operation(); } finally { await rm(lockPath, { force: true }); }
+}
+
+function independentReviewPassed(result) {
+  const normalized = String(result || '').replaceAll('\r\n', '\n').trim();
+  return normalized === 'None.' || normalized === '# Verdict\n\nPASS' || normalized === '# Verdict\n\nPASS\n\n# Findings\n\nNone.';
+}
+
 export class NotionProductionOperator {
-  constructor({ token, databaseUrl, configuredBase, fetcher = globalThis.fetch, readPullRequest, readReviewJob, appendWorkpad, operatorLockRoot } = {}) {
+  constructor({ token, databaseUrl, configuredBase, fetcher = globalThis.fetch, readPullRequest, readReviewJob, appendWorkpad, operatorLockRoot, dispatchCoordinationRoot } = {}) {
     if (!token) throw new Error('NOTION_TOKEN is required for production Operator actions');
     this.token = token;
     this.databaseUrl = databaseUrl;
@@ -118,6 +164,7 @@ export class NotionProductionOperator {
     this.readReviewJob = readReviewJob || (async () => null);
     this.appendWorkpadOverride = appendWorkpad;
     this.operatorLockRoot = operatorLockRoot;
+    this.dispatchCoordinationRoot = dispatchCoordinationRoot;
   }
 
   async request(method, path, body) {
@@ -199,8 +246,10 @@ export class NotionProductionOperator {
     if (!pullRequest || String(pullRequest.state || '').toUpperCase() === 'CLOSED' || normalizeSha(pullRequestHead) !== head) throw new Error('delivered PR source HEAD is not the reviewed HEAD');
     if (this.configuredBase && pullRequest.baseRefName !== this.configuredBase) throw new Error(`delivered PR targets ${pullRequest.baseRefName || 'unknown'} instead of configured base ${this.configuredBase}`);
     const job = review || await this.readReviewJob(reviewJobId);
-    if (!job || job.state !== 'completed' || !/\bPASS\b/.test(String(job.result || ''))) throw new Error('independent review Job is not a completed PASS for the delivered HEAD');
-    if (normalizeSha(job.targetHead || reviewTargetHead) !== head) throw new Error('independent review Job target HEAD does not match the delivered HEAD');
+    if (!job || job.state !== 'completed' || !independentReviewPassed(job.result)) throw new Error('independent review Job is not a completed PASS for the delivered HEAD');
+    if (reviewJobId && job.id !== reviewJobId) throw new Error('independent review Job identity does not match the requested Job');
+    if (!validSha(job.targetHead)) throw new Error('independent review Job did not provide an authoritative target HEAD');
+    if (normalizeSha(job.targetHead) !== head) throw new Error('independent review Job target HEAD does not match the delivered HEAD');
     return { head, pullRequest, job, reviewJobId: reviewJobId || job.id };
   }
 
@@ -269,34 +318,40 @@ export class NotionProductionOperator {
     return { ok: true, state: 'Merging', approvedHead, currentHead };
   }
 
-  async closeStrandedTask({ taskId, terminalState = 'Cancelled', readExecutionOwnership, reason = 'self-verification stranded task closure' } = {}) {
+  async closeStrandedTask({ taskId, expectedIdentifier, terminalState = 'Cancelled', readExecutionOwnership, reason = 'self-verification stranded task closure' } = {}) {
     if (typeof readExecutionOwnership !== 'function') throw new Error('stranded closure requires an authoritative execution ownership reader');
     return withTaskLock(`closure:${this.databaseId}:${taskId}`, async () => {
       const source = await this.resolveTaskDataSource();
       await this.ensureOperatorProperties(source);
       const first = await this.readTask(taskId, source);
-      const state = stateOf(first.page);
-      if (!['Ready', 'In Progress', 'Rework'].includes(state)) throw new Error(`stranded closure requires an active dispatch state, got ${state || 'missing'}`);
-      const before = await readExecutionOwnership(taskId);
-      if (before?.length) return { closed: false, reason: 'execution_ownership_exists', ownership: before };
-      const existingFence = propertyText(first.page.properties, propertyNames.dispatchFence);
-      const fence = existingFence || randomUUID();
-      await this.patchTask(taskId, { [propertyNames.dispatchFence]: { rich_text: [{ type: 'text', text: { content: fence } }] } }, source, state);
-      const fenced = await this.readTask(taskId, source);
-      if (propertyText(fenced.page.properties, propertyNames.dispatchFence) !== fence) return { closed: false, reason: 'dispatch_fence_readback_failed' };
-      const after = await readExecutionOwnership(taskId);
-      if (after?.length) {
-        const racedTask = await this.readTask(taskId, source);
-        const racedState = stateOf(racedTask.page);
-        if (['Ready', 'In Progress', 'Rework'].includes(racedState) && propertyText(racedTask.page.properties, propertyNames.dispatchFence) === fence) {
-          await this.patchTask(taskId, { [propertyNames.dispatchFence]: { rich_text: [] } }, source, racedState);
+      const identifier = propertyText(first.page.properties, 'Identifier');
+      if (!identifier) throw new Error('stranded closure task has no immutable Identifier property');
+      if (expectedIdentifier && expectedIdentifier !== identifier) throw new Error(`stranded closure identifier mismatch: expected ${expectedIdentifier}, got ${identifier}`);
+      return withDispatchLock(identifier, async () => {
+        const current = await this.readTask(taskId, source);
+        const state = stateOf(current.page);
+        if (!['Ready', 'In Progress', 'Rework'].includes(state)) throw new Error(`stranded closure requires an active dispatch state, got ${state || 'missing'}`);
+        const before = await readExecutionOwnership(taskId);
+        if (before?.length) return { closed: false, reason: 'execution_ownership_exists', ownership: before };
+        const existingFence = propertyText(current.page.properties, propertyNames.dispatchFence);
+        const fence = existingFence || randomUUID();
+        await this.patchTask(taskId, { [propertyNames.dispatchFence]: { rich_text: [{ type: 'text', text: { content: fence } }] } }, source, state);
+        const fenced = await this.readTask(taskId, source);
+        if (propertyText(fenced.page.properties, propertyNames.dispatchFence) !== fence) return { closed: false, reason: 'dispatch_fence_readback_failed' };
+        const after = await readExecutionOwnership(taskId);
+        if (after?.length) {
+          const racedTask = await this.readTask(taskId, source);
+          const racedState = stateOf(racedTask.page);
+          if (['Ready', 'In Progress', 'Rework'].includes(racedState) && propertyText(racedTask.page.properties, propertyNames.dispatchFence) === fence) {
+            await this.patchTask(taskId, { [propertyNames.dispatchFence]: { rich_text: [] } }, source, racedState);
+          }
+          return { closed: false, reason: 'scheduler_claim_won_race', ownership: after };
         }
-        return { closed: false, reason: 'scheduler_claim_won_race', ownership: after };
-      }
-      await this.appendWorkpad(taskId, `Production Operator stranded closure\nfence: ${fence}\nterminal_state: ${terminalState}\nreason: ${reason}`);
-      await this.patchTask(taskId, { State: { select: { name: terminalState } }, [propertyNames.closureReason]: { rich_text: [{ type: 'text', text: { content: reason } }] } }, source, state);
-      const readback = await this.readTask(taskId, source);
-      return { closed: stateOf(readback.page) === terminalState, state: stateOf(readback.page), fence, taskId };
+        await this.appendWorkpad(taskId, `Production Operator stranded closure\nfence: ${fence}\nterminal_state: ${terminalState}\nreason: ${reason}`);
+        await this.patchTask(taskId, { State: { select: { name: terminalState } }, [propertyNames.closureReason]: { rich_text: [{ type: 'text', text: { content: reason } }] } }, source, state);
+        const readback = await this.readTask(taskId, source);
+        return { closed: stateOf(readback.page) === terminalState, state: stateOf(readback.page), fence, taskId };
+      }, this.dispatchCoordinationRoot);
     }, this.operatorLockRoot);
   }
 }
@@ -337,7 +392,7 @@ async function main() {
   const databaseUrl = argument(args, '--database-url');
   const token = process.env.NOTION_TOKEN || await localEnvironmentValue('NOTION_TOKEN');
   if (!token) throw new Error('NOTION_TOKEN is required');
-  const operator = new NotionProductionOperator({ token, databaseUrl, configuredBase: argument(args, '--configured-base', false) || null, operatorLockRoot: process.env.LEESH_LOOP_OPERATOR_LOCK_ROOT });
+  const operator = new NotionProductionOperator({ token, databaseUrl, configuredBase: argument(args, '--configured-base', false) || null, operatorLockRoot: process.env.LEESH_LOOP_OPERATOR_LOCK_ROOT, dispatchCoordinationRoot: process.env.SYMPHONY_DISPATCH_COORDINATION_ROOT });
   if (command === 'approve') {
     return operator.approveHumanReview({
       taskId: argument(args, '--task-id'), deliveredPr: argument(args, '--delivered-pr'), deliveredHead: argument(args, '--delivered-head'),
@@ -348,7 +403,7 @@ async function main() {
   if (command === 'close-stranded') {
     const dashboard = argument(args, '--dashboard');
     const identifier = argument(args, '--issue-identifier');
-    return operator.closeStrandedTask({ taskId: argument(args, '--task-id'), terminalState: argument(args, '--terminal-state', false) || 'Cancelled', readExecutionOwnership: () => dashboardOwnership(dashboard, identifier) });
+    return operator.closeStrandedTask({ taskId: argument(args, '--task-id'), expectedIdentifier: identifier, terminalState: argument(args, '--terminal-state', false) || 'Cancelled', readExecutionOwnership: () => dashboardOwnership(dashboard, identifier) });
   }
   throw new Error('Usage: production-operator <approve|verify-merging|close-stranded> --database-url URL ...');
 }

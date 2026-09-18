@@ -49,7 +49,7 @@ export class SelfVerificationRunner {
     this.lifecycleEvidencePath = lifecycleEvidencePath;
     this.store = new SelfVerificationStore(this.stateRoot, databaseUrl);
     this.writer = new EvidenceWriter(this.store);
-    this.operator = new NotionProductionOperator({ token, databaseUrl, readPullRequest, readReviewJob, operatorLockRoot: join(this.stateRoot, 'operator-locks') });
+    this.operator = new NotionProductionOperator({ token, databaseUrl, readPullRequest, readReviewJob, operatorLockRoot: join(this.stateRoot, 'operator-locks'), dispatchCoordinationRoot: join(this.store.directory, 'operator-state', 'dispatch-coordination') });
     this.run = null;
     this.configPath = null;
     this.lifecyclePath = null;
@@ -212,6 +212,31 @@ export class SelfVerificationRunner {
     }
   }
 
+  async stopProductionRuntime() {
+    const runtimeDirectory = join(dirname(this.configPath), 'operator-state');
+    const runtimeStatePath = join(runtimeDirectory, 'runtime.json');
+    if (!existsSync(runtimeStatePath)) return { ok: true, skipped: true, reason: 'runtime_not_present' };
+    let dashboard;
+    try { dashboard = await this.observeDashboard(); } catch (error) {
+      return { ok: false, reason: 'runtime_dashboard_unavailable', error: String(error?.message || error) };
+    }
+    const activeOwners = ['running', 'retrying', 'blocked'].flatMap(kind => dashboard[kind] || []);
+    if (activeOwners.length) return { ok: false, reason: 'runtime_has_active_owners', owners: activeOwners };
+    let output;
+    try {
+      output = await command(process.execPath, [join(root, 'operator/app/leesh-loop.mjs'), 'stop', this.configPath]);
+    } catch (error) {
+      return { ok: false, reason: 'runtime_stop_failed', error: String(error?.message || error) };
+    }
+    const remaining = ['runtime.json', 'ownership.json', 'dispatch-authorization.json', 'dispatch-acknowledgement.json']
+      .filter(name => existsSync(join(runtimeDirectory, name)));
+    if (remaining.length) throw new Error(`production runtime stop readback left owned state: ${remaining.join(', ')}`);
+    const result = output ? JSON.parse(output.split(/\r?\n/).filter(Boolean).at(-1)) : null;
+    this.writer.record({ kind: 'runtime_teardown', operator_result: result, authoritative_readback: { owned_runtime_state_absent: true } });
+    await this.writer.flush();
+    return { ok: true, result };
+  }
+
   async finalize() {
     this.run = await this.store.read();
     await this.writer.flush();
@@ -228,7 +253,8 @@ export class SelfVerificationRunner {
       await this.store.noteEvidenceGap({ kind: 'symphony_dashboard_unavailable', error: dashboardError, irrecoverable: false });
     }
     const owners = (dashboard.running || []).filter(item => item.issue_identifier === this.run.authoritative_task.identifier)
-      .concat((dashboard.retrying || []).filter(item => item.issue_identifier === this.run.authoritative_task.identifier));
+      .concat((dashboard.retrying || []).filter(item => item.issue_identifier === this.run.authoritative_task.identifier))
+      .concat((dashboard.blocked || []).filter(item => item.issue_identifier === this.run.authoritative_task.identifier));
     const result = await this.store.finalize({
       authoritativeReadback: async () => ({
         admission_safe: !dashboardError && ['Done', 'Cancelled'].includes(state.state) && owners.length === 0 && !existsSync(workspace),
@@ -239,6 +265,8 @@ export class SelfVerificationRunner {
         final_state: state.state
       }),
       cleanupHarness: async run => {
+        const runtimeCleanup = await this.stopProductionRuntime();
+        if (!runtimeCleanup.ok) return runtimeCleanup;
         const bindingCleanup = await deleteRunBinding(run.binding);
         if (!bindingCleanup.ok) return bindingCleanup;
         await rm(this.configPath, { force: true });
