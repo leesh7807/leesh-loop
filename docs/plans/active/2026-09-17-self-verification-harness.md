@@ -214,3 +214,12 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - 기각 finding: 없음.
 - 적용한 커밋: `2f4aad6efdc6fd4bac77ceab535db59c50e2ecaf`
 - 검증 결과: Node app 44 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, cleanup-gap/alternate-PR regression 및 format/syntax/`git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
+
+- 리뷰한 HEAD: `3cc52c14b358070d4b3e9c79128900738ae9e05f`
+- Review Job: `e0fa5e9c-2b65-4e36-b609-7be218dfe088`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - terminal run이 runtime crash 후 Symphony teardown/workspace cleanup을 복구하지 못함: 수용. terminal resume 시 runtime state 또는 task workspace가 남아 있으면 정상 Operator start 경로로 runtime을 재기동해 Symphony-owned cleanup을 수행한 뒤 finalize한다.
+- 기각 finding: 없음.
+- 적용한 커밋: `18099e1d52608327c38f6768c4b93041cc1f0697`
+- 검증 결과: Node app 44 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, format/syntax/`git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
