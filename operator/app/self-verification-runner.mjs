@@ -285,6 +285,12 @@ export class SelfVerificationRunner {
     return { ok: true, result };
   }
 
+  async waitForWorkspaceAbsence(workspace, deadlineMs = 60_000) {
+    const deadline = Date.now() + deadlineMs;
+    while (existsSync(workspace) && Date.now() < deadline) await sleep(250);
+    return !existsSync(workspace);
+  }
+
   async finalize() {
     this.run = await this.store.read();
     await this.writer.flush();
@@ -353,7 +359,14 @@ async function main() {
       const workspace = join(config.symphony_workspace_root, workspaceKey(admitted.run.authoritative_task.identifier));
       const runtimeState = join(dirname(runner.configPath), 'operator-state', 'runtime.json');
       if (existsSync(runtimeState) || existsSync(workspace)) {
-        try { await runner.startProduction(); } catch (error) {
+        try {
+          await runner.startProduction();
+          if (!await runner.waitForWorkspaceAbsence(workspace)) {
+            const stopped = await runner.stopProductionRuntime();
+            if (!stopped.ok) runner.writer.record({ kind: 'terminal_recovery_runtime_stop_failed', result: stopped });
+            await runner.writer.flush();
+          }
+        } catch (error) {
           runner.writer.record({ kind: 'terminal_recovery_runtime_start_failed', error: String(error?.message || error) });
           await runner.writer.flush();
         }
