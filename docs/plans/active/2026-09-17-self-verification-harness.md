@@ -127,9 +127,17 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 
 ## chatgpt-shot review log
 
-- 리뷰한 HEAD: `e7d92df8424fdaa77b2671052794f945d8c2f3e5`
+- 리뷰한 HEAD: `7f0083feba3f3bb366fec00105798bc9bf9054c1`
 - PR: `https://github.com/leesh7807/leesh-loop/pull/33`
-- verdict: `BLOCKED` — `chatgpt-shot submit`가 `CHATGPT_AUTH_REQUIRED`로 Job을 만들기 전에 실패했다. 사용자 인증 없이는 재시도하지 않는다.
-- finding 수용/기각: 리뷰 결과 문서가 생성되지 않아 finding 없음/수용/기각을 판정하지 않았다.
-- 적용한 커밋: `e7d92df8424fdaa77b2671052794f945d8c2f3e5` (구현), `795a3d101dacc8b3c4859bbed3f899785e8d129b` (review blocker log), `3f650d4` (scheduler ownership race에서 stranded-closure fence를 되돌리는 후속 안전성 수정)
-- 검증 결과: Node app 33 passed, Publisher 25 passed, Symphony 331 passed/6 skipped, modified Elixir format check passed, `git diff --check` passed. 후속 race 수정은 Node 관련 13 tests와 syntax/diff 검사를 추가 통과했다. 인증 blocker로 지정 HEAD 및 후속 HEAD의 독립 리뷰는 미완료다.
+- Review Job: `533e1678-7af8-49c6-a016-8fa16fcc7f2e`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - admission current-run pointer crash window: 수용. namespace의 `runs/<run-id>/run.json`을 scan해 pointer write 전 중단된 non-finalized run도 resume하도록 수정했다.
+  - publisher success 후 local binding crash: 수용. self-verification resume 시 unchanged complete publication을 canonical readback 검증 후 재사용하는 publisher 경로를 추가했다.
+  - observer deadline의 polling 지속: 수용. AbortSignal로 observer loop와 Human Review approval 진입을 중단하며 production state는 변경하지 않도록 수정했다.
+  - dashboard read 실패 후 unsafe finalization: 수용. dashboard unavailable을 collection gap으로 남기고 authoritative ownership readback이 없으면 finalization을 거부한다.
+  - lifecycle evidence cross-run mixing: 수용. 기본 evidence path를 run-scoped로 만들고 ingestion 시 current run ID를 필터링한다.
+  - Production Operator stale lock: 수용. owner PID/lock age를 확인해 process crash 후 stale lock을 회수한다.
+- 기각 finding: 없음.
+- 적용한 커밋: `1334a23` (위 6개 수정과 regression tests)
+- 검증 결과: Node app 35 passed, Publisher 26 passed, production-operator/self-verification 집중 검증 16 passed, syntax 및 `git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
