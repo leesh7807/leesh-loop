@@ -194,3 +194,13 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - 기각 finding: 없음.
 - 적용한 커밋: `b7b2842c76d17d98812eb6506bc2033a14ced2d1`
 - 검증 결과: Node app 42 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, latest Human Review cycle regression 및 format/syntax/`git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
+
+- 리뷰한 HEAD: `63249a3c7e6fe9942e6ef64c843157c2faeed44a`
+- Review Job: `167c542b-a857-47c5-8731-4735e60e5ad5`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - terminal resumable run이 finalization 전에 readiness를 다시 요구: 수용. resumed authoritative task가 이미 `Done`/`Cancelled`이면 runtime을 다시 시작하지 않고 authoritative readback과 finalization recovery로 바로 진입한다.
+  - 일반 `close-stranded` CLI의 coordination lock 미설정: 수용. CLI가 project config 또는 명시적 coordination root를 통해 Symphony와 같은 lock path를 결정하고, 어느 경로도 없으면 안전하게 거절한다.
+- 기각 finding: 없음.
+- 적용한 커밋: `64aac1a8ed7e25dae4f395ffeaa61b926d09b792`
+- 검증 결과: Node app 42 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, format/syntax/`git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
