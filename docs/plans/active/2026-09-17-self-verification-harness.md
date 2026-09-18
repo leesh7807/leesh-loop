@@ -267,3 +267,12 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - 기각 finding: 없음.
 - 적용한 커밋: `f828dfce11d41af822d71208efd14f3be91f141c`
 - 검증 결과: Node app 전체 46 passed, Symphony 333 passed/6 skipped, Node syntax, Elixir format, `git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
+
+- 리뷰한 HEAD: `3ec70a8038f1c185da387efce58f7e5923ac8168`
+- Review Job: `b6600dd5-4c48-4bde-bad7-7b0488eb7a7a`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - stale lock 회수가 새 소유자의 lock을 제거할 수 있음: 수용. reclaim이 관찰한 owner raw content를 atomic rename 후 재확인하고, identity가 바뀌었으면 no-replace hard-link로 새 lock을 복구한 뒤에만 이전 inode를 제거하도록 수정했다. 각 새 owner에는 고유 `lock_id`를 추가했다.
+- 기각 finding: 없음.
+- 적용한 커밋: `0f8e018a0da17bf23148b8f2dc52a12c057540d5`
+- 검증 결과: Node app 전체 46 passed, Symphony 333 passed/6 skipped, Node syntax, Elixir format, `git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
