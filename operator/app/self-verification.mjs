@@ -1,19 +1,17 @@
 #!/usr/bin/env node
 
-import { appendFile, copyFile, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, copyFile, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile as execute } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { readRemoteBranch } from './git-target.mjs';
+import { acquireFileLock } from './file-lock.mjs';
 
 const execFile = promisify(execute);
 const gitEnvironment = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-const DEFAULT_LOCK_WAIT_MS = 30_000;
-const DEFAULT_LOCK_POLL_MS = 25;
 const DEFAULT_EVIDENCE_QUEUE_LIMIT = 256;
 
-const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 const isoNow = () => new Date().toISOString();
 
 function compactDatabaseId(databaseUrl) {
@@ -70,62 +68,8 @@ async function readJson(path) {
   }
 }
 
-function processAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function acquireLock(lockDirectory, { waitMs = DEFAULT_LOCK_WAIT_MS, pollMs = DEFAULT_LOCK_POLL_MS } = {}) {
-  const started = Date.now();
-  await mkdir(dirname(lockDirectory), { recursive: true, mode: 0o700 });
-  while (true) {
-    try {
-      await mkdir(lockDirectory, { mode: 0o700 });
-      await atomicJson(join(lockDirectory, 'owner.json'), { pid: process.pid, started_at: isoNow() });
-      return async () => rm(lockDirectory, { recursive: true, force: true });
-    } catch (error) {
-      if (error?.code !== 'EEXIST') throw error;
-      const owner = await readJson(join(lockDirectory, 'owner.json'));
-      if (owner && !processAlive(owner.pid)) {
-        await reclaimAdmissionLock(lockDirectory);
-        continue;
-      }
-      if (!owner) {
-        try {
-          const metadata = await stat(lockDirectory);
-          if (Date.now() - metadata.mtimeMs > DEFAULT_LOCK_POLL_MS * 4) {
-            await reclaimAdmissionLock(lockDirectory);
-            continue;
-          }
-        } catch (statError) {
-          if (statError?.code !== 'ENOENT') throw statError;
-          continue;
-        }
-      }
-      if (Date.now() - started >= waitMs) throw new Error(`timed out waiting for self-verification admission lock: ${lockDirectory}`);
-      await sleep(pollMs);
-    }
-  }
-}
-
-async function reclaimAdmissionLock(lockDirectory) {
-  const reclaimPath = `${lockDirectory}.reclaim-${process.pid}-${randomUUID()}`;
-  try {
-    await rename(lockDirectory, reclaimPath);
-  } catch (error) {
-    if (error?.code === 'ENOENT') return;
-    throw error;
-  }
-  await rm(reclaimPath, { recursive: true, force: true });
-}
-
 async function withLock(lockDirectory, operation, options) {
-  const release = await acquireLock(lockDirectory, options);
+  const release = await acquireFileLock(lockDirectory, { ...options, label: 'self-verification admission lock' });
   try {
     return await operation();
   } finally {

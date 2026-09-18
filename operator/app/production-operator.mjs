@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
 import { execFile as execute } from 'node:child_process';
-import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { acquireFileLock } from './file-lock.mjs';
 
 const execFile = promisify(execute);
 const notionVersion = '2025-09-03';
@@ -13,16 +14,6 @@ const propertyNames = { approvedHead: 'Approved HEAD', approvedReviewJob: 'Appro
 const localLocks = new Map();
 const operatorLockPollMs = 25;
 const dispatchLockWaitMs = 30_000;
-
-function processAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function notionDatabaseId(url) {
   const match = String(url || '').match(/([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}|[\da-f]{32})(?:[?#/]|$)/i);
@@ -63,44 +54,9 @@ async function withTaskLock(key, operation, root = process.env.LEESH_LOOP_OPERAT
   if (previous) await previous;
   try {
     if (!root) return await operation();
-    await mkdir(root, { recursive: true, mode: 0o700 });
     const lockPath = join(root, `${createHash('sha256').update(key).digest('hex')}.lock`);
-    // The in-process queue protects normal Operator calls. The filesystem
-    // marker makes the identity visible to diagnostics without pretending it
-    // is a second tracker authority.
-    const started = Date.now();
-    while (true) {
-      try {
-        await mkdir(lockPath, { mode: 0o700 });
-        const owner = await open(join(lockPath, 'owner.json'), 'wx', 0o600);
-        await owner.writeFile(JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
-        await owner.close();
-        break;
-      } catch (error) {
-        if (error?.code !== 'EEXIST') throw error;
-        let owner = null;
-        try { owner = JSON.parse(await readFile(join(lockPath, 'owner.json'), 'utf8')); } catch (readError) { if (readError?.code !== 'ENOENT' && !(readError instanceof SyntaxError)) throw readError; }
-        if (owner && !processAlive(owner.pid)) {
-          await rm(lockPath, { recursive: true, force: true });
-          continue;
-        }
-        if (!owner) {
-          try {
-            const metadata = await stat(lockPath);
-            if (Date.now() - metadata.mtimeMs > operatorLockPollMs * 4) {
-              await rm(lockPath, { recursive: true, force: true });
-              continue;
-            }
-          } catch (statError) {
-            if (statError?.code !== 'ENOENT') throw statError;
-            continue;
-          }
-        }
-        if (Date.now() - started > 30_000) throw new Error(`timed out waiting for production Operator lock: ${key}`);
-        await new Promise(resolve => setTimeout(resolve, operatorLockPollMs));
-      }
-    }
-    try { return await operation(); } finally { await rm(lockPath, { recursive: true, force: true }); }
+    const release = await acquireFileLock(lockPath, { pollMs: operatorLockPollMs, label: `production Operator lock: ${key}` });
+    try { return await operation(); } finally { await release(); }
   } finally {
     release();
     if (localLocks.get(key) === current) localLocks.delete(key);
@@ -109,53 +65,9 @@ async function withTaskLock(key, operation, root = process.env.LEESH_LOOP_OPERAT
 
 async function withDispatchLock(identifier, operation, root = process.env.SYMPHONY_DISPATCH_COORDINATION_ROOT) {
   if (!root) return operation();
-  await mkdir(root, { recursive: true, mode: 0o700 });
   const lockPath = join(root, `${createHash('sha256').update(String(identifier)).digest('hex')}.lock`);
-  const started = Date.now();
-  while (true) {
-    let handle;
-    try {
-      handle = await open(lockPath, 'wx', 0o600);
-      await handle.writeFile(JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
-      await handle.sync();
-      break;
-    } catch (error) {
-      if (handle) await handle.close().catch(() => {});
-      if (error?.code !== 'EEXIST') throw error;
-      let owner = null;
-      try { owner = JSON.parse(await readFile(lockPath, 'utf8')); } catch (readError) { if (readError?.code !== 'ENOENT' && !(readError instanceof SyntaxError)) throw readError; }
-      if (owner && !processAlive(owner.pid)) {
-        await reclaimDispatchLock(lockPath);
-        continue;
-      }
-      if (!owner) {
-        try {
-          const metadata = await stat(lockPath);
-          if (Date.now() - metadata.mtimeMs > operatorLockPollMs * 4) {
-            await reclaimDispatchLock(lockPath);
-            continue;
-          }
-        } catch (statError) {
-          if (statError?.code !== 'ENOENT') throw statError;
-          continue;
-        }
-      }
-      if (Date.now() - started > dispatchLockWaitMs) throw new Error(`timed out waiting for dispatch coordination lock: ${identifier}`);
-      await new Promise(resolve => setTimeout(resolve, operatorLockPollMs));
-    }
-  }
-  try { return await operation(); } finally { await rm(lockPath, { force: true }); }
-}
-
-async function reclaimDispatchLock(lockPath) {
-  const reclaimPath = `${lockPath}.reclaim-${process.pid}-${randomUUID()}`;
-  try {
-    await rename(lockPath, reclaimPath);
-  } catch (error) {
-    if (error?.code === 'ENOENT') return;
-    throw error;
-  }
-  await rm(reclaimPath, { force: true });
+  const release = await acquireFileLock(lockPath, { waitMs: dispatchLockWaitMs, pollMs: operatorLockPollMs, label: `dispatch coordination lock: ${identifier}` });
+  try { return await operation(); } finally { await release(); }
 }
 
 function independentReviewPassed(result) {
