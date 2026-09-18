@@ -165,3 +165,13 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - 기각 finding: 없음.
 - 적용한 커밋: `116684193f27ad7d0dfcd7521839e87a8802ebc0`
 - 검증 결과: 수정 후 새 HEAD에 대해 Node app 40 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, format/syntax/`git diff --check` passed. 새 HEAD에 대한 재리뷰가 필요하다.
+
+- 리뷰한 HEAD: `b1211284b889b750944607f32b931bccc445e6ba`
+- Review Job: `5e107f7e-5a4e-4b59-a21f-14807cd74b34`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - namespace 공용 scoped Plan 재사용으로 finalized task가 다음 run에 상속됨: 수용. scoped Plan을 run record 디렉터리에 저장해 run마다 marker/Identifier가 분리되고 resume은 해당 run 파일만 읽도록 수정했다.
+  - malformed lifecycle evidence가 recoverable incomplete로 영구 admission lock을 만듦: 수용. malformed NDJSON gap을 irrecoverable로 기록해 admission-safe closure 후 irrecoverable collection failure로 finalize할 수 있게 했다.
+- 기각 finding: 없음.
+- 적용한 커밋: `2bc2616fcac0e62d746c2b61eb732b0d4d7d0fb5`
+- 검증 결과: Node app 40 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, format/syntax/`git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
