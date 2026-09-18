@@ -100,8 +100,19 @@ defmodule SymphonyElixir.DispatchCoordination do
   end
 
   defp remove_and_retry(path) do
-    File.rm(path)
-    acquire(path)
+    reclaim_path = "#{path}.reclaim-#{System.unique_integer([:positive])}"
+
+    case File.rename(path, reclaim_path) do
+      :ok ->
+        File.rm(reclaim_path)
+        acquire(path)
+
+      {:error, :enoent} ->
+        acquire(path)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   defp process_alive?(pid) when is_integer(pid) and pid > 0 do

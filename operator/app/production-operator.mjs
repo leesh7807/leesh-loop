@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFile as execute } from 'node:child_process';
-import { mkdir, open, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -125,14 +125,14 @@ async function withDispatchLock(identifier, operation, root = process.env.SYMPHO
       let owner = null;
       try { owner = JSON.parse(await readFile(lockPath, 'utf8')); } catch (readError) { if (readError?.code !== 'ENOENT' && !(readError instanceof SyntaxError)) throw readError; }
       if (owner && !processAlive(owner.pid)) {
-        await rm(lockPath, { force: true });
+        await reclaimDispatchLock(lockPath);
         continue;
       }
       if (!owner) {
         try {
           const metadata = await stat(lockPath);
           if (Date.now() - metadata.mtimeMs > operatorLockPollMs * 4) {
-            await rm(lockPath, { force: true });
+            await reclaimDispatchLock(lockPath);
             continue;
           }
         } catch (statError) {
@@ -145,6 +145,17 @@ async function withDispatchLock(identifier, operation, root = process.env.SYMPHO
     }
   }
   try { return await operation(); } finally { await rm(lockPath, { force: true }); }
+}
+
+async function reclaimDispatchLock(lockPath) {
+  const reclaimPath = `${lockPath}.reclaim-${process.pid}-${randomUUID()}`;
+  try {
+    await rename(lockPath, reclaimPath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  await rm(reclaimPath, { force: true });
 }
 
 function independentReviewPassed(result) {

@@ -146,6 +146,18 @@ test('stranded closure validates the dashboard identifier against the immutable 
   assert.equal(fake.current.properties.State.select.name, 'Ready');
 });
 
+test('stranded closure atomically recovers a stale dispatch coordination lock', async t => {
+  const coordinationRoot = await mkdtemp(join(tmpdir(), 'leesh-loop-dispatch-lock-'));
+  t.after(() => rm(coordinationRoot, { recursive: true, force: true }));
+  const keyHash = createHash('sha256').update('SELF-1').digest('hex');
+  await writeFile(join(coordinationRoot, `${keyHash}.lock`), JSON.stringify({ pid: 999999, started_at: new Date().toISOString() }));
+  const fake = fakeNotion('Ready');
+  const operator = new NotionProductionOperator({ token: 'token', databaseUrl, fetcher: fake.fetcher, dispatchCoordinationRoot: coordinationRoot });
+  const result = await operator.closeStrandedTask({ taskId: 'task', readExecutionOwnership: async () => [] });
+  assert.equal(result.closed, true);
+  assert.equal(fake.current.properties.State.select.name, 'Cancelled');
+});
+
 test('production Operator recovers a stale cross-process lock after a crash', async t => {
   const lockRoot = await mkdtemp(join(tmpdir(), 'leesh-loop-operator-lock-'));
   t.after(() => rm(lockRoot, { recursive: true, force: true }));
