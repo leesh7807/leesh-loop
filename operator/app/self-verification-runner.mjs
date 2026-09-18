@@ -12,6 +12,12 @@ import { admissionNamespace, EvidenceWriter, SelfVerificationStore, createRunBin
 const execFile = promisify(execute);
 const root = resolve(dirname(new URL(import.meta.url).pathname), '../..');
 const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
+const sleepWithSignal = (ms, signal) => new Promise(resolveSleep => {
+  if (signal?.aborted) return resolveSleep();
+  const timer = setTimeout(() => { signal?.removeEventListener('abort', wake); resolveSleep(); }, ms);
+  const wake = () => { clearTimeout(timer); signal?.removeEventListener('abort', wake); resolveSleep(); };
+  signal?.addEventListener('abort', wake, { once: true });
+});
 
 function localEnvironmentToken() {
   try {
@@ -59,7 +65,7 @@ export class SelfVerificationRunner {
     });
     this.run = admitted.run;
     this.operator.configuredBase = this.run.binding.effectiveConfiguredBase;
-    this.lifecyclePath = this.lifecycleEvidencePath || join(this.store.directory, 'symphony-lifecycle.ndjson');
+    this.lifecyclePath = this.lifecycleEvidencePath || join(dirname(this.store.paths.runRecord), 'symphony-lifecycle.ndjson');
     await this.store.update(run => {
       run.observation = { ...(run.observation || {}), resumed: admitted.resumed, lifecycle_evidence_path: this.lifecyclePath };
       return run;
@@ -90,7 +96,7 @@ export class SelfVerificationRunner {
         await command('npm', ['ci'], { cwd: join(root, 'operator/notion_publisher') });
         await command('npm', ['run', 'build'], { cwd: join(root, 'operator/notion_publisher') });
       }
-      const output = await command(process.execPath, [publisher, '--plan', resolve(planPath), '--config', join(root, 'operator/notion_publisher/examples/publisher-config.json'), '--database-url', this.databaseUrl]);
+      const output = await command(process.execPath, [publisher, '--plan', resolve(planPath), '--config', join(root, 'operator/notion_publisher/examples/publisher-config.json'), '--database-url', this.databaseUrl, '--resume-existing']);
       const lines = output.split(/\r?\n/).filter(Boolean);
       const published = JSON.parse(lines.at(-1));
       return { id: published.page_id, identifier: published.identifier, url: published.url };
@@ -132,23 +138,25 @@ export class SelfVerificationRunner {
   async waitForState(states, { deadlineMs = 3_600_000, onHumanReview } = {}) {
     const wanted = new Set(states);
     let previous = null;
-    const operation = async () => {
-      while (true) {
+    const operation = async signal => {
+      while (!signal?.aborted) {
         const observation = await this.readState();
+        if (signal?.aborted) break;
         if (observation.state !== previous) {
           this.writer.record({ kind: 'tracker_state_observed', state: observation.state });
           previous = observation.state;
         }
-        if (observation.state === 'Human Review' && onHumanReview) {
+        if (observation.state === 'Human Review' && onHumanReview && !signal?.aborted) {
           const approval = await onHumanReview({ run: await this.store.read(), task: observation.page, operator: this.operator });
-          if (approval) {
+          if (approval && !signal?.aborted) {
             const result = await this.operator.approveHumanReview(approval);
             this.writer.record({ kind: 'operator_approval', result });
           }
         }
         if (wanted.has(observation.state)) return observation;
-        await sleep(this.pollMs);
+        await sleepWithSignal(this.pollMs, signal);
       }
+      return { timed_out: true };
     };
     return runWithDeadline(operation, deadlineMs, async () => {
       this.writer.record({ kind: 'observer_deadline', states: [...wanted] });
@@ -171,7 +179,11 @@ export class SelfVerificationRunner {
     try {
       const contents = await readFile(this.lifecyclePath, 'utf8');
       for (const line of contents.split(/\r?\n/).filter(Boolean)) {
-        try { this.writer.record({ kind: 'symphony_lifecycle', event: JSON.parse(line) }); } catch { await this.store.noteEvidenceGap({ kind: 'malformed_lifecycle_evidence' }); }
+        try {
+          const event = JSON.parse(line);
+          if (event.run_id !== this.run.run_id) continue;
+          this.writer.record({ kind: 'symphony_lifecycle', event });
+        } catch { await this.store.noteEvidenceGap({ kind: 'malformed_lifecycle_evidence' }); }
       }
       await this.writer.flush();
     } catch (error) {
@@ -209,15 +221,20 @@ export class SelfVerificationRunner {
     const workspace = join(config.symphony_workspace_root, workspaceKey(this.run.authoritative_task.identifier));
     const state = await this.readState();
     let dashboard;
-    try { dashboard = await this.observeDashboard(); } catch { dashboard = { error: 'unavailable' }; }
+    let dashboardError = null;
+    try { dashboard = await this.observeDashboard(); } catch (error) {
+      dashboard = { error: 'unavailable' };
+      dashboardError = String(error?.message || error);
+      await this.store.noteEvidenceGap({ kind: 'symphony_dashboard_unavailable', error: dashboardError, irrecoverable: false });
+    }
     const owners = (dashboard.running || []).filter(item => item.issue_identifier === this.run.authoritative_task.identifier)
       .concat((dashboard.retrying || []).filter(item => item.issue_identifier === this.run.authoritative_task.identifier));
     const result = await this.store.finalize({
       authoritativeReadback: async () => ({
-        admission_safe: ['Done', 'Cancelled'].includes(state.state) && owners.length === 0 && !existsSync(workspace),
+        admission_safe: !dashboardError && ['Done', 'Cancelled'].includes(state.state) && owners.length === 0 && !existsSync(workspace),
         task_dispatchable: !['Done', 'Cancelled'].includes(state.state),
         execution_owners: owners,
-        conflicting_ownership: [],
+        conflicting_ownership: dashboardError ? [{ source: 'symphony_dashboard', error: dashboardError }] : [],
         workspace_absent: !existsSync(workspace),
         final_state: state.state
       }),

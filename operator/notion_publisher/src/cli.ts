@@ -6,10 +6,10 @@ import { PublicationError } from "./core.js";
 import { NotionClient } from "./notion.js";
 import { publish, type PublishResult } from "./publisher.js";
 
-export async function publishPlanFile(planPath: string, configPath: string, databaseUrl: string, client: NotionClient): Promise<PublishResult> {
+export async function publishPlanFile(planPath: string, configPath: string, databaseUrl: string, client: NotionClient, options: { allowCompletedExisting?: boolean } = {}): Promise<PublishResult> {
   const plan = await readFile(planPath, "utf8");
   const { policy } = await loadConfig(configPath);
-  return publish({ plan, databaseUrl, fallbackTitle: basename(planPath), client, config: { policy } });
+  return publish({ plan, databaseUrl, fallbackTitle: basename(planPath), client, config: { policy }, allowCompletedExisting: options.allowCompletedExisting });
 }
 
 async function localEnvironment(): Promise<Record<string, string>> {
@@ -34,7 +34,7 @@ async function main(): Promise<void> {
   const local = await localEnvironment();
   const token = environmentValue("NOTION_TOKEN", local);
   if (!token) throw new PublicationError("missing NOTION_TOKEN");
-  console.log(JSON.stringify(await publishPlanFile(resolve(planArg), resolve(configArg), databaseUrl, new NotionClient(token))));
+  console.log(JSON.stringify(await publishPlanFile(resolve(planArg), resolve(configArg), databaseUrl, new NotionClient(token), { allowCompletedExisting: args.includes("--resume-existing") })));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

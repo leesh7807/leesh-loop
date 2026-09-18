@@ -242,6 +242,15 @@ test("completed publications are never repaired even if Plan content is later ch
   assert.deepEqual(planPage.children, buildPlanBlocks("tampered"));
 });
 
+test("self-verification resume reuses an unchanged completed publication", async () => {
+  const { plan, config } = await inputs("# Resumable\naccepted");
+  const client = new PublicationFake();
+  const first = await publishPlanFile(plan, config, DATABASE_URL, client);
+  const resumed = await publishPlanFile(plan, config, DATABASE_URL, client, { allowCompletedExisting: true });
+  assert.equal(resumed.page_id, first.page_id);
+  assert.equal(resumed.identifier, first.identifier);
+});
+
 test("empty Plan is rejected before Notion mutation", async () => {
   const client = new PublicationFake();
   await assert.rejects(publish({ plan: " \n", databaseUrl: DATABASE_URL, client, config: { policy: DEFAULT_POLICY } }), /non-empty/);

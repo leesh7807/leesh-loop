@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { EvidenceWriter, SelfVerificationStore, admissionNamespace } from '../self-verification.mjs';
+import { EvidenceWriter, SelfVerificationStore, admissionNamespace, runWithDeadline } from '../self-verification.mjs';
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-self-verification-'));
@@ -57,6 +57,17 @@ test('an interrupted lock marker without an owner is recoverable', async t => {
   await utimes(store.paths.lock, stale, stale);
   const admitted = await store.admit({ bindingFactory: async runId => binding(runId) });
   assert.equal(admitted.resumed, false);
+});
+
+test('an admitted run record is discoverable if the current-run pointer write is interrupted', async t => {
+  const directory = await fixture(t);
+  const database = 'https://app.notion.com/p/3df8a265862580cfb1ebda7e3337d9fa';
+  const first = new SelfVerificationStore(directory, database);
+  const admitted = await first.admit({ bindingFactory: async runId => binding(runId, database) });
+  await rm(first.paths.run, { force: true });
+  const resumed = await new SelfVerificationStore(directory, database).admit({ bindingFactory: async () => { throw new Error('must resume the orphaned durable run'); } });
+  assert.equal(resumed.resumed, true);
+  assert.equal(resumed.run.run_id, admitted.run.run_id);
 });
 
 test('logical task binding is idempotent and never republishes an acknowledged task', async t => {
@@ -147,4 +158,19 @@ test('artifact content is retained in the run bundle independently of cleanup me
   assert.equal(run.artifact.source, 'GitHub PR patch');
   assert.match(await readFile(run.artifact.path, 'utf8'), /Observed contract/);
   assert.equal((await store.read()).artifact.sha256.length, 64);
+});
+
+test('observer deadline aborts the resumable observation loop without changing production state', async () => {
+  let iterations = 0;
+  const result = await runWithDeadline(async signal => {
+    while (!signal.aborted) {
+      iterations += 1;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    return { stopped: true };
+  }, 15);
+  const observedAtTimeout = iterations;
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.deepEqual(result, { timed_out: true });
+  assert.equal(iterations, observedAtTimeout);
 });

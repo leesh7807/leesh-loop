@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { NotionProductionOperator } from '../production-operator.mjs';
 
@@ -103,4 +107,23 @@ test('stranded closure fences dispatch before terminal transition and refuses a 
   assert.equal(raced.closed, false);
   assert.equal(raceFake.current.properties.State.select.name, 'Ready');
   assert.deepEqual(raceFake.current.properties['Dispatch Fence']?.rich_text || [], []);
+});
+
+test('production Operator recovers a stale cross-process lock after a crash', async t => {
+  const lockRoot = await mkdtemp(join(tmpdir(), 'leesh-loop-operator-lock-'));
+  t.after(() => rm(lockRoot, { recursive: true, force: true }));
+  const keyHash = createHash('sha256').update('approval:3df8a265862580cfb1ebda7e3337d9fa:task').digest('hex');
+  const lockPath = join(lockRoot, `${keyHash}.lock`);
+  await mkdir(lockPath, { recursive: true });
+  await writeFile(join(lockPath, 'owner.json'), JSON.stringify({ pid: 999999, started_at: new Date().toISOString() }));
+  const fake = fakeNotion();
+  const operator = new NotionProductionOperator({
+    token: 'token', databaseUrl, fetcher: fake.fetcher, operatorLockRoot: lockRoot,
+    readPullRequest: async () => ({ state: 'OPEN', headRefOid: headA }),
+    readReviewJob: async () => ({ id: 'job-1', state: 'completed', targetHead: headA, result: 'PASS' })
+  });
+  const result = await operator.approveHumanReview({ taskId: 'task', deliveredPr: '1', deliveredHead: headA, reviewTargetHead: headA, reviewJobId: 'job-1' });
+  assert.equal(result.outcome, 'approved');
+  assert.equal(fake.current.properties.State.select.name, 'Merging');
+  await assert.rejects(readFile(lockPath));
 });

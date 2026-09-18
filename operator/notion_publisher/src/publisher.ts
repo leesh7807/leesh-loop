@@ -2,7 +2,7 @@ import { buildTaskProperties, deriveIdentifier, extractPlanTitle, type Policy, P
 import { type DatabaseBinding, type NotionClient } from "./notion.js";
 
 export type PublisherConfig = { policy: Policy };
-export type PublishInput = { plan: string; databaseUrl: string; fallbackTitle?: string; client: NotionClient; config: PublisherConfig };
+export type PublishInput = { plan: string; databaseUrl: string; fallbackTitle?: string; client: NotionClient; config: PublisherConfig; allowCompletedExisting?: boolean };
 export type PublishResult = { identifier: string; page_id: string; url?: string };
 const publicationLocks = new Map<string, Promise<void>>();
 
@@ -16,7 +16,7 @@ async function withPublicationLock<T>(key: string, operation: () => Promise<T>):
   finally { release(); if (publicationLocks.get(key) === current) publicationLocks.delete(key); }
 }
 
-export async function publish({ plan, databaseUrl, fallbackTitle, client, config }: PublishInput): Promise<PublishResult> {
+export async function publish({ plan, databaseUrl, fallbackTitle, client, config, allowCompletedExisting = false }: PublishInput): Promise<PublishResult> {
   const database = resolvePublishDatabase(databaseUrl);
   if (!plan.trim()) throw new PublicationError("Plan content must be non-empty");
   const title = extractPlanTitle(plan, fallbackTitle);
@@ -27,7 +27,11 @@ export async function publish({ plan, databaseUrl, fallbackTitle, client, config
     const existing = await client.findPublication(binding.taskDataSourceId, config.policy, identifier);
 
     if (existing) {
-      if (existing.complete) throw new PublicationError(`duplicate publication: ${identifier} already exists`);
+      if (existing.complete) {
+        if (!allowCompletedExisting) throw new PublicationError(`duplicate publication: ${identifier} already exists`);
+        await client.validateCanonicalRepresentation(existing.pageId, plan, binding, identifier, title, config.policy.identifier);
+        return { identifier, page_id: existing.pageId, url: existing.url };
+      }
       try { await client.repairIncomplete(existing.pageId, plan, binding, identifier, title, config.policy.identifier); await client.finalizePublication(existing.pageId, config.policy); }
       catch (error) { if (error instanceof PublicationError) throw error; throw new PublicationError(`provider/API failure while repairing incomplete Plan publication; retry is safe: ${error instanceof Error ? error.message : "unknown error"}`); }
       return { identifier, page_id: existing.pageId, url: existing.url };

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFile as execute } from 'node:child_process';
-import { mkdir, open, readFile, rm } from 'node:fs/promises';
+import { mkdir, open, readFile, rm, stat } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -11,6 +11,17 @@ const notionVersion = '2025-09-03';
 const requiredTaskProperties = ['Identifier', 'Title', 'State', 'Priority', 'Labels', 'Blocked By', 'Plan'];
 const propertyNames = { approvedHead: 'Approved HEAD', approvedReviewJob: 'Approved Review Job', approvedPr: 'Approved PR', dispatchFence: 'Dispatch Fence', closureReason: 'Closure Reason' };
 const localLocks = new Map();
+const operatorLockPollMs = 25;
+
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function notionDatabaseId(url) {
   const match = String(url || '').match(/([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}|[\da-f]{32})(?:[?#/]|$)/i);
@@ -66,8 +77,26 @@ async function withTaskLock(key, operation, root = process.env.LEESH_LOOP_OPERAT
         break;
       } catch (error) {
         if (error?.code !== 'EEXIST') throw error;
+        let owner = null;
+        try { owner = JSON.parse(await readFile(join(lockPath, 'owner.json'), 'utf8')); } catch (readError) { if (readError?.code !== 'ENOENT' && !(readError instanceof SyntaxError)) throw readError; }
+        if (owner && !processAlive(owner.pid)) {
+          await rm(lockPath, { recursive: true, force: true });
+          continue;
+        }
+        if (!owner) {
+          try {
+            const metadata = await stat(lockPath);
+            if (Date.now() - metadata.mtimeMs > operatorLockPollMs * 4) {
+              await rm(lockPath, { recursive: true, force: true });
+              continue;
+            }
+          } catch (statError) {
+            if (statError?.code !== 'ENOENT') throw statError;
+            continue;
+          }
+        }
         if (Date.now() - started > 30_000) throw new Error(`timed out waiting for production Operator lock: ${key}`);
-        await new Promise(resolve => setTimeout(resolve, 25));
+        await new Promise(resolve => setTimeout(resolve, operatorLockPollMs));
       }
     }
     try { return await operation(); } finally { await rm(lockPath, { recursive: true, force: true }); }

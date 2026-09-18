@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { appendFile, copyFile, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, copyFile, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile as execute } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
@@ -145,7 +145,20 @@ export class SelfVerificationStore {
   }
 
   async read() {
-    const run = await readJson(this.currentRunPath);
+    const current = await readJson(this.currentRunPath);
+    const records = new Map(current?.run_id ? [[current.run_id, current]] : []);
+    try {
+      for (const entry of await readdir(join(this.directory, 'runs'), { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const candidate = await readJson(join(this.directory, 'runs', entry.name, 'run.json'));
+        if (candidate?.run_id) records.set(candidate.run_id, candidate);
+      }
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    const resumable = [...records.values()].filter(run => run.finalization?.finalized !== true);
+    if (resumable.length > 1) throw new Error(`multiple non-finalized self-verification runs found for namespace ${this.namespace}`);
+    const run = resumable[0] || current;
     if (run?.run_id) this.setActiveRun(run.run_id);
     return run;
   }
@@ -429,12 +442,16 @@ export async function writeRunProjectConfig(projectConfigPath, run, outputPath, 
 
 export async function runWithDeadline(operation, deadlineMs, onTimeout = () => {}) {
   if (!Number.isFinite(deadlineMs) || deadlineMs <= 0) return operation();
+  const controller = new AbortController();
   let timeout;
   const deadline = new Promise(resolveDeadline => {
-    timeout = setTimeout(async () => { await onTimeout(); resolveDeadline({ timed_out: true }); }, deadlineMs);
+    timeout = setTimeout(() => {
+      controller.abort();
+      Promise.resolve().then(onTimeout).catch(() => {}).finally(() => resolveDeadline({ timed_out: true }));
+    }, deadlineMs);
   });
   try {
-    return await Promise.race([Promise.resolve().then(operation), deadline]);
+    return await Promise.race([Promise.resolve().then(() => operation(controller.signal)), deadline]);
   } finally {
     clearTimeout(timeout);
   }
