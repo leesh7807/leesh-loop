@@ -208,6 +208,7 @@ export class SelfVerificationStore {
         runtime_id_history: runtimeId ? [runtimeId] : [],
         evidence: { event_count: 0, dropped_count: 0, gaps: [] },
         collection_disposition: null,
+        binding_status: 'pending',
         finalization: { finalized: false, phase: 'admission_committed', finalized_at: null, cleanup: null },
         created_at: isoNow(),
         updated_at: isoNow()
@@ -421,16 +422,29 @@ async function git(args, cwd) {
   }
 }
 
-export async function createRunBinding({ repository, configuredBase, trackerDatabase, runId }) {
+export async function planRunBinding({ repository, configuredBase, trackerDatabase, runId }) {
   if (typeof repository !== 'string' || repository.trim() === '') throw new Error('production repository is required');
   if (typeof configuredBase !== 'string' || configuredBase.trim() === '') throw new Error('configured base branch is required');
   const seedCommit = await readRemoteBranch(repository, configuredBase);
   if (!seedCommit) throw new Error(`configured base branch has no authoritative remote HEAD: ${configuredBase}`);
   const temporaryBase = `self-verification/${runId}`;
-  await git(['push', repository, `${seedCommit}:refs/heads/${temporaryBase}`]);
-  const readback = await readRemoteBranch(repository, temporaryBase);
-  if (readback !== seedCommit) throw new Error(`temporary base readback mismatch: expected ${seedCommit}, got ${readback || 'missing'}`);
   return { repository, configuredBase, seedCommit, temporaryBase, trackerDatabase };
+}
+
+export async function materializeRunBinding(binding) {
+  assertBinding(binding);
+  const existing = await readRemoteBranch(binding.repository, binding.temporaryBase);
+  if (existing && existing !== binding.seedCommit) throw new Error(`temporary base already exists at a different commit: ${binding.temporaryBase}`);
+  if (!existing) await git(['push', binding.repository, `${binding.seedCommit}:refs/heads/${binding.temporaryBase}`]);
+  const readback = await readRemoteBranch(binding.repository, binding.temporaryBase);
+  if (readback !== binding.seedCommit) throw new Error(`temporary base readback mismatch: expected ${binding.seedCommit}, got ${readback || 'missing'}`);
+  return binding;
+}
+
+export async function createRunBinding({ repository, configuredBase, trackerDatabase, runId }) {
+  const binding = await planRunBinding({ repository, configuredBase, trackerDatabase, runId });
+  await materializeRunBinding(binding);
+  return binding;
 }
 
 export async function deleteRunBinding(binding) {

@@ -7,7 +7,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { NotionProductionOperator } from './production-operator.mjs';
-import { admissionNamespace, EvidenceWriter, SelfVerificationStore, createRunBinding, deleteRunBinding, runWithDeadline, writeRunProjectConfig } from './self-verification.mjs';
+import { admissionNamespace, EvidenceWriter, SelfVerificationStore, deleteRunBinding, materializeRunBinding, planRunBinding, runWithDeadline, writeRunProjectConfig } from './self-verification.mjs';
 
 const execFile = promisify(execute);
 const root = resolve(dirname(new URL(import.meta.url).pathname), '../..');
@@ -37,6 +37,12 @@ function workspaceKey(identifier) {
   return `${safe}--${createHash('sha256').update(identifier).digest('hex').slice(0, 16)}`;
 }
 
+export function latestHumanReviewBlock(workpad) {
+  const text = String(workpad || '');
+  const starts = [...text.matchAll(/^Human Review\s*$/gim)].map(match => match.index);
+  return starts.length ? text.slice(starts.at(-1)) : text;
+}
+
 export class SelfVerificationRunner {
   constructor({ projectConfigPath, databaseUrl, stateRoot, repository, configuredBase, token = process.env.NOTION_TOKEN || localEnvironmentToken(), pollMs = 1_000, lifecycleEvidencePath, readPullRequest, readReviewJob } = {}) {
     if (!projectConfigPath || !databaseUrl || !stateRoot || !repository || !configuredBase) throw new Error('projectConfigPath, databaseUrl, stateRoot, repository, and configuredBase are required');
@@ -61,9 +67,13 @@ export class SelfVerificationRunner {
     if (projectConfig.github_base_branch !== this.configuredBase) throw new Error('self-verification configured base does not match the persistent Project binding');
     if (projectConfig.notion_database_url && admissionNamespace(projectConfig.notion_database_url) !== this.store.namespace) throw new Error('self-verification tracker database does not match the persistent Project binding');
     const admitted = await this.store.admit({
-      bindingFactory: runId => createRunBinding({ repository: this.repository, configuredBase: this.configuredBase, trackerDatabase: this.databaseUrl, runId })
+      bindingFactory: runId => planRunBinding({ repository: this.repository, configuredBase: this.configuredBase, trackerDatabase: this.databaseUrl, runId })
     });
     this.run = admitted.run;
+    if ((this.run.binding_status || 'ready') === 'pending') {
+      const binding = await materializeRunBinding(this.run.binding);
+      this.run = await this.store.update(run => { run.binding_status = 'ready'; run.binding = binding; return run; });
+    }
     this.operator.configuredBase = this.run.binding.effectiveConfiguredBase;
     this.lifecyclePath = this.lifecycleEvidencePath || join(dirname(this.store.paths.runRecord), 'symphony-lifecycle.ndjson');
     await this.store.update(run => {
@@ -191,7 +201,7 @@ export class SelfVerificationRunner {
 
   async approvalFromWorkpad() {
     const taskId = this.run.authoritative_task.id;
-    const workpad = (await this.operator.readWorkpad(taskId)).join('\n');
+    const workpad = latestHumanReviewBlock((await this.operator.readWorkpad(taskId)).join('\n'));
     const deliveredPr = workpad.match(/delivered_pr:\s*(https?:\/\/\S+)/i)?.[1];
     const deliveredHead = workpad.match(/delivered_head:\s*([0-9a-f]{40})/i)?.[1];
     const reviewJobId = workpad.match(/(?:review_job|job[_ ]id|Review Job ID):\s*([0-9a-f-]{36})/i)?.[1];
@@ -232,7 +242,7 @@ export class SelfVerificationRunner {
   async preserveArtifact() {
     const state = await this.readState();
     if (state.state !== 'Done') return { skipped: true, state: state.state };
-    const workpad = (await this.operator.readWorkpad(this.run.authoritative_task.id)).join('\n');
+    const workpad = latestHumanReviewBlock((await this.operator.readWorkpad(this.run.authoritative_task.id)).join('\n'));
     const deliveredPr = workpad.match(/delivered_pr:\s*(https?:\/\/\S+)/i)?.[1];
     const deliveredHead = workpad.match(/delivered_head:\s*([0-9a-f]{40})/i)?.[1];
     if (!deliveredPr || !deliveredHead) {
