@@ -123,7 +123,7 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - finalization/readback: lifecycle evidence에는 admission과 readiness failure가 남았고, `admission_safe=true`, `task_dispatchable=false`, ownership 없음, workspace 없음으로 확인했다. temporary base는 harness cleanup 후 remote에서 absent readback되었고 run bundle은 finalized 및 `collection complete`로 durable하게 남았다. 이는 production workflow 성공을 의미하지 않으며, 인증 blocker를 포함한 실패 경로의 finalization이다.
 - artifact preservation 구현: 성공 경로에서는 GitHub PR patch를 run-scoped durable artifact file과 SHA-256 metadata로 보존한다. workspace/task branch/temporary base cleanup 이후에도 result representation을 재확인할 수 있게 했다.
 - authority check: Runner/Observer는 worker/Tracker state를 직접 mutate하지 않고, Human Review approval과 stranded closure는 일반 Production Operator capability를 통해서만 수행한다. Lifecycle evidence는 best-effort observer이고 production scheduler authority가 아니다.
-- 검증 결과: Node app 전체 42 tests passed; Publisher 26 tests passed; Symphony 전체 333 tests passed, 6 skipped; modified Elixir files format check passed; repository baseline의 unrelated `operator/symphony/lib/symphony_elixir/notion/agent_tool.ex` format drift는 수정하지 않았다; `git diff --check` passed.
+- 검증 결과: Node app 전체 44 tests passed; Publisher 26 tests passed; Symphony 전체 333 tests passed, 6 skipped; modified Elixir files format check passed; repository baseline의 unrelated `operator/symphony/lib/symphony_elixir/notion/agent_tool.ex` format drift는 수정하지 않았다; `git diff --check` passed.
 
 ## chatgpt-shot review log
 
@@ -204,3 +204,13 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - 기각 finding: 없음.
 - 적용한 커밋: `64aac1a8ed7e25dae4f395ffeaa61b926d09b792`
 - 검증 결과: Node app 42 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, format/syntax/`git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
+
+- 리뷰한 HEAD: `f2ea07a3b00ffa911511af0e4de844d56307ab68`
+- Review Job: `c56fd59e-6d0a-4905-b727-0a5d52a1cf7d`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - cleanup 중 새 collection gap이 pre-cleanup `complete`로 덮어써짐: 수용. cleanup 후 현재 run을 다시 읽고 새 gap/irrecoverable 상태를 반영한 disposition만 finalization에 기록한다.
+  - Merging이 Approved PR identity를 검증하지 않음: 수용. durable `Approved PR`과 현재 Merging 호출의 PR identity가 exact match일 때만 HEAD 검증을 진행한다.
+- 기각 finding: 없음.
+- 적용한 커밋: `2f4aad6efdc6fd4bac77ceab535db59c50e2ecaf`
+- 검증 결과: Node app 44 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, cleanup-gap/alternate-PR regression 및 format/syntax/`git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
