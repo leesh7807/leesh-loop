@@ -249,3 +249,12 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - 기각 finding: 없음.
 - 적용한 커밋: `70c6ad0c0a06ab75bba20a8ae1a1955870fc1c23`
 - 검증 결과: Production Operator 10 passed, Node app 전체 45 passed, Symphony 333 passed/6 skipped, Elixir format check, syntax check, `git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
+
+- 리뷰한 HEAD: `b7e3194ffa503248a8c86d57883a6d402548b72e`
+- Review Job: `c26ecbc3-676b-4086-9f29-7c7a9df8e6ea`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - stale admission lock 복구가 새 소유자의 lock을 삭제할 수 있음: 수용. SelfVerification admission lock도 stale directory를 고유 reclaim 경로로 atomic rename한 뒤 제거하고 재획득하도록 변경했으며, 두 별도 프로세스의 stale-lock 동시 복구 회귀 테스트를 추가했다.
+- 기각 finding: 없음.
+- 적용한 커밋: `fd986b04d0f12b0862e985556445e5f04fcc90fa`
+- 검증 결과: Node app 전체 46 passed, stale admission lock 동시 복구 회귀를 포함한 self-verification 15 passed, `git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
