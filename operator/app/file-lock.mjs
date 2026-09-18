@@ -12,13 +12,19 @@ function processAlive(pid) {
   }
 }
 
-async function readOwner(lockPath) {
+async function readLock(lockPath) {
   try {
     const metadata = await stat(lockPath);
     const ownerPath = metadata.isDirectory() ? join(lockPath, 'owner.json') : lockPath;
-    return JSON.parse(await readFile(ownerPath, 'utf8'));
+    const raw = await readFile(ownerPath, 'utf8');
+    try {
+      return { owner: JSON.parse(raw), raw };
+    } catch (error) {
+      if (error instanceof SyntaxError) return { owner: null, raw };
+      throw error;
+    }
   } catch (error) {
-    if (error?.code === 'ENOENT' || error?.code === 'EISDIR' || error instanceof SyntaxError) return null;
+    if (error?.code === 'ENOENT' || error?.code === 'EISDIR') return { owner: null, raw: null };
     throw error;
   }
 }
@@ -33,13 +39,21 @@ async function writeCandidate(candidate, owner) {
   }
 }
 
-async function reclaim(lockPath) {
+async function reclaim(lockPath, expectedRaw) {
   const reclaimPath = `${lockPath}.reclaim-${process.pid}-${randomUUID()}`;
   try {
     await rename(lockPath, reclaimPath);
   } catch (error) {
     if (error?.code === 'ENOENT') return;
     throw error;
+  }
+  const current = await readLock(reclaimPath);
+  if (current.raw !== expectedRaw) {
+    try {
+      await link(reclaimPath, lockPath);
+    } catch (error) {
+      if (error?.code !== 'EEXIST' && error?.code !== 'ENOENT') throw error;
+    }
   }
   await rm(reclaimPath, { recursive: true, force: true });
 }
@@ -50,7 +64,7 @@ export async function acquireFileLock(lockPath, { waitMs = 30_000, pollMs = 25, 
   while (true) {
     const candidate = `${lockPath}.candidate-${process.pid}-${randomUUID()}`;
     try {
-      await writeCandidate(candidate, { pid: process.pid, started_at: new Date().toISOString() });
+      await writeCandidate(candidate, { pid: process.pid, started_at: new Date().toISOString(), lock_id: randomUUID() });
       try {
         // Publish only after the owner record is complete. Hard-link creation
         // is the no-replace atomic claim shared with the Elixir coordinator.
@@ -64,16 +78,16 @@ export async function acquireFileLock(lockPath, { waitMs = 30_000, pollMs = 25, 
       await rm(candidate, { force: true });
     }
 
-    const owner = await readOwner(lockPath);
-    if (owner && !processAlive(owner.pid)) {
-      await reclaim(lockPath);
+    const observed = await readLock(lockPath);
+    if (observed.owner && !processAlive(observed.owner.pid)) {
+      await reclaim(lockPath, observed.raw);
       continue;
     }
-    if (!owner) {
+    if (!observed.owner) {
       try {
         const metadata = await stat(lockPath);
         if (Date.now() - metadata.mtimeMs > staleAfterMs) {
-          await reclaim(lockPath);
+          await reclaim(lockPath, observed.raw);
           continue;
         }
       } catch (statError) {

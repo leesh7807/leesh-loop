@@ -63,7 +63,7 @@ defmodule SymphonyElixir.DispatchCoordination do
     case File.open(path, [:write, :exclusive]) do
       {:ok, device} ->
         try do
-          :ok = IO.write(device, Jason.encode!(%{pid: pid, started_at: DateTime.utc_now()}))
+          :ok = IO.write(device, Jason.encode!(%{pid: pid, started_at: DateTime.utc_now(), lock_id: lock_id()}))
           :file.sync(device)
         after
           File.close(device)
@@ -82,18 +82,18 @@ defmodule SymphonyElixir.DispatchCoordination do
             if process_alive?(pid) do
               :busy
             else
-              remove_and_retry(path)
+              remove_and_retry(path, contents)
             end
 
           _ ->
-            reclaim_unowned(path)
+            reclaim_unowned(path, contents)
         end
 
       {:error, :enoent} ->
         acquire(path)
 
       {:error, _reason} ->
-        reclaim_unowned(path)
+        reclaim_unowned(path, nil)
     end
   end
 
@@ -104,13 +104,13 @@ defmodule SymphonyElixir.DispatchCoordination do
     end
   end
 
-  defp reclaim_unowned(path) do
+  defp reclaim_unowned(path, expected_contents) do
     case File.stat(path) do
       {:ok, %{mtime: mtime}} ->
         age_ms = NaiveDateTime.diff(NaiveDateTime.utc_now(), NaiveDateTime.from_erl!(mtime), :millisecond)
 
         if age_ms > @stale_marker_ms do
-          remove_and_retry(path)
+          remove_and_retry(path, expected_contents)
         else
           :busy
         end
@@ -123,13 +123,36 @@ defmodule SymphonyElixir.DispatchCoordination do
     end
   end
 
-  defp remove_and_retry(path) do
+  defp remove_and_retry(path, expected_contents) do
     reclaim_path = "#{path}.reclaim-#{System.unique_integer([:positive])}"
 
     case File.rename(path, reclaim_path) do
       :ok ->
-        File.rm_rf(reclaim_path)
-        acquire(path)
+        current_contents =
+          case read_owner(reclaim_path) do
+            {:ok, contents} -> contents
+            {:error, _reason} -> nil
+          end
+
+        if current_contents != expected_contents do
+          restore_result =
+            case File.ln(reclaim_path, path) do
+              :ok -> :ok
+              {:error, :eexist} -> :ok
+              {:error, :enoent} -> :ok
+              {:error, reason} -> {:error, reason}
+            end
+
+          File.rm_rf(reclaim_path)
+
+          case restore_result do
+            :ok -> acquire(path)
+            {:error, reason} -> {:error, reason}
+          end
+        else
+          File.rm_rf(reclaim_path)
+          acquire(path)
+        end
 
       {:error, :enoent} ->
         acquire(path)
@@ -144,4 +167,8 @@ defmodule SymphonyElixir.DispatchCoordination do
   end
 
   defp process_alive?(_pid), do: false
+
+  defp lock_id do
+    :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+  end
 end
