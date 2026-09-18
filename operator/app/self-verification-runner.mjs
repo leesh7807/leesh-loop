@@ -349,6 +349,15 @@ async function main() {
     const current = await runner.readState();
     if (['Done', 'Cancelled'].includes(current.state)) {
       await runner.ensureRuntimeConfig();
+      const config = JSON.parse(await readFile(runner.configPath, 'utf8'));
+      const workspace = join(config.symphony_workspace_root, workspaceKey(admitted.run.authoritative_task.identifier));
+      const runtimeState = join(dirname(runner.configPath), 'operator-state', 'runtime.json');
+      if (existsSync(runtimeState) || existsSync(workspace)) {
+        try { await runner.startProduction(); } catch (error) {
+          runner.writer.record({ kind: 'terminal_recovery_runtime_start_failed', error: String(error?.message || error) });
+          await runner.writer.flush();
+        }
+      }
       process.stdout.write(`${JSON.stringify(await runner.finalize())}\n`);
       return;
     }
