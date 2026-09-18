@@ -1,100 +1,63 @@
-import { link, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { mkdir } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { dirname } from 'node:path';
 
-function processAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+const defaultPollMs = 25;
+
+function acquireKernelLock(lockPath) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('flock', ['-n', lockPath, '/bin/sh', '-c', 'printf ready; IFS= read -r _'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let ready = false;
+    let settled = false;
+    let output = '';
+    const fail = error => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    child.on('error', fail);
+    child.stdout.on('data', chunk => {
+      output += chunk.toString();
+      if (!ready && output.includes('ready')) {
+        ready = true;
+        settled = true;
+        resolve(child);
+      }
+    });
+    child.on('exit', (code, signal) => {
+      if (ready || settled) return;
+      settled = true;
+      if (code === 1 && signal === null) resolve(null);
+      else reject(new Error(`flock exited before acquisition (code=${code}, signal=${signal || 'none'})`));
+    });
+  });
 }
 
-async function readLock(lockPath) {
-  try {
-    const metadata = await stat(lockPath);
-    const ownerPath = metadata.isDirectory() ? join(lockPath, 'owner.json') : lockPath;
-    const raw = await readFile(ownerPath, 'utf8');
-    try {
-      return { owner: JSON.parse(raw), raw };
-    } catch (error) {
-      if (error instanceof SyntaxError) return { owner: null, raw };
-      throw error;
-    }
-  } catch (error) {
-    if (error?.code === 'ENOENT' || error?.code === 'EISDIR') return { owner: null, raw: null };
-    throw error;
-  }
+async function releaseKernelLock(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise(resolve => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    child.once('exit', finish);
+    child.once('error', finish);
+    child.stdin.end('\n');
+    setTimeout(() => {
+      if (!settled) child.kill('SIGTERM');
+      finish();
+    }, 1_000).unref();
+  });
 }
 
-async function writeCandidate(candidate, owner) {
-  const handle = await open(candidate, 'wx', 0o600);
-  try {
-    await handle.writeFile(`${JSON.stringify(owner)}\n`, 'utf8');
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-}
-
-async function reclaim(lockPath, expectedRaw) {
-  const reclaimPath = `${lockPath}.reclaim-${process.pid}-${randomUUID()}`;
-  try {
-    await rename(lockPath, reclaimPath);
-  } catch (error) {
-    if (error?.code === 'ENOENT') return;
-    throw error;
-  }
-  const current = await readLock(reclaimPath);
-  if (current.raw !== expectedRaw) {
-    try {
-      await link(reclaimPath, lockPath);
-    } catch (error) {
-      if (error?.code !== 'EEXIST' && error?.code !== 'ENOENT') throw error;
-    }
-  }
-  await rm(reclaimPath, { recursive: true, force: true });
-}
-
-export async function acquireFileLock(lockPath, { waitMs = 30_000, pollMs = 25, staleAfterMs = pollMs * 4, label = lockPath } = {}) {
+export async function acquireFileLock(lockPath, { waitMs = 30_000, pollMs = defaultPollMs, label = lockPath } = {}) {
   const started = Date.now();
   await mkdir(dirname(lockPath), { recursive: true, mode: 0o700 });
   while (true) {
-    const candidate = `${lockPath}.candidate-${process.pid}-${randomUUID()}`;
-    try {
-      await writeCandidate(candidate, { pid: process.pid, started_at: new Date().toISOString(), lock_id: randomUUID() });
-      try {
-        // Publish only after the owner record is complete. Hard-link creation
-        // is the no-replace atomic claim shared with the Elixir coordinator.
-        await link(candidate, lockPath);
-        await rm(candidate, { force: true });
-        return async () => rm(lockPath, { recursive: true, force: true });
-      } catch (error) {
-        if (error?.code !== 'EEXIST') throw error;
-      }
-    } finally {
-      await rm(candidate, { force: true });
-    }
-
-    const observed = await readLock(lockPath);
-    if (observed.owner && !processAlive(observed.owner.pid)) {
-      await reclaim(lockPath, observed.raw);
-      continue;
-    }
-    if (!observed.owner) {
-      try {
-        const metadata = await stat(lockPath);
-        if (Date.now() - metadata.mtimeMs > staleAfterMs) {
-          await reclaim(lockPath, observed.raw);
-          continue;
-        }
-      } catch (statError) {
-        if (statError?.code !== 'ENOENT') throw statError;
-        continue;
-      }
-    }
+    const child = await acquireKernelLock(lockPath);
+    if (child) return () => releaseKernelLock(child);
     if (Date.now() - started >= waitMs) throw new Error(`timed out waiting for ${label}: ${lockPath}`);
     await new Promise(resolve => setTimeout(resolve, pollMs));
   }
