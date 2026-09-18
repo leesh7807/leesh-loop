@@ -18,6 +18,7 @@ defmodule SymphonyElixir.LeeshLoopWorkflowContractTest do
     assert prompt =~ "delivered_pr: <PR URL or number | none>"
     assert prompt =~ "origin_base: <resolved-remote-base-commit>"
     assert prompt =~ "remote_base: <configured-base remote commit | none>"
+    assert prompt =~ "SYMPHONY_TASK_BRANCH"
     assert prompt =~ "git fetch origin \"$SYMPHONY_GITHUB_BASE_BRANCH\""
     assert prompt =~ "gh pr create --base \"$SYMPHONY_GITHUB_BASE_BRANCH\""
     refute prompt =~ "origin/main"

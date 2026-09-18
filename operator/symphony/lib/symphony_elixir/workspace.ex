@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Workspace do
   """
 
   require Logger
-  alias SymphonyElixir.{Config, PathSafety, SSH}
+  alias SymphonyElixir.{Config, LifecycleEvidence, PathSafety, SSH}
 
   @remote_workspace_marker "__SYMPHONY_WORKSPACE__"
 
@@ -23,7 +23,14 @@ defmodule SymphonyElixir.Workspace do
            {:ok, workspace, created?} <- ensure_workspace(workspace, worker_host) do
         case maybe_run_after_create_hook(workspace, issue_context, created?, worker_host) do
           :ok ->
-            {:ok, workspace}
+            case maybe_prepare_task_branch(workspace, issue_context, worker_host) do
+              :ok ->
+                {:ok, workspace}
+
+              {:error, _reason} = error ->
+                cleanup_failed_new_workspace(workspace, created?, worker_host)
+                error
+            end
 
           {:error, _reason} = error ->
             cleanup_failed_new_workspace(workspace, created?, worker_host)
@@ -277,6 +284,24 @@ defmodule SymphonyElixir.Workspace do
 
   def workspace_key(_identifier), do: "issue"
 
+  @doc """
+  Returns the production task branch for an issue.
+
+  Tracker-provided branch names remain authoritative when present. Notion tasks
+  do not currently provide one, so the stable identifier-derived name is used.
+  The branch is deliberately separate from `SYMPHONY_GITHUB_BASE_BRANCH`.
+  """
+  @spec task_branch(map() | String.t() | nil) :: String.t()
+  def task_branch(%{branch_name: branch_name, identifier: identifier}) do
+    case branch_name && String.trim(to_string(branch_name)) do
+      branch when is_binary(branch) and branch != "" -> branch
+      _ -> default_task_branch(identifier)
+    end
+  end
+
+  def task_branch(%{identifier: identifier}), do: default_task_branch(identifier)
+  def task_branch(identifier), do: default_task_branch(identifier)
+
   defp safe_identifier(identifier) when is_binary(identifier),
     do: String.replace(identifier, ~r/[^a-zA-Z0-9._-]/, "_")
 
@@ -302,6 +327,88 @@ defmodule SymphonyElixir.Workspace do
       false ->
         :ok
     end
+  end
+
+  defp maybe_prepare_task_branch(workspace, issue_context, worker_host) do
+    case System.get_env("SYMPHONY_GITHUB_BASE_BRANCH") |> blank_to_nil() do
+      nil ->
+        :ok
+
+      configured_base ->
+        task_branch = issue_context.task_branch
+
+        if task_branch == configured_base do
+          reason = {:task_branch_equals_configured_base, task_branch}
+          LifecycleEvidence.record(:task_branch_preparation_failed, %{reason: inspect(reason), task_branch: task_branch, configured_base: configured_base})
+          {:error, reason}
+        else
+          script = task_branch_script(configured_base, task_branch)
+
+          case run_workspace_command(script, workspace, worker_host) do
+            {:ok, {_output, 0}} ->
+              LifecycleEvidence.record(:task_branch_prepared, %{task_branch: task_branch, configured_base: configured_base})
+              :ok
+
+            {:ok, {output, status}} ->
+              reason = {:task_branch_preparation_failed, status, sanitize_hook_output_for_log(output)}
+              LifecycleEvidence.record(:task_branch_preparation_failed, %{reason: inspect(reason), task_branch: task_branch, configured_base: configured_base})
+              {:error, reason}
+
+            {:error, reason} ->
+              LifecycleEvidence.record(:task_branch_preparation_failed, %{reason: inspect(reason), task_branch: task_branch, configured_base: configured_base})
+              {:error, reason}
+          end
+        end
+    end
+  end
+
+  defp task_branch_script(configured_base, task_branch) do
+    escaped_base = shell_escape(configured_base)
+    escaped_task_branch = shell_escape(task_branch)
+
+    [
+      "set -eu",
+      "configured_base=#{escaped_base}",
+      "task_branch=#{escaped_task_branch}",
+      "git check-ref-format --branch \"$task_branch\" >/dev/null",
+      "current_branch=\"$(git branch --show-current)\"",
+      "if [ \"$current_branch\" = \"$configured_base\" ]; then",
+      "  git fetch --no-tags origin \"$configured_base\"",
+      "  base_commit=\"$(git rev-parse --verify \"refs/remotes/origin/$configured_base\")\"",
+      "  if git show-ref --verify --quiet \"refs/heads/$task_branch\"; then",
+      "    echo 'task branch already exists while workspace is on configured base' >&2",
+      "    exit 23",
+      "  fi",
+      "  git switch --create \"$task_branch\" \"$base_commit\"",
+      "fi",
+      "current_branch=\"$(git branch --show-current)\"",
+      "test \"$current_branch\" = \"$task_branch\"",
+      "test \"$current_branch\" != \"$configured_base\"",
+      "printf '%s\\t%s\\n' \"$current_branch\" \"$configured_base\""
+    ]
+    |> Enum.join("\n")
+  end
+
+  defp run_workspace_command(command, workspace, nil) do
+    timeout_ms = Config.settings!().hooks.timeout_ms
+
+    task =
+      Task.async(fn ->
+        System.cmd("sh", ["-lc", command], cd: workspace, stderr_to_stdout: true)
+      end)
+
+    case Task.yield(task, timeout_ms) do
+      {:ok, result} ->
+        {:ok, result}
+
+      nil ->
+        Task.shutdown(task, :brutal_kill)
+        {:error, {:workspace_hook_timeout, "task_branch", timeout_ms}}
+    end
+  end
+
+  defp run_workspace_command(command, workspace, worker_host) when is_binary(worker_host) do
+    run_remote_command(worker_host, "cd #{shell_escape(workspace)} && #{command}", Config.settings!().hooks.timeout_ms)
   end
 
   defp cleanup_failed_new_workspace(_workspace, false, _worker_host), do: :ok
@@ -568,24 +675,50 @@ defmodule SymphonyElixir.Workspace do
   defp worker_host_for_log(nil), do: "local"
   defp worker_host_for_log(worker_host), do: worker_host
 
-  defp issue_context(%{id: issue_id, identifier: identifier}) do
+  defp default_task_branch(identifier) do
+    identifier = if is_binary(identifier) and identifier != "", do: identifier, else: "issue"
+    safe_identifier = safe_identifier(identifier)
+
+    branch_identifier =
+      cond do
+        safe_identifier in ["", ".", ".."] -> "issue-#{short_identifier_hash(identifier)}"
+        safe_identifier == identifier -> safe_identifier
+        true -> "#{safe_identifier}--#{short_identifier_hash(identifier)}"
+      end
+
+    "task/#{branch_identifier}"
+  end
+
+  defp blank_to_nil(nil), do: nil
+
+  defp blank_to_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp issue_context(%{id: issue_id, identifier: identifier} = issue) do
     %{
       issue_id: issue_id,
-      issue_identifier: identifier || "issue"
+      issue_identifier: identifier || "issue",
+      task_branch: task_branch(issue)
     }
   end
 
   defp issue_context(identifier) when is_binary(identifier) do
     %{
       issue_id: nil,
-      issue_identifier: identifier
+      issue_identifier: identifier,
+      task_branch: task_branch(identifier)
     }
   end
 
   defp issue_context(_identifier) do
     %{
       issue_id: nil,
-      issue_identifier: "issue"
+      issue_identifier: "issue",
+      task_branch: task_branch("issue")
     }
   end
 

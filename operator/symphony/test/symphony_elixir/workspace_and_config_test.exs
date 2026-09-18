@@ -40,6 +40,50 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "new production workspaces use a task branch distinct from the configured base" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-task-branch-#{System.unique_integer([:positive])}"
+      )
+
+    previous_base = System.get_env("SYMPHONY_GITHUB_BASE_BRANCH")
+
+    try do
+      template_repo = Path.join(test_root, "source")
+      workspace_root = Path.join(test_root, "workspaces")
+
+      File.mkdir_p!(template_repo)
+      File.write!(Path.join(template_repo, "README.md"), "configured base\n")
+      {_, 0} = System.cmd("git", ["-C", template_repo, "init", "-b", "main"])
+      {_, 0} = System.cmd("git", ["-C", template_repo, "config", "user.name", "Test User"])
+      {_, 0} = System.cmd("git", ["-C", template_repo, "config", "user.email", "test@example.com"])
+      {_, 0} = System.cmd("git", ["-C", template_repo, "add", "README.md"])
+      {_, 0} = System.cmd("git", ["-C", template_repo, "commit", "-m", "initial"])
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "git clone --branch main #{template_repo} ."
+      )
+
+      System.put_env("SYMPHONY_GITHUB_BASE_BRANCH", "main")
+      issue = %Issue{id: "task-branch-1", identifier: "PLAN-BRANCH-1"}
+
+      assert Workspace.task_branch(issue) == "task/PLAN-BRANCH-1"
+      assert {:ok, workspace} = Workspace.create_for_issue(issue)
+      assert {"task/PLAN-BRANCH-1\n", 0} = System.cmd("git", ["-C", workspace, "branch", "--show-current"])
+      assert {remote_base, 0} = System.cmd("git", ["-C", workspace, "rev-parse", "refs/remotes/origin/main"])
+      assert {task_head, 0} = System.cmd("git", ["-C", workspace, "rev-parse", "HEAD"])
+      assert String.trim(task_head) == String.trim(remote_base)
+
+      assert {:ok, ^workspace} = Workspace.create_for_issue(issue)
+      assert {"task/PLAN-BRANCH-1\n", 0} = System.cmd("git", ["-C", workspace, "branch", "--show-current"])
+    after
+      restore_env("SYMPHONY_GITHUB_BASE_BRANCH", previous_base)
+      File.rm_rf(test_root)
+    end
+  end
+
   test "workspace path is deterministic per issue identifier" do
     workspace_root =
       Path.join(
