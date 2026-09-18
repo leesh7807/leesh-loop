@@ -256,7 +256,14 @@ export class NotionProductionOperator {
       const fenced = await this.readTask(taskId, source);
       if (propertyText(fenced.page.properties, propertyNames.dispatchFence) !== fence) return { closed: false, reason: 'dispatch_fence_readback_failed' };
       const after = await readExecutionOwnership(taskId);
-      if (after?.length) return { closed: false, reason: 'scheduler_claim_won_race', ownership: after };
+      if (after?.length) {
+        const racedTask = await this.readTask(taskId, source);
+        const racedState = stateOf(racedTask.page);
+        if (['Ready', 'In Progress', 'Rework'].includes(racedState) && propertyText(racedTask.page.properties, propertyNames.dispatchFence) === fence) {
+          await this.patchTask(taskId, { [propertyNames.dispatchFence]: { rich_text: [] } }, source, racedState);
+        }
+        return { closed: false, reason: 'scheduler_claim_won_race', ownership: after };
+      }
       await this.appendWorkpad(taskId, `Production Operator stranded closure\nfence: ${fence}\nterminal_state: ${terminalState}\nreason: ${reason}`);
       await this.patchTask(taskId, { State: { select: { name: terminalState } }, [propertyNames.closureReason]: { rich_text: [{ type: 'text', text: { content: reason } }] } }, source, state);
       const readback = await this.readTask(taskId, source);

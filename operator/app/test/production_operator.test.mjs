@@ -102,4 +102,5 @@ test('stranded closure fences dispatch before terminal transition and refuses a 
   const raced = await raceOperator.closeStrandedTask({ taskId: 'task', readExecutionOwnership: async () => (++raceReads === 1 ? [] : [{ id: 'execution' }]) });
   assert.equal(raced.closed, false);
   assert.equal(raceFake.current.properties.State.select.name, 'Ready');
+  assert.deepEqual(raceFake.current.properties['Dispatch Fence']?.rich_text || [], []);
 });
