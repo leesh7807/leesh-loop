@@ -223,3 +223,12 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - 기각 finding: 없음.
 - 적용한 커밋: `18099e1d52608327c38f6768c4b93041cc1f0697`
 - 검증 결과: Node app 44 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, format/syntax/`git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
+
+- 리뷰한 HEAD: `8c60f7c27ad82991769b2672fa1ca0c584de27fd`
+- Review Job: `76d935d8-e13c-49e7-b422-5efcf03a3c0d`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - terminal recovery가 dispatch acknowledgement만 기다려 workspace cleanup보다 먼저 finalize함: 수용. 재기동 후 workspace 부재를 bounded wait로 확인하고, timeout에는 normal Operator stop/readback 후 non-finalized로 남긴다.
+- 기각 finding: 없음.
+- 적용한 커밋: `a5baf2ef9cc9d39ee3cd5d5881f104f4fab08cd`
+- 검증 결과: Node app 44 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, format/syntax/`git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
