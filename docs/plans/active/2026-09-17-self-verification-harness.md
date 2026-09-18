@@ -163,5 +163,5 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
   - finalized 이전 run의 terminal task 재사용: 수용. run ID marker를 포함한 durable scoped Plan을 만들어 각 run의 canonical task identity를 분리하고 resume 시 scoped Plan SHA를 검증한다.
   - lifecycle evidence writer drop/error의 collection gap 누락: 수용. runtime endpoint가 writer status를 authoritative readback으로 노출하고 runner가 dropped/error를 durable evidence gap으로 기록한다.
 - 기각 finding: 없음.
-- 적용한 커밋: 다음 수정 커밋에 기록한다.
+- 적용한 커밋: `116684193f27ad7d0dfcd7521839e87a8802ebc0`
 - 검증 결과: 수정 후 새 HEAD에 대해 Node app 40 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, format/syntax/`git diff --check` passed. 새 HEAD에 대한 재리뷰가 필요하다.
