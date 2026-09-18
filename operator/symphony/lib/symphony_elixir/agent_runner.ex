@@ -5,7 +5,7 @@ defmodule SymphonyElixir.AgentRunner do
 
   require Logger
   alias SymphonyElixir.Codex.AppServer
-  alias SymphonyElixir.{Config, PromptBuilder, Tracker, Workspace}
+  alias SymphonyElixir.{Config, LifecycleEvidence, PromptBuilder, Tracker, Workspace}
   alias SymphonyElixir.Tracker.Issue
 
   @type worker_host :: String.t() | nil
@@ -24,6 +24,7 @@ defmodule SymphonyElixir.AgentRunner do
     worker_host = selected_worker_host(Keyword.get(opts, :worker_host), Config.settings!().worker.ssh_hosts)
 
     Logger.info("Starting agent run for #{issue_context(issue)} worker_host=#{worker_host_for_log(worker_host)}")
+    LifecycleEvidence.record(:agent_attempt_started, %{issue_id: issue.id, identifier: issue.identifier, worker_host: worker_host})
 
     case run_on_worker_host(issue, codex_update_recipient, opts, worker_host) do
       :ok ->
@@ -40,6 +41,7 @@ defmodule SymphonyElixir.AgentRunner do
 
     case Workspace.create_for_issue(issue, worker_host) do
       {:ok, workspace} ->
+        LifecycleEvidence.record(:workspace_prepared, %{issue_id: issue.id, identifier: issue.identifier, workspace: workspace, worker_host: worker_host})
         send_worker_runtime_info(codex_update_recipient, issue, worker_host, workspace)
 
         try do
@@ -51,6 +53,7 @@ defmodule SymphonyElixir.AgentRunner do
         end
 
       {:error, reason} ->
+        LifecycleEvidence.record(:workspace_preparation_failed, %{issue_id: issue.id, identifier: issue.identifier, reason: inspect(reason)})
         {:error, reason}
     end
   end
@@ -90,11 +93,17 @@ defmodule SymphonyElixir.AgentRunner do
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issues_by_ids/1)
 
     with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host, issue: issue) do
+      LifecycleEvidence.record(:codex_session_started, %{issue_id: issue.id, identifier: issue.identifier, workspace: workspace, worker_host: worker_host})
+
       try do
         do_run_codex_turns(session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, 1, max_turns)
       after
         AppServer.stop_session(session)
       end
+    else
+      {:error, reason} ->
+        LifecycleEvidence.record(:codex_session_start_failed, %{issue_id: issue.id, identifier: issue.identifier, reason: inspect(reason)})
+        {:error, reason}
     end
   end
 

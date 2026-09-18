@@ -242,6 +242,7 @@ defmodule SymphonyElixir.Notion.Client do
          {:ok, state} <- state_property(props["State"]),
          {:ok, priority} <- priority_property(props["Priority"]),
          {:ok, labels} <- labels_property(props["Labels"]),
+         {:ok, dispatch_fence} <- dispatch_fence_property(props["Dispatch Fence"]),
          {:ok, blockers} <- blockers(props["Blocked By"], id, settings, fun),
          {:ok, plan} <- plan_page(props["Plan"], id, identifier, plan_source, settings, fun),
          {:ok, description} <- page_text(plan, settings, fun),
@@ -255,6 +256,7 @@ defmodule SymphonyElixir.Notion.Client do
          state: state,
          priority: priority,
          labels: labels,
+         dispatch_fence: dispatch_fence,
          blocked_by: blockers,
          dispatchable: Enum.all?(blockers, &(&1["terminal"] == true)),
          description: description,
@@ -416,6 +418,15 @@ defmodule SymphonyElixir.Notion.Client do
        end)}
 
   defp labels_property(_), do: {:error, :invalid_labels}
+
+  defp dispatch_fence_property(nil), do: {:ok, nil}
+
+  defp dispatch_fence_property(%{"type" => "rich_text", "rich_text" => values}) when is_list(values) do
+    value = rich_text(values)
+    {:ok, if(String.trim(value) == "", do: nil, else: value)}
+  end
+
+  defp dispatch_fence_property(_), do: {:error, :invalid_dispatch_fence}
 
   defp value_state(property) do
     case property do

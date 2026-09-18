@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, LifecycleEvidence, StatusDashboard, Tracker, Workspace}
   alias SymphonyElixir.Tracker.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -81,6 +81,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   @impl true
   def handle_info(:dispatch_authorized, %{dispatch_enabled: false} = state) do
+    LifecycleEvidence.record(:runtime_ready, %{dispatch: "authorized"})
     run_terminal_workspace_cleanup()
     {:noreply, state |> Map.put(:dispatch_enabled, true) |> schedule_tick(0)}
   end
@@ -214,6 +215,8 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp handle_agent_down(:normal, state, issue_id, running_entry, session_id) do
+    LifecycleEvidence.record(:worker_exit, %{issue_id: issue_id, identifier: running_entry.identifier, session_id: session_id, reason: "normal"})
+
     if input_required_blocker?(running_entry) do
       block_input_required_agent_down(state, issue_id, running_entry, session_id, :normal)
     else
@@ -232,6 +235,8 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp handle_agent_down(reason, state, issue_id, running_entry, session_id) do
+    LifecycleEvidence.record(:worker_exit, %{issue_id: issue_id, identifier: running_entry.identifier, session_id: session_id, reason: inspect(reason)})
+
     if input_required_blocker?(running_entry) do
       block_input_required_agent_down(state, issue_id, running_entry, session_id, reason)
     else
@@ -307,6 +312,7 @@ defmodule SymphonyElixir.Orchestrator do
         state
 
       {:error, reason} ->
+        LifecycleEvidence.record(:tracker_poll_failed, %{scope: "active", reason: inspect(reason)})
         Logger.error("Failed to fetch from issue tracker: #{inspect(reason)}")
         state
 
@@ -333,6 +339,7 @@ defmodule SymphonyElixir.Orchestrator do
           |> reconcile_missing_running_issue_ids(running_ids, issues)
 
         {:error, reason} ->
+          LifecycleEvidence.record(:tracker_reconciliation_failed, %{scope: "running", issue_ids: running_ids, reason: inspect(reason)})
           Logger.debug("Failed to refresh running issue states: #{inspect(reason)}; keeping active workers")
 
           state
@@ -357,6 +364,7 @@ defmodule SymphonyElixir.Orchestrator do
           |> reconcile_missing_blocked_issue_ids(blocked_ids, issues)
 
         {:error, reason} ->
+          LifecycleEvidence.record(:tracker_reconciliation_failed, %{scope: "blocked", issue_ids: blocked_ids, reason: inspect(reason)})
           Logger.debug("Failed to refresh blocked issue states: #{inspect(reason)}; keeping blocked issues")
 
           state
@@ -429,6 +437,8 @@ defmodule SymphonyElixir.Orchestrator do
   defp reconcile_issue_state(%Issue{} = issue, state, active_states, terminal_states) do
     cond do
       terminal_issue_state?(issue.state, terminal_states) ->
+        LifecycleEvidence.record(:tracker_terminal_observed, %{issue_id: issue.id, identifier: issue.identifier, state: issue.state})
+        LifecycleEvidence.record(:symphony_terminal_observed, %{issue_id: issue.id, identifier: issue.identifier, state: issue.state})
         Logger.info("Issue moved to terminal state: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
 
         terminate_running_issue(state, issue.id, true)
@@ -567,7 +577,8 @@ defmodule SymphonyElixir.Orchestrator do
       %{pid: pid, ref: ref, identifier: identifier} = running_entry ->
         state = record_session_completion_totals(state, running_entry)
 
-        stop_running_task(pid, ref, state.task_supervisor)
+        teardown_result = stop_running_task(pid, ref, state.task_supervisor)
+        LifecycleEvidence.record(:execution_teardown, %{issue_id: issue_id, identifier: identifier, session_id: running_entry_session_id(running_entry), result: inspect(teardown_result)})
 
         if cleanup_workspace do
           cleanup_issue_workspace(Map.get(running_entry, :issue, identifier), running_entry)
@@ -622,6 +633,7 @@ defmodule SymphonyElixir.Orchestrator do
 
       if input_required_blocker?(running_entry) do
         error = blocker_error(running_entry, "stalled for #{elapsed_ms}ms after Codex requested operator input")
+        LifecycleEvidence.record(:worker_blocked, %{issue_id: issue_id, identifier: identifier, session_id: session_id, reason: error})
 
         Logger.warning("Issue blocked: issue_id=#{issue_id} issue_identifier=#{identifier} session_id=#{session_id} elapsed_ms=#{elapsed_ms}; #{error}")
 
@@ -629,6 +641,7 @@ defmodule SymphonyElixir.Orchestrator do
         |> record_session_completion_totals(running_entry)
         |> stop_and_block_issue(issue_id, running_entry, error)
       else
+        LifecycleEvidence.record(:worker_stalled, %{issue_id: issue_id, identifier: identifier, session_id: session_id, elapsed_ms: elapsed_ms})
         Logger.warning("Issue stalled: issue_id=#{issue_id} issue_identifier=#{identifier} session_id=#{session_id} elapsed_ms=#{elapsed_ms}; restarting with backoff")
 
         next_attempt = next_retry_attempt_from_running(running_entry)
@@ -753,11 +766,19 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp stop_and_block_issue(%State{} = state, issue_id, running_entry, error) do
-    stop_running_task(
-      Map.get(running_entry, :pid),
-      Map.get(running_entry, :ref),
-      state.task_supervisor
-    )
+    teardown_result =
+      stop_running_task(
+        Map.get(running_entry, :pid),
+        Map.get(running_entry, :ref),
+        state.task_supervisor
+      )
+
+    LifecycleEvidence.record(:execution_teardown, %{
+      issue_id: issue_id,
+      identifier: Map.get(running_entry, :identifier),
+      session_id: running_entry_session_id(running_entry),
+      result: inspect(teardown_result)
+    })
 
     block_issue_from_entry(state, issue_id, running_entry, error)
   end
@@ -940,6 +961,7 @@ defmodule SymphonyElixir.Orchestrator do
         {:skip, refreshed_issue}
 
       {:error, reason} ->
+        LifecycleEvidence.record(:tracker_reconciliation_failed, %{scope: "dispatch_refresh", issue_id: issue.id, identifier: issue.identifier, reason: inspect(reason)})
         Logger.warning("Skipping dispatch; issue refresh failed for #{issue_context(issue)}: #{inspect(reason)}")
         {:error, reason}
     end
@@ -947,9 +969,11 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp do_dispatch_issue(%State{} = state, issue, attempt, preferred_worker_host) do
     recipient = self()
+    LifecycleEvidence.record(:dispatch_candidate, %{issue_id: issue.id, identifier: issue.identifier, attempt: attempt})
 
     case select_worker_host(state, preferred_worker_host) do
       :no_worker_capacity ->
+        LifecycleEvidence.record(:dispatch_skipped, %{issue_id: issue.id, identifier: issue.identifier, reason: "no_worker_capacity"})
         Logger.debug("No SSH worker slots available for #{issue_context(issue)} preferred_worker_host=#{inspect(preferred_worker_host)}")
         state
 
@@ -964,6 +988,8 @@ defmodule SymphonyElixir.Orchestrator do
          end) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
+
+        LifecycleEvidence.record(:worker_spawn_succeeded, %{issue_id: issue.id, identifier: issue.identifier, attempt: attempt, worker_host: worker_host})
 
         Logger.info("Dispatching issue to agent: #{issue_context(issue)} pid=#{inspect(pid)} attempt=#{inspect(attempt)} worker_host=#{worker_host || "local"}")
 
@@ -999,6 +1025,7 @@ defmodule SymphonyElixir.Orchestrator do
         }
 
       {:error, reason} ->
+        LifecycleEvidence.record(:worker_spawn_failed, %{issue_id: issue.id, identifier: issue.identifier, attempt: attempt, reason: inspect(reason)})
         Logger.error("Unable to spawn agent for #{issue_context(issue)}: #{inspect(reason)}")
         next_attempt = if is_integer(attempt), do: attempt + 1, else: nil
 
@@ -1063,6 +1090,7 @@ defmodule SymphonyElixir.Orchestrator do
     error_suffix = if is_binary(error), do: " error=#{error}", else: ""
 
     Logger.warning("Retrying issue_id=#{issue_id} issue_identifier=#{identifier} in #{delay_ms}ms (attempt #{next_attempt})#{error_suffix}")
+    LifecycleEvidence.record(:retry_scheduled, %{issue_id: issue_id, identifier: identifier, attempt: next_attempt, delay_ms: delay_ms, error: error})
 
     %{
       state
@@ -1108,6 +1136,7 @@ defmodule SymphonyElixir.Orchestrator do
         |> handle_retry_issue_lookup(state, issue_id, attempt, metadata)
 
       {:error, reason} ->
+        LifecycleEvidence.record(:tracker_reconciliation_failed, %{scope: "retry", issue_id: issue_id, identifier: metadata[:identifier] || issue_id, reason: inspect(reason)})
         Logger.warning("Retry poll failed for issue_id=#{issue_id} issue_identifier=#{metadata[:identifier] || issue_id}: #{inspect(reason)}")
 
         {:noreply,
@@ -1150,7 +1179,9 @@ defmodule SymphonyElixir.Orchestrator do
   defp cleanup_issue_workspace(issue_or_identifier, metadata) when is_map(metadata) do
     case Map.get(metadata, :workspace_path) do
       workspace_path when is_binary(workspace_path) and workspace_path != "" ->
-        Workspace.remove_recorded(workspace_path, Map.get(metadata, :worker_host))
+        result = Workspace.remove_recorded(workspace_path, Map.get(metadata, :worker_host))
+        LifecycleEvidence.record(:workspace_cleanup, %{workspace: workspace_path, result: inspect(result)})
+        result
 
       _ ->
         cleanup_issue_workspace(issue_or_identifier, Map.get(metadata, :worker_host))
@@ -1158,11 +1189,15 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp cleanup_issue_workspace(%Issue{} = issue, worker_host) do
-    Workspace.remove_issue_workspaces(issue, worker_host)
+    result = Workspace.remove_issue_workspaces(issue, worker_host)
+    LifecycleEvidence.record(:workspace_cleanup, %{issue_id: issue.id, identifier: issue.identifier, worker_host: worker_host, result: inspect(result)})
+    result
   end
 
   defp cleanup_issue_workspace(identifier, worker_host) when is_binary(identifier) do
-    Workspace.remove_issue_workspaces(identifier, worker_host)
+    result = Workspace.remove_issue_workspaces(identifier, worker_host)
+    LifecycleEvidence.record(:workspace_cleanup, %{identifier: identifier, worker_host: worker_host, result: inspect(result)})
+    result
   end
 
   defp cleanup_issue_workspace(_issue_or_identifier, _worker_host), do: :ok

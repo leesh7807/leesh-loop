@@ -2,6 +2,8 @@ defmodule SymphonyElixir.DispatchBarrier do
   @moduledoc false
   use GenServer
 
+  alias SymphonyElixir.LifecycleEvidence
+
   @check_interval_ms 100
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -27,7 +29,12 @@ defmodule SymphonyElixir.DispatchBarrier do
   @impl true
   def init(_opts) do
     state = %{enabled?: System.get_env("SYMPHONY_DISPATCH_BARRIER") != "closed", subscribers: MapSet.new()}
-    if state.enabled?, do: write_acknowledgement()
+
+    if state.enabled? do
+      write_acknowledgement()
+      LifecycleEvidence.record(:dispatch_authorized, %{source: "barrier_init"})
+    end
+
     schedule_check(state)
     {:ok, state}
   end
@@ -51,6 +58,7 @@ defmodule SymphonyElixir.DispatchBarrier do
 
   defp enable(state) do
     write_acknowledgement()
+    LifecycleEvidence.record(:dispatch_authorized, %{source: "operator_authorization"})
     Enum.each(state.subscribers, &send(&1, :dispatch_authorized))
     %{state | enabled?: true}
   end

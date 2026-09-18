@@ -20,6 +20,7 @@ defmodule SymphonyElixir.Tracker.Issue do
     :branch_name,
     :url,
     :assignee_id,
+    :dispatch_fence,
     blocked_by: [],
     labels: [],
     dispatchable: false,
@@ -38,6 +39,7 @@ defmodule SymphonyElixir.Tracker.Issue do
           branch_name: String.t() | nil,
           url: String.t() | nil,
           assignee_id: String.t() | nil,
+          dispatch_fence: String.t() | nil,
           labels: [String.t()],
           blocked_by: [map()],
           dispatchable: boolean(),
@@ -51,7 +53,7 @@ defmodule SymphonyElixir.Tracker.Issue do
   end
 
   @spec routable?(t(), [String.t()]) :: boolean()
-  def routable?(%__MODULE__{dispatchable: true, labels: labels}, required_labels)
+  def routable?(%__MODULE__{dispatchable: true, dispatch_fence: nil, labels: labels}, required_labels)
       when is_list(labels) and is_list(required_labels) do
     issue_labels = MapSet.new(labels, &normalize_label/1)
     Enum.all?(required_labels, &MapSet.member?(issue_labels, normalize_label(&1)))

@@ -59,6 +59,21 @@ defmodule SymphonyElixir.Notion.AdapterTest do
     assert issue.dispatchable
   end
 
+  test "a production Operator dispatch fence makes an otherwise ready task non-routable" do
+    task =
+      put_in(task_page()["properties"]["Dispatch Fence"], %{
+        "type" => "rich_text",
+        "rich_text" => [%{"plain_text" => "fence-1"}]
+      })
+
+    request = recording_request(self(), task: task)
+
+    assert {:ok, [issue]} = Client.fetch_issues_by_ids_for_test(["task"], notion_settings(), request)
+    assert issue.dispatchable
+    assert issue.dispatch_fence == "fence-1"
+    refute Issue.routable?(issue, [])
+  end
+
   test "Plan source is selected by relation target, not by display name or order" do
     request =
       recording_request(self(),

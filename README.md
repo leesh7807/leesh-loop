@@ -158,6 +158,15 @@ Publisher/adapter representation remains shared. Free-form `State` removes schem
 for ordinary workflow-state additions or renames, but it does not make the complete lifecycle
 independently configurable.
 
+## Self-verification
+
+`operator/app/self-verification-runner.mjs` observes the real Operator → Symphony → worker path
+with a durable run record. It uses the configured remote repository/base and a persistent Notion
+tracker database, creates a temporary run-scoped base, resumes non-finalized runs, and records
+best-effort lifecycle evidence without becoming a second scheduler or lifecycle authority. The
+production Operator approval and stranded-task closure actions remain the only mutation paths for
+those production transitions.
+
 ## Symphony
 
 Task execution uses [OpenAI Symphony](https://github.com/openai/symphony).
