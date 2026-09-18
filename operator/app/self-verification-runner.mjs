@@ -51,7 +51,7 @@ export class SelfVerificationRunner {
     this.writer = new EvidenceWriter(this.store);
     this.operator = new NotionProductionOperator({ token, databaseUrl, readPullRequest, readReviewJob, operatorLockRoot: join(this.stateRoot, 'operator-locks'), dispatchCoordinationRoot: join(this.store.directory, 'operator-state', 'dispatch-coordination') });
     this.run = null;
-    this.configPath = null;
+    this.configPath = join(this.store.directory, 'run-project.json');
     this.lifecyclePath = null;
   }
 
@@ -76,7 +76,6 @@ export class SelfVerificationRunner {
 
   async ensureRuntimeConfig() {
     this.run = await this.store.read();
-    this.configPath = join(this.store.directory, 'run-project.json');
     await mkdir(dirname(this.configPath), { recursive: true, mode: 0o700 });
     await writeRunProjectConfig(this.projectConfigPath, this.run, this.configPath, { self_verification_run_id: this.run.run_id, lifecycle_evidence_path: this.lifecyclePath });
     this.run = await this.store.update(run => { run.observation.runtime_config_path = this.configPath; return run; });
@@ -123,7 +122,7 @@ export class SelfVerificationRunner {
   }
 
   async startProduction() {
-    if (!this.configPath) await this.ensureRuntimeConfig();
+    if (!existsSync(this.configPath)) await this.ensureRuntimeConfig();
     try {
       const output = await command(process.execPath, [join(root, 'operator/app/leesh-loop.mjs'), 'start', this.configPath]);
       const result = JSON.parse(output.split(/\r?\n/).filter(Boolean).at(-1));
@@ -201,16 +200,19 @@ export class SelfVerificationRunner {
   }
 
   async ingestLifecycleEvidence() {
-    try {
-      const runtime = await this.observeRuntime();
-      const status = runtime.lifecycle_evidence || {};
-      if (Number(status.dropped || 0) > 0 || status.error) {
-        const current = await this.store.read();
-        const duplicate = (current.evidence?.gaps || []).some(gap => gap.kind === 'lifecycle_evidence_writer_failure' && gap.runtime_id === runtime.runtime_id);
-        if (!duplicate) await this.store.noteEvidenceGap({ kind: 'lifecycle_evidence_writer_failure', runtime_id: runtime.runtime_id, dropped: status.dropped || 0, error: status.error || null, irrecoverable: false });
+    const runtimeStatePath = join(dirname(this.configPath), 'operator-state', 'runtime.json');
+    if (existsSync(runtimeStatePath)) {
+      try {
+        const runtime = await this.observeRuntime();
+        const status = runtime.lifecycle_evidence || {};
+        if (Number(status.dropped || 0) > 0 || status.error) {
+          const current = await this.store.read();
+          const duplicate = (current.evidence?.gaps || []).some(gap => gap.kind === 'lifecycle_evidence_writer_failure' && gap.runtime_id === runtime.runtime_id);
+          if (!duplicate) await this.store.noteEvidenceGap({ kind: 'lifecycle_evidence_writer_failure', runtime_id: runtime.runtime_id, dropped: status.dropped || 0, error: status.error || null, irrecoverable: false });
+        }
+      } catch (error) {
+        await this.store.noteEvidenceGap({ kind: 'lifecycle_evidence_status_unavailable', error: String(error?.message || error), irrecoverable: false });
       }
-    } catch (error) {
-      await this.store.noteEvidenceGap({ kind: 'lifecycle_evidence_status_unavailable', error: String(error?.message || error), irrecoverable: false });
     }
     try {
       const contents = await readFile(this.lifecyclePath, 'utf8');
@@ -278,12 +280,14 @@ export class SelfVerificationRunner {
     await this.writer.flush();
     await this.ingestLifecycleEvidence();
     await this.preserveArtifact();
-    const config = JSON.parse(await readFile(this.configPath, 'utf8'));
+    const config = existsSync(this.configPath)
+      ? JSON.parse(await readFile(this.configPath, 'utf8'))
+      : { symphony_workspace_root: join(dirname(this.configPath), 'operator-state', 'workspaces'), symphony_port: 4100 };
     const workspace = join(config.symphony_workspace_root, workspaceKey(this.run.authoritative_task.identifier));
     const state = await this.readState();
     let dashboard;
     let dashboardError = null;
-    try { dashboard = await this.observeDashboard(); } catch (error) {
+    try { dashboard = existsSync(join(dirname(this.configPath), 'operator-state', 'runtime.json')) ? await this.observeDashboard() : {}; } catch (error) {
       dashboard = { error: 'unavailable' };
       dashboardError = String(error?.message || error);
       await this.store.noteEvidenceGap({ kind: 'symphony_dashboard_unavailable', error: dashboardError, irrecoverable: false });
@@ -325,7 +329,12 @@ async function main() {
     projectConfigPath: get('--project-config'), databaseUrl: get('--database-url'), stateRoot: get('--state-root'), repository: get('--repository'), configuredBase: get('--configured-base'),
     readReviewJob: async jobId => JSON.parse(await command('chatgpt-shot', ['jobs', jobId]))
   });
-  await runner.admit();
+  const admitted = await runner.admit();
+  if (admitted.run.finalization?.phase === 'cleanup_started') {
+    await runner.ensureRuntimeConfig();
+    process.stdout.write(`${JSON.stringify(await runner.finalize())}\n`);
+    return;
+  }
   await runner.ensureRuntimeConfig();
   await runner.publish(get('--plan'));
   await runner.startProduction();

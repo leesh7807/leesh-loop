@@ -138,6 +138,17 @@ test('finalization requires authoritative admission-safe closure and preserves i
   assert.match(await readFile(store.paths.bundle, 'utf8'), /irrecoverable collection failure/);
 });
 
+test('finalization durably marks cleanup before destructive harness cleanup and resumes after interruption', async t => {
+  const store = new SelfVerificationStore(await fixture(t), 'https://app.notion.com/p/3df8a265862580cfb1ebda7e3337d9fa');
+  await store.admit({ bindingFactory: async runId => binding(runId) });
+  const safe = async () => ({ admission_safe: true, task_dispatchable: false, execution_owners: [], conflicting_ownership: [], workspace_absent: true });
+  const interrupted = await store.finalize({ authoritativeReadback: safe, cleanupHarness: async () => ({ ok: false, reason: 'interrupted after cleanup marker' }) });
+  assert.equal(interrupted.finalized, false);
+  assert.equal((await store.read()).finalization.phase, 'cleanup_started');
+  const resumed = await store.finalize({ authoritativeReadback: safe, cleanupHarness: async () => ({ ok: true }) });
+  assert.equal(resumed.finalized, true);
+});
+
 test('finalized runs retain separate evidence bundles before the next admission', async t => {
   const directory = await fixture(t);
   const database = 'https://app.notion.com/p/3df8a265862580cfb1ebda7e3337d9fa';

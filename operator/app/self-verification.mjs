@@ -335,7 +335,19 @@ export class SelfVerificationStore {
     const disposition = run.collection_disposition?.value || run.collection_disposition;
     if (disposition === 'incomplete' && !irrecoverableCollection) return { run, finalized: false, reason: 'collection_is_recoverable_incomplete' };
     if (!disposition) await this.setCollectionDisposition('complete');
-    const cleanup = await cleanupHarness(run);
+    const cleanupRun = await withLock(this.paths.lock, async () => {
+      const current = await this.read();
+      if (!current || current.finalization?.finalized === true) return current;
+      if (current.finalization?.phase !== 'cleanup_started') {
+        current.finalization = { ...(current.finalization || {}), phase: 'cleanup_started', cleanup_started_at: isoNow(), cleanup: null };
+        current.updated_at = isoNow();
+        await atomicJson(this.paths.runRecord || this.currentRunPath, current);
+        await atomicJson(this.currentRunPath, current);
+      }
+      return current;
+    });
+    if (!cleanupRun || cleanupRun.finalization?.finalized === true) return { run: cleanupRun, finalized: true, resumed: true };
+    const cleanup = await cleanupHarness(cleanupRun);
     if (!cleanup || cleanup.ok !== true) return { run: await this.read(), finalized: false, reason: 'harness_cleanup_failed', cleanup };
     const finalDisposition = disposition === 'incomplete' && irrecoverableCollection ? 'irrecoverable collection failure' : disposition || 'complete';
     const finalized = await withLock(this.paths.lock, async () => {
