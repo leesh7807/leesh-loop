@@ -124,6 +124,8 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - 인증 후 두 번째 실제 run: `d99cca1e-1cef-4424-abdd-907675aa73e6`. 같은 persistent Notion DB와 repository를 사용해 atomic admission, run-scoped temporary base readback, canonical task publish(`PLAN-FDE42677384E`, task `3df8a265-8625-8163-8a5f-d38b06053997`), runtime ready/dispatch authorization, worker preparation, Codex session start, execution teardown까지 실제 production path를 통과했다. `chatgpt-shot doctor`는 authenticated session을 authoritative하게 확인했다.
 - 두 번째 run의 production blocker: worker가 task branch를 temporary configured base와 같은 `self-verification/d99cca1e-1cef-4424-abdd-907675aa73e6`로 사용해 `gh pr create`가 base와 head가 같다는 이유로 거절됐다. Worker Workpad와 Git remote readback에 commit `4da0d0e36153e0645d2ef84cccdeb85f2de15a39` 및 동일 branch가 남았고, PR/review/approval/merge는 실행되지 않았다. 이는 self-verification이 우회하거나 합성할 수 없는 실제 production Human Review blocker다.
 - 두 번째 run resume/deadline readback: runner를 재시작해 동일 run을 찾았고, authoritative Notion State `Human Review`를 재확인했다. observer deadline을 별도 실행해 `collection_disposition=complete`를 durable하게 남겼지만, task가 terminal이 아니고 workspace/runtime이 보존되어 `finalization.finalized=false`로 유지됐다. 따라서 인증 blocker는 해소됐으나 대표 성공 경로는 task branch/base identity blocker에서 중단된 상태다.
+- branch semantics correction: 이전 run에서 task branch와 run-scoped temporary configured base가 동일해 PR 생성이 거절된 결함을 수정했다. 일반 production Symphony workspace preparation이 exact `refs/remotes/origin/$SYMPHONY_GITHUB_BASE_BRANCH`에서 `SYMPHONY_TASK_BRANCH`를 만들고, continuation마다 configured repository remote, current task branch, base와의 분리를 authoritative Git readback으로 검증한다. Codex local/remote process에도 같은 task branch를 `SYMPHONY_TASK_BRANCH`로 전달한다. 별도 self-verification branch/endpoint/Tracker mutation은 추가하지 않았다.
+- branch correction local verification: 실제 Git clone fixture에서 `HEAD == refs/remotes/origin/main`, current branch `task/PLAN-BRANCH-1`, continuation branch reuse를 확인했고, origin remote를 다른 repository로 바꾸면 worker 전 단계에서 거절되는 회귀 테스트를 추가했다. Node app 46 passed, Symphony 334 passed/6 skipped. `mix format --check-formatted`는 기존 unrelated `operator/symphony/lib/symphony_elixir/notion/agent_tool.ex` drift만 보고했으며 수정하지 않았다.
 - artifact preservation 구현: 성공 경로에서는 GitHub PR patch를 run-scoped durable artifact file과 SHA-256 metadata로 보존한다. workspace/task branch/temporary base cleanup 이후에도 result representation을 재확인할 수 있게 했다.
 - authority check: Runner/Observer는 worker/Tracker state를 직접 mutate하지 않고, Human Review approval과 stranded closure는 일반 Production Operator capability를 통해서만 수행한다. Lifecycle evidence는 best-effort observer이고 production scheduler authority가 아니다.
 - 검증 결과: Node app 전체 44 tests passed; Publisher 26 tests passed; Symphony 전체 333 tests passed, 6 skipped; modified Elixir files format check passed; repository baseline의 unrelated `operator/symphony/lib/symphony_elixir/notion/agent_tool.ex` format drift는 수정하지 않았다; `git diff --check` passed.
@@ -304,3 +306,21 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - 기각 finding: 없음. live-run 기록만 추가된 최종 PR HEAD의 실제 원문 기준 실제 결함이 없음을 확인했다.
 - 적용한 커밋: 없음.
 - 검증 결과: 지정 최종 HEAD 기준 `chatgpt-shot`이 `None.`을 반환했다. 코드 변경이 없으므로 이전 Node app 46 passed, Symphony 333 passed/6 skipped, Node syntax, Elixir format, `git diff --check` 결과가 유효하다.
+
+- 리뷰한 HEAD: `6adb2cf` (`Prepare production task branches separately from base`)
+- Review Job: `2c9f4183-fd54-43fa-8bb1-6063491028cc`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - continuation이 task branch만 검사하고 `origin`을 configured repository와 비교하지 않음: 수용. task branch preparation이 매 dispatch에서 `git remote get-url origin`과 `SYMPHONY_GITHUB_REPOSITORY_URL`의 exact equality를 확인하도록 수정했다.
+  - `SYMPHONY_TASK_BRANCH`가 Codex worker process에 전달되지 않음: 수용. local Port 환경과 remote SSH launch 모두에 issue별 authoritative task branch를 전달하고 `AppServer.run/4`도 issue를 session startup에 연결했다.
+- 기각 finding: 없음.
+- 적용한 커밋: `5902373`
+- 검증 결과: Node app 46 passed, Symphony 334 passed/6 skipped, `git diff --check` passed. `mix format --check-formatted`는 기존 unrelated `notion/agent_tool.ex` drift만 보고했다. 수정 후 현재 HEAD에 대한 재리뷰가 완료되어야 한다.
+
+- 리뷰한 HEAD: `5902373`
+- Review Job: `76101736-9071-4d30-8e6d-4566804c528b`
+- verdict: `PASS` (`None.`)
+- finding 수용 근거: 없음.
+- 기각 finding: 없음.
+- 적용한 커밋: 없음.
+- 검증 결과: 지정 HEAD 실제 원문 기준 `chatgpt-shot`이 `None.`을 반환했다.
