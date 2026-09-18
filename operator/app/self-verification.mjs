@@ -92,14 +92,14 @@ async function acquireLock(lockDirectory, { waitMs = DEFAULT_LOCK_WAIT_MS, pollM
       if (error?.code !== 'EEXIST') throw error;
       const owner = await readJson(join(lockDirectory, 'owner.json'));
       if (owner && !processAlive(owner.pid)) {
-        await rm(lockDirectory, { recursive: true, force: true });
+        await reclaimAdmissionLock(lockDirectory);
         continue;
       }
       if (!owner) {
         try {
           const metadata = await stat(lockDirectory);
           if (Date.now() - metadata.mtimeMs > DEFAULT_LOCK_POLL_MS * 4) {
-            await rm(lockDirectory, { recursive: true, force: true });
+            await reclaimAdmissionLock(lockDirectory);
             continue;
           }
         } catch (statError) {
@@ -111,6 +111,17 @@ async function acquireLock(lockDirectory, { waitMs = DEFAULT_LOCK_WAIT_MS, pollM
       await sleep(pollMs);
     }
   }
+}
+
+async function reclaimAdmissionLock(lockDirectory) {
+  const reclaimPath = `${lockDirectory}.reclaim-${process.pid}-${randomUUID()}`;
+  try {
+    await rename(lockDirectory, reclaimPath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  await rm(reclaimPath, { recursive: true, force: true });
 }
 
 async function withLock(lockDirectory, operation, options) {

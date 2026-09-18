@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import { execFile as execute } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import test from 'node:test';
 import { EvidenceWriter, SelfVerificationStore, admissionNamespace, runWithDeadline } from '../self-verification.mjs';
+
+const execFile = promisify(execute);
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-self-verification-'));
@@ -57,6 +61,33 @@ test('an interrupted lock marker without an owner is recoverable', async t => {
   await utimes(store.paths.lock, stale, stale);
   const admitted = await store.admit({ bindingFactory: async runId => binding(runId) });
   assert.equal(admitted.resumed, false);
+});
+
+test('concurrent invocations recover one stale admission lock without splitting ownership', async t => {
+  const stateRoot = await fixture(t);
+  const database = 'https://app.notion.com/p/3df8a265862580cfb1ebda7e3337d9fa';
+  const store = new SelfVerificationStore(stateRoot, database);
+  await mkdir(store.paths.lock, { recursive: true });
+  await writeFile(join(store.paths.lock, 'owner.json'), JSON.stringify({ pid: 999999, started_at: new Date().toISOString() }));
+  const moduleUrl = new URL('../self-verification.mjs', import.meta.url).href;
+  const script = `
+    import { SelfVerificationStore } from ${JSON.stringify(moduleUrl)};
+    const database = process.env.SV_DATABASE;
+    const store = new SelfVerificationStore(process.env.SV_STATE, database);
+    const result = await store.admit({ bindingFactory: async runId => ({
+      repository: 'https://github.com/example/project.git',
+      configuredBase: 'main',
+      seedCommit: '0123456789abcdef0123456789abcdef01234567',
+      temporaryBase: 'self-verification/' + runId,
+      trackerDatabase: database
+    }) });
+    process.stdout.write(JSON.stringify({ runId: result.run.run_id, resumed: result.resumed }));
+  `;
+  const launch = () => execFile(process.execPath, ['--input-type=module', '--eval', script], { env: { ...process.env, SV_STATE: stateRoot, SV_DATABASE: database } });
+  const results = await Promise.all([launch(), launch()]);
+  const admissions = results.map(result => JSON.parse(result.stdout));
+  assert.equal(new Set(admissions.map(result => result.runId)).size, 1);
+  assert.equal(admissions.filter(result => result.resumed).length, 1);
 });
 
 test('an admitted run record is discoverable if the current-run pointer write is interrupted', async t => {
