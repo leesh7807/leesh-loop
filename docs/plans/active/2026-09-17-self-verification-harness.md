@@ -240,3 +240,12 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - 기각 finding: 없음. `None.`
 - 적용한 커밋: 없음.
 - 검증 결과: 지정 HEAD의 실제 원문 기준 finding 없음. 해당 HEAD의 로컬 검증은 이전 라운드에서 Node app 44 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, format/syntax/`git diff --check` 통과를 확인했다.
+
+- 리뷰한 HEAD: `5faba6fb51aa4d29d622fc10e6e47639fb37bf43`
+- Review Job: `0fad128b-b2a5-4e36-9a6d-edeee3e3c33d`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - stale dispatch lock 복구가 unlink 후 재생성하는 TOCTOU로 scheduler와 stranded closure를 동시에 통과시킬 수 있음: 수용. Elixir와 Production Operator의 공유 dispatch lock 모두 stale 경로를 동일 디렉터리의 고유 reclaim 경로로 먼저 atomic rename한 뒤 원자 경계 밖에서 재획득하도록 변경했고, 다른 contender가 먼저 rename한 경우 새 owner를 다시 관찰하도록 했다.
+- 기각 finding: 없음.
+- 적용한 커밋: `70c6ad0c0a06ab75bba20a8ae1a1955870fc1c23`
+- 검증 결과: Production Operator 10 passed, Node app 전체 45 passed, Symphony 333 passed/6 skipped, Elixir format check, syntax check, `git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
