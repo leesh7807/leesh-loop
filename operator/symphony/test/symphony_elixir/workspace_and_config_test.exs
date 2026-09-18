@@ -48,6 +48,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       )
 
     previous_base = System.get_env("SYMPHONY_GITHUB_BASE_BRANCH")
+    previous_repository = System.get_env("SYMPHONY_GITHUB_REPOSITORY_URL")
 
     try do
       template_repo = Path.join(test_root, "source")
@@ -67,6 +68,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       )
 
       System.put_env("SYMPHONY_GITHUB_BASE_BRANCH", "main")
+      System.put_env("SYMPHONY_GITHUB_REPOSITORY_URL", template_repo)
       issue = %Issue{id: "task-branch-1", identifier: "PLAN-BRANCH-1"}
 
       assert Workspace.task_branch(issue) == "task/PLAN-BRANCH-1"
@@ -76,10 +78,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert {task_head, 0} = System.cmd("git", ["-C", workspace, "rev-parse", "HEAD"])
       assert String.trim(task_head) == String.trim(remote_base)
 
+      {_, 0} = System.cmd("git", ["-C", workspace, "remote", "set-url", "origin", Path.join(test_root, "other-source")])
+      assert {:error, {:task_branch_preparation_failed, 1, _}} = Workspace.create_for_issue(issue)
+
+      {_, 0} = System.cmd("git", ["-C", workspace, "remote", "set-url", "origin", template_repo])
       assert {:ok, ^workspace} = Workspace.create_for_issue(issue)
       assert {"task/PLAN-BRANCH-1\n", 0} = System.cmd("git", ["-C", workspace, "branch", "--show-current"])
     after
       restore_env("SYMPHONY_GITHUB_BASE_BRANCH", previous_base)
+      restore_env("SYMPHONY_GITHUB_REPOSITORY_URL", previous_repository)
       File.rm_rf(test_root)
     end
   end

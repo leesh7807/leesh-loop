@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   """
 
   require Logger
-  alias SymphonyElixir.{Codex.DynamicTool, Config, PathSafety, SSH}
+  alias SymphonyElixir.{Codex.DynamicTool, Config, PathSafety, SSH, Workspace}
 
   @initialize_id 1
   @thread_start_id 2
@@ -26,7 +26,7 @@ defmodule SymphonyElixir.Codex.AppServer do
 
   @spec run(Path.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
   def run(workspace, prompt, issue, opts \\ []) do
-    with {:ok, session} <- start_session(workspace, opts) do
+    with {:ok, session} <- start_session(workspace, Keyword.put_new(opts, :issue, issue)) do
       try do
         run_turn(session, prompt, issue, opts)
       after
@@ -38,10 +38,11 @@ defmodule SymphonyElixir.Codex.AppServer do
   @spec start_session(Path.t(), keyword()) :: {:ok, session()} | {:error, term()}
   def start_session(workspace, opts \\ []) do
     worker_host = Keyword.get(opts, :worker_host)
+    issue = Keyword.get(opts, :issue)
     dynamic_tool_binding = DynamicTool.bind(issue: Keyword.get(opts, :issue))
 
     with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace, worker_host),
-         {:ok, port} <- start_port(expanded_workspace, worker_host, dynamic_tool_binding) do
+         {:ok, port} <- start_port(expanded_workspace, worker_host, dynamic_tool_binding, issue) do
       metadata = port_metadata(port, worker_host)
 
       with {:ok, session_policies} <- session_policies(expanded_workspace, worker_host),
@@ -189,7 +190,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp start_port(workspace, nil, dynamic_tool_binding) do
+  defp start_port(workspace, nil, dynamic_tool_binding, issue) do
     executable = System.find_executable("bash")
 
     if is_nil(executable) do
@@ -202,9 +203,9 @@ defmodule SymphonyElixir.Codex.AppServer do
             :binary,
             :exit_status,
             :stderr_to_stdout,
-            args: [~c"-lc", String.to_charlist(local_launch_command(dynamic_tool_binding))],
+            args: [~c"-lc", String.to_charlist(local_launch_command(dynamic_tool_binding, issue))],
             cd: String.to_charlist(workspace),
-            env: tracker_secret_port_env(dynamic_tool_binding),
+            env: port_env(dynamic_tool_binding, issue),
             line: @port_line_bytes
           ]
         )
@@ -213,13 +214,14 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp start_port(workspace, worker_host, dynamic_tool_binding) when is_binary(worker_host) do
-    remote_command = remote_launch_command(workspace, dynamic_tool_binding)
+  defp start_port(workspace, worker_host, dynamic_tool_binding, issue) when is_binary(worker_host) do
+    remote_command = remote_launch_command(workspace, dynamic_tool_binding, issue)
     SSH.start_port(worker_host, remote_command, line: @port_line_bytes)
   end
 
-  defp local_launch_command(dynamic_tool_binding) do
+  defp local_launch_command(dynamic_tool_binding, issue) do
     [
+      task_branch_export_command(issue),
       tracker_secret_unset_command(dynamic_tool_binding),
       "exec #{Config.settings!().codex.command}"
     ]
@@ -227,9 +229,10 @@ defmodule SymphonyElixir.Codex.AppServer do
     |> Enum.join(" && ")
   end
 
-  defp remote_launch_command(workspace, dynamic_tool_binding) when is_binary(workspace) do
+  defp remote_launch_command(workspace, dynamic_tool_binding, issue) when is_binary(workspace) do
     [
       "cd #{shell_escape(workspace)}",
+      task_branch_export_command(issue),
       tracker_secret_unset_command(dynamic_tool_binding),
       "exec #{Config.settings!().codex.command}"
     ]
@@ -241,6 +244,22 @@ defmodule SymphonyElixir.Codex.AppServer do
     dynamic_tool_binding.secret_environment_names
     |> valid_environment_names()
     |> Enum.map(fn name -> {String.to_charlist(name), false} end)
+  end
+
+  defp port_env(dynamic_tool_binding, issue) do
+    tracker_secret_port_env(dynamic_tool_binding) ++ task_branch_port_env(issue)
+  end
+
+  defp task_branch_port_env(nil), do: []
+
+  defp task_branch_port_env(issue) do
+    [{~c"SYMPHONY_TASK_BRANCH", String.to_charlist(Workspace.task_branch(issue))}]
+  end
+
+  defp task_branch_export_command(nil), do: nil
+
+  defp task_branch_export_command(issue) do
+    "export SYMPHONY_TASK_BRANCH=#{shell_escape(Workspace.task_branch(issue))}"
   end
 
   defp tracker_secret_unset_command(dynamic_tool_binding) do

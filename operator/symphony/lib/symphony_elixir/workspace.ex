@@ -330,11 +330,19 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp maybe_prepare_task_branch(workspace, issue_context, worker_host) do
-    case System.get_env("SYMPHONY_GITHUB_BASE_BRANCH") |> blank_to_nil() do
-      nil ->
+    configured_base = System.get_env("SYMPHONY_GITHUB_BASE_BRANCH") |> blank_to_nil()
+    configured_repository = System.get_env("SYMPHONY_GITHUB_REPOSITORY_URL") |> blank_to_nil()
+
+    case {configured_base, configured_repository} do
+      {nil, _} ->
         :ok
 
-      configured_base ->
+      {_, nil} ->
+        reason = :github_repository_url_missing
+        LifecycleEvidence.record(:task_branch_preparation_failed, %{reason: inspect(reason), configured_base: configured_base})
+        {:error, reason}
+
+      {configured_base, configured_repository} ->
         task_branch = issue_context.task_branch
 
         if task_branch == configured_base do
@@ -342,7 +350,7 @@ defmodule SymphonyElixir.Workspace do
           LifecycleEvidence.record(:task_branch_preparation_failed, %{reason: inspect(reason), task_branch: task_branch, configured_base: configured_base})
           {:error, reason}
         else
-          script = task_branch_script(configured_base, task_branch)
+          script = task_branch_script(configured_repository, configured_base, task_branch)
 
           case run_workspace_command(script, workspace, worker_host) do
             {:ok, {_output, 0}} ->
@@ -362,14 +370,18 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp task_branch_script(configured_base, task_branch) do
+  defp task_branch_script(configured_repository, configured_base, task_branch) do
+    escaped_repository = shell_escape(configured_repository)
     escaped_base = shell_escape(configured_base)
     escaped_task_branch = shell_escape(task_branch)
 
     [
       "set -eu",
+      "configured_repository=#{escaped_repository}",
       "configured_base=#{escaped_base}",
       "task_branch=#{escaped_task_branch}",
+      "origin_url=\"$(git remote get-url origin)\"",
+      "test \"$origin_url\" = \"$configured_repository\"",
       "git check-ref-format --branch \"$task_branch\" >/dev/null",
       "current_branch=\"$(git branch --show-current)\"",
       "if [ \"$current_branch\" = \"$configured_base\" ]; then",

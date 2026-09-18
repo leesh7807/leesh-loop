@@ -2042,6 +2042,7 @@ defmodule SymphonyElixir.CoreTest do
       count=0
       printf 'ARGV:%s\\n' \"$*\" >> \"$trace_file\"
       printf 'CWD:%s\\n' \"$PWD\" >> \"$trace_file\"
+      printf 'TASK_BRANCH:%s\\n' \"$SYMPHONY_TASK_BRANCH\" >> \"$trace_file\"
 
       while IFS= read -r line; do
         count=$((count + 1))
@@ -2095,6 +2096,7 @@ defmodule SymphonyElixir.CoreTest do
       refute Enum.any?(lines, &String.contains?(&1, "--yolo"))
       assert cwd_line = Enum.find(lines, fn line -> String.starts_with?(line, "CWD:") end)
       assert String.ends_with?(cwd_line, Path.basename(workspace))
+      assert "TASK_BRANCH:task/MT-77" in lines
 
       assert Enum.any?(lines, fn line ->
                if String.starts_with?(line, "JSON:") do
