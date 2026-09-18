@@ -3,7 +3,7 @@
 import { execFile as execute } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { NotionProductionOperator } from './production-operator.mjs';
@@ -85,18 +85,35 @@ export class SelfVerificationRunner {
 
   async publish(planPath, logicalTask = {}) {
     if (!this.run?.run_id) await this.admit();
-    const plan = await readFile(resolve(planPath), 'utf8');
-    const canonicalIdentifier = `PLAN-${createHash('sha256').update(plan, 'utf8').digest('hex').slice(0, 12).toUpperCase()}`;
+    const run = await this.store.read();
+    const sourcePlan = await readFile(resolve(planPath), 'utf8');
+    const scopedPlanPath = join(this.store.directory, 'run-plan.md');
+    const runMarker = `<!-- leesh-loop self-verification run: ${run.run_id} -->`;
+    const expectedPlanSha = run.logical_task?.scoped_plan_sha256;
+    let scopedPlan;
+    try {
+      scopedPlan = await readFile(scopedPlanPath, 'utf8');
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      scopedPlan = `${runMarker}\n${sourcePlan}`;
+      try { await writeFile(scopedPlanPath, scopedPlan, { flag: 'wx', mode: 0o600 }); } catch (writeError) {
+        if (writeError?.code !== 'EEXIST') throw writeError;
+        scopedPlan = await readFile(scopedPlanPath, 'utf8');
+      }
+    }
+    const scopedPlanSha = createHash('sha256').update(scopedPlan, 'utf8').digest('hex');
+    if (expectedPlanSha && expectedPlanSha !== scopedPlanSha) throw new Error('durable self-verification Plan changed during resume');
+    const canonicalIdentifier = `PLAN-${scopedPlanSha.slice(0, 12).toUpperCase()}`;
     if (logicalTask.identifier && logicalTask.identifier !== canonicalIdentifier) throw new Error(`logical task identifier must match publisher identity ${canonicalIdentifier}`);
     const identifier = canonicalIdentifier;
     const title = logicalTask.title || 'Bounded production workflow investigation';
-    const result = await this.store.bindLogicalTask({ identifier, title }, async task => {
+    const result = await this.store.bindLogicalTask({ identifier, title, scoped_plan_path: scopedPlanPath, scoped_plan_sha256: scopedPlanSha }, async task => {
       const publisher = join(root, 'operator/notion_publisher/dist/src/cli.js');
       if (!existsSync(publisher)) {
         await command('npm', ['ci'], { cwd: join(root, 'operator/notion_publisher') });
         await command('npm', ['run', 'build'], { cwd: join(root, 'operator/notion_publisher') });
       }
-      const output = await command(process.execPath, [publisher, '--plan', resolve(planPath), '--config', join(root, 'operator/notion_publisher/examples/publisher-config.json'), '--database-url', this.databaseUrl, '--resume-existing']);
+      const output = await command(process.execPath, [publisher, '--plan', scopedPlanPath, '--config', join(root, 'operator/notion_publisher/examples/publisher-config.json'), '--database-url', this.databaseUrl, '--resume-existing']);
       const lines = output.split(/\r?\n/).filter(Boolean);
       const published = JSON.parse(lines.at(-1));
       return { id: published.page_id, identifier: published.identifier, url: published.url };
@@ -132,6 +149,14 @@ export class SelfVerificationRunner {
     const port = Number(config.symphony_port || 4100);
     const response = await fetch(`http://127.0.0.1:${port}/api/v1/state`);
     if (!response.ok) throw new Error(`Symphony state read failed: HTTP ${response.status}`);
+    return response.json();
+  }
+
+  async observeRuntime() {
+    const config = JSON.parse(await readFile(this.configPath, 'utf8'));
+    const port = Number(config.symphony_port || 4100);
+    const response = await fetch(`http://127.0.0.1:${port}/api/v1/runtime`);
+    if (!response.ok) throw new Error(`Symphony runtime read failed: HTTP ${response.status}`);
     return response.json();
   }
 
@@ -176,6 +201,17 @@ export class SelfVerificationRunner {
   }
 
   async ingestLifecycleEvidence() {
+    try {
+      const runtime = await this.observeRuntime();
+      const status = runtime.lifecycle_evidence || {};
+      if (Number(status.dropped || 0) > 0 || status.error) {
+        const current = await this.store.read();
+        const duplicate = (current.evidence?.gaps || []).some(gap => gap.kind === 'lifecycle_evidence_writer_failure' && gap.runtime_id === runtime.runtime_id);
+        if (!duplicate) await this.store.noteEvidenceGap({ kind: 'lifecycle_evidence_writer_failure', runtime_id: runtime.runtime_id, dropped: status.dropped || 0, error: status.error || null, irrecoverable: false });
+      }
+    } catch (error) {
+      await this.store.noteEvidenceGap({ kind: 'lifecycle_evidence_status_unavailable', error: String(error?.message || error), irrecoverable: false });
+    }
     try {
       const contents = await readFile(this.lifecyclePath, 'utf8');
       for (const line of contents.split(/\r?\n/).filter(Boolean)) {

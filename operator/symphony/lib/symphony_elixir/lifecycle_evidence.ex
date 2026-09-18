@@ -31,10 +31,10 @@ defmodule SymphonyElixir.LifecycleEvidence do
   def status do
     case Process.whereis(__MODULE__) do
       nil -> %{enabled?: false, written: 0, dropped: 0, error: nil}
-      pid -> GenServer.call(pid, :status, 1_000)
+      pid -> GenServer.call(pid, :status, 1_000) |> public_status()
     end
   catch
-    :exit, _ -> %{enabled?: false, written: 0, dropped: 0, error: :unavailable}
+    :exit, _ -> %{enabled?: false, written: 0, dropped: 0, error: "unavailable"}
   end
 
   @impl true
@@ -72,7 +72,15 @@ defmodule SymphonyElixir.LifecycleEvidence do
 
   @impl true
   def handle_call(:status, _from, state) do
-    {:reply, Map.put(state, :enabled?, is_binary(state.path) and state.path != ""), state}
+    {:reply, public_status(Map.put(state, :enabled?, is_binary(state.path) and state.path != "")), state}
+  end
+
+  defp public_status(state) do
+    Map.update(state, :error, nil, fn
+      nil -> nil
+      value when is_atom(value) -> Atom.to_string(value)
+      value -> value
+    end)
   end
 
   defp normalize_kind(kind) when is_atom(kind), do: Atom.to_string(kind)

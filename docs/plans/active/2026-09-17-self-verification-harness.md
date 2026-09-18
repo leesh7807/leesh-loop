@@ -123,7 +123,7 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - finalization/readback: lifecycle evidence에는 admission과 readiness failure가 남았고, `admission_safe=true`, `task_dispatchable=false`, ownership 없음, workspace 없음으로 확인했다. temporary base는 harness cleanup 후 remote에서 absent readback되었고 run bundle은 finalized 및 `collection complete`로 durable하게 남았다. 이는 production workflow 성공을 의미하지 않으며, 인증 blocker를 포함한 실패 경로의 finalization이다.
 - artifact preservation 구현: 성공 경로에서는 GitHub PR patch를 run-scoped durable artifact file과 SHA-256 metadata로 보존한다. workspace/task branch/temporary base cleanup 이후에도 result representation을 재확인할 수 있게 했다.
 - authority check: Runner/Observer는 worker/Tracker state를 직접 mutate하지 않고, Human Review approval과 stranded closure는 일반 Production Operator capability를 통해서만 수행한다. Lifecycle evidence는 best-effort observer이고 production scheduler authority가 아니다.
-- 검증 결과: Node app 전체 33 tests passed; Publisher 25 tests passed; Symphony 전체 331 tests passed, 6 skipped; modified Elixir files format check passed; repository baseline의 unrelated `operator/symphony/lib/symphony_elixir/notion/agent_tool.ex` format drift는 수정하지 않았다; `git diff --check` passed.
+- 검증 결과: Node app 전체 40 tests passed; Publisher 26 tests passed; Symphony 전체 333 tests passed, 6 skipped; modified Elixir files format check passed; repository baseline의 unrelated `operator/symphony/lib/symphony_elixir/notion/agent_tool.ex` format drift는 수정하지 않았다; `git diff --check` passed.
 
 ## chatgpt-shot review log
 
@@ -141,3 +141,27 @@ Workspace, task branch, temporary base가 cleanup된 뒤에도 investigation res
 - 기각 finding: 없음.
 - 적용한 커밋: `1334a23` (위 6개 수정과 regression tests)
 - 검증 결과: Node app 35 passed, Publisher 26 passed, production-operator/self-verification 집중 검증 16 passed, syntax 및 `git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
+
+- 리뷰한 HEAD: `2999d25e0ad0d5c8d05a76e65233d94375c8dd7c`
+- Review Job: `70398be4-de6a-4f27-92cb-e4903035f38f`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - independent review Job target HEAD 부재/자기주장 fallback: 수용. authoritative `job.targetHead`가 없으면 approval을 거절하고 delivered HEAD와 exact equality를 검증하도록 수정했다.
+  - PASS substring 오인식: 수용. `None.` 또는 명시적 PASS 문서 전체 형식만 승인하고 FINDINGS 본문의 PASS를 거절하도록 수정했다.
+  - stranded closure의 task/dashboard Identifier 혼동: 수용. immutable task Identifier를 readback해 CLI/dashboard identity와 일치할 때만 closure를 진행한다.
+  - dispatch fence와 scheduler spawn 재검증 race: 수용. Operator와 Symphony가 동일 task Identifier의 coordination lock을 공유하고 lock 안에서 revalidation 후 spawn/terminal transition을 경쟁시킨다.
+  - object-valued complete disposition의 늦은 evidence gap: 수용. `{value: 'complete'}`도 gap 발생 시 `incomplete`로 downgrade한다.
+  - finalized run 이후 이전 Symphony runtime 잔존: 수용. finalization 전에 active owner 전체를 확인하고 기존 production `leesh-loop stop` lifecycle action 및 owned-state readback을 거친다.
+- 기각 finding: 없음.
+- 적용한 커밋: `78845ff1e6e92905969c90188bb87b4a1056204a`
+- 검증 결과: Node app 40 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, dispatch coordination focused tests 2 passed, syntax/format/`git diff --check` passed. 수정 후 현재 HEAD에 대한 재리뷰가 필요하다.
+
+- 리뷰한 HEAD: `78845ff1e6e92905969c90188bb87b4a1056204a`
+- Review Job: `30e85f0b-a948-45f3-9e33-5b5fb68a2864`
+- verdict: `FINDINGS`
+- finding 수용 근거:
+  - finalized 이전 run의 terminal task 재사용: 수용. run ID marker를 포함한 durable scoped Plan을 만들어 각 run의 canonical task identity를 분리하고 resume 시 scoped Plan SHA를 검증한다.
+  - lifecycle evidence writer drop/error의 collection gap 누락: 수용. runtime endpoint가 writer status를 authoritative readback으로 노출하고 runner가 dropped/error를 durable evidence gap으로 기록한다.
+- 기각 finding: 없음.
+- 적용한 커밋: 다음 수정 커밋에 기록한다.
+- 검증 결과: 수정 후 새 HEAD에 대해 Node app 40 passed, Publisher 26 passed, Symphony 333 passed/6 skipped, format/syntax/`git diff --check` passed. 새 HEAD에 대한 재리뷰가 필요하다.
