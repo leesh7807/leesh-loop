@@ -9,8 +9,7 @@ const strategies = new Map([
   ['Human Review', { phase: 'Human Review', capability: 'mechanical_review_approval' }],
   ['Merging', { phase: 'Merging', capability: 'observe' }],
   ['Done', { phase: 'Done', capability: 'terminal' }],
-  ['Cancelled', { phase: 'Cancelled', capability: 'terminal' }],
-  ['Rework', { phase: 'Rework', capability: 'observe' }]
+  ['Cancelled', { phase: 'Cancelled', capability: 'terminal' }]
 ]);
 
 export class LifecycleInterpreter {

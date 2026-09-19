@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { validateCatalog } from '../catalog.mjs';
 import { deriveIdentifier } from '../common.mjs';
 import { E2EOrchestrator } from '../orchestrator.mjs';
-import { RunStore } from '../record.mjs';
+import { newRunRecord, RunStore } from '../record.mjs';
+import { runPaths } from '../config.mjs';
 
 const plan = '# Representative task\n\nInspect the repository and write a concise note under docs/.\n';
 
@@ -141,6 +142,7 @@ test('admission does not treat unrelated branch changes as run-owned residue', a
   const previous = {
     run_id: 'run-previous',
     status: 'finished',
+    failures: [],
     finalization: { complete: true },
     cleanup: { unresolved: [], runtime_stopped: true },
     evidence: { branch_isolation: { unrelated_changes: ['refs/heads/main'], remaining_run_owned_refs: [] } },
@@ -150,4 +152,35 @@ test('admission does not treat unrelated branch changes as run-owned residue', a
   harness.capabilities.store = { async list() { return [previous]; } };
   const result = await new E2EOrchestrator({ ...harness, random: () => 0 }).admit();
   assert.equal(result.workload.length, 1);
+});
+
+test('admission blocks an unresolved new remote ref', async () => {
+  const harness = fixture({ states: ['Ready'], clock: () => 0 });
+  const previous = {
+    run_id: 'run-previous',
+    status: 'finished',
+    failures: [],
+    finalization: { complete: true },
+    cleanup: { unresolved: [], runtime_stopped: true },
+    evidence: { branch_isolation: { unrelated_changes: [], unresolved_new_refs: ['refs/heads/worker-leftover'], remaining_run_owned_refs: [] } },
+    timing: { symphony: { start_requested_at: null, started_at: null } },
+    paths: {}
+  };
+  harness.capabilities.store = { async list() { return [previous]; } };
+  harness.capabilities.finalizer = { async finalize({ record }) { return record; } };
+  await assert.rejects(() => new E2EOrchestrator({ ...harness, random: () => 0 }).admit(), /remains unresolved/);
+});
+
+test('reconciliation rebinds a published task from its workload identity after a crash', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-publisher-crash-'));
+  const harness = fixture({ states: ['Ready'], clock: () => 0 });
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+  const workload = harness.catalog[0];
+  const record = newRunRecord({ config: harness.config, runId: 'run-publisher-crash', workload, paths: runPaths(harness.config, 'run-publisher-crash') });
+  record.status = 'published';
+  record.artifacts.task_identifier = workload.identifier;
+  const orchestrator = new E2EOrchestrator({ ...harness, random: () => 0 });
+  await orchestrator.reconcile(record);
+  assert.equal(record.artifacts.task_id, 'page-1');
 });

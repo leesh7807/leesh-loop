@@ -121,9 +121,11 @@ export class Finalizer {
         const before = record.evidence.branch_refs_before || {};
         const knownDeliveryBranches = this.github.runOwnedDeliveryBranches?.(record.evidence.snapshots.flatMap(snapshot => snapshot.github?.delivery_prs || []), record) || [];
         const runBranches = new Set([baseBranch, ...knownDeliveryBranches, ...record.cleanup.branches_deleted].filter(Boolean).map(branch => `refs/heads/${branch}`));
-        const unrelatedChanges = new Set([...new Set([...Object.keys(before), ...Object.keys(after)])].filter(ref => !runBranches.has(ref)).filter(ref => before[ref] !== after[ref]));
+        const changedRefs = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(ref => !runBranches.has(ref)).filter(ref => before[ref] !== after[ref]);
+        const unrelatedChanges = changedRefs.filter(ref => before[ref] !== undefined && after[ref] !== undefined);
+        const unresolvedNewRefs = changedRefs.filter(ref => before[ref] === undefined && after[ref] !== undefined);
         const remainingRunBranches = Object.keys(after).filter(ref => runBranches.has(ref));
-        record.evidence.branch_isolation = { unrelated_changes: [...unrelatedChanges], remaining_run_owned_refs: remainingRunBranches, transient_mutations_unobservable: true };
+        record.evidence.branch_isolation = { unrelated_changes: unrelatedChanges, unresolved_new_refs: unresolvedNewRefs, remaining_run_owned_refs: remainingRunBranches, transient_mutations_unobservable: true };
         return record.evidence.branch_isolation;
       });
       if (workspaceRoot) {

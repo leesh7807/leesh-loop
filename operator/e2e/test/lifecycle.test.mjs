@@ -5,6 +5,7 @@ import { LifecycleInterpreter, mechanicalReviewAllowed } from '../lifecycle.mjs'
 test('interpreter selects a capability without owning a competing lifecycle state model', () => {
   const interpreter = new LifecycleInterpreter();
   assert.deepEqual(interpreter.interpret({ state: 'Human Review' }), { phase: 'Human Review', capability: 'mechanical_review_approval', state: 'Human Review' });
+  assert.equal(interpreter.interpret({ state: 'Rework' }).capability, 'unsupported_state');
   assert.equal(interpreter.interpret({ state: 'Unexpected' }).capability, 'unsupported_state');
   assert.deepEqual(interpreter.gaps('In Progress'), ['Human Review', 'Merging', 'Done']);
 });

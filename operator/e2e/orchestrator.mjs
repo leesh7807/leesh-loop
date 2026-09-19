@@ -33,10 +33,11 @@ export class E2EOrchestrator {
       || (record.cleanup?.unresolved?.length ?? 0) > 0
       || (record.timing?.symphony?.start_requested_at && record.cleanup?.runtime_stopped !== true)
       || (record.timing?.symphony?.started_at && record.cleanup?.runtime_stopped !== true)
-      || (record.evidence?.branch_isolation?.remaining_run_owned_refs?.length ?? 0) > 0;
+      || (record.evidence?.branch_isolation?.remaining_run_owned_refs?.length ?? 0) > 0
+      || (record.evidence?.branch_isolation?.unresolved_new_refs?.length ?? 0) > 0;
     for (const previous of records.filter(needsReconciliation)) {
       await this.reconcile(previous);
-      if (previous.finalization?.complete !== true || previous.evidence?.branch_isolation?.remaining_run_owned_refs?.length) throw new Error(`previous E2E run ${previous.run_id} remains unresolved; refusing a new dispatch`);
+      if (previous.finalization?.complete !== true || previous.evidence?.branch_isolation?.remaining_run_owned_refs?.length || previous.evidence?.branch_isolation?.unresolved_new_refs?.length) throw new Error(`previous E2E run ${previous.run_id} remains unresolved; refusing a new dispatch`);
     }
     for (const previous of records) {
       const workspace = previous.paths?.workspace_root;
@@ -56,8 +57,7 @@ export class E2EOrchestrator {
 
   async reconcile(record) {
     let task = null;
-    try { task = record.artifacts?.task_id ? await this.notion.readTask(this.config.notion_database_url, record.artifacts.task_id) : null; } catch (error) { addFailure(record, error, 'admission_reconciliation'); }
-    if (!task && record.artifacts?.task_id) task = { id: record.artifacts.task_id, state: null };
+    try { task = await this.readOwnedTask(record); } catch (error) { addFailure(record, error, 'admission_reconciliation'); }
     try {
       await this.finalizer.finalize({ record, reason: 'admission_reconciliation', task, dashboard: record.runtime?.dashboard, baseBranch: record.binding?.base_branch, workspaceRoot: record.paths?.workspace_root, normalDone: task?.state === 'Done' });
     } catch (error) {
@@ -65,6 +65,21 @@ export class E2EOrchestrator {
       await this.store.save(record);
     }
     return record;
+  }
+
+  async readOwnedTask(record) {
+    const expectedIdentifier = record.artifacts?.task_identifier || record.workload?.identifier;
+    const lookup = record.artifacts?.task_id || expectedIdentifier;
+    if (!lookup) return null;
+    const task = await this.notion.readTask(this.config.notion_database_url, lookup);
+    if (!task || task.identifier !== expectedIdentifier || task.accepted_plan !== record.workload?.accepted_plan) throw new Error('reconciliation found a task that is not bound to the recorded E2E workload');
+    if (!record.artifacts.task_id) {
+      record.artifacts.task_id = task.id;
+      record.artifacts.task_url = task.url || null;
+      record.artifacts.task_identifier = task.identifier;
+      await this.store.save(record);
+    }
+    return task;
   }
 
   async run() {
