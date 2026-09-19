@@ -4,7 +4,9 @@ Create and maintain a plan that keeps the work aligned with the objective and ma
 
 - Name each plan document using the format `date-summary`.
 
-- Use the confirmed objective, intent, repository conventions, and available evidence to settle decisions that could change the outcome, externally observable behavior, contracts, responsibilities, boundaries, or verification. Include implementation details only when they are necessary to preserve one of those decisions or to make the intended work unambiguous.
+- Treat `Objective`, `Intent`, and `Verification Requirements` as user-owned plan inputs. Do not modify them unless the user explicitly changes or asks to revise them. All subsequent planning must remain consistent with them.
+
+- Use the confirmed objective, intent, verification requirements, repository conventions, and available evidence to settle decisions that could change the outcome, externally observable behavior, contracts, responsibilities, boundaries, or verification. Include implementation details only when they are necessary to preserve one of those decisions or to make the intended work unambiguous.
 
 - Do not invent reasons, tradeoffs, or justifications for the user.
 
@@ -12,7 +14,7 @@ Create and maintain a plan that keeps the work aligned with the objective and ma
 
 - Fix terminology before planning. Use one term for one meaning.
 
-- Update the plan during execution only when new evidence changes an important assumption, decision, boundary, intent, or verification method.
+- Update the plan during execution only when new evidence changes an important assumption, decision, boundary, intent, verification requirement, or verification method.
 
 - Do not use the plan as an execution log.
 
@@ -34,7 +36,7 @@ Do not split the plan just to make the work easier for an agent.
 
 If you cannot turn a planned unit into a clear executable issue, check whether you understand its scope and domain boundary well enough.
 
-The final plan should resolve the decisions necessary to preserve the objective, intended behavior, contracts, responsibilities, boundaries, and verification. It should identify the implementation details that are necessary to carry those decisions into execution, without prescribing incidental implementation choices that can safely be left to the executor.
+The final plan should resolve the decisions necessary to preserve the objective, intended behavior, contracts, responsibilities, boundaries, and verification requirements. It should identify the implementation details that are necessary to carry those decisions into execution, without prescribing incidental implementation choices that can safely be left to the executor.
 
 Write in Korean.
 
@@ -42,30 +44,56 @@ KISS, YANGI, DRY is core principle.
 
 ## Plan format
 
-```text
+```markdown
 # date-summary
 
 ## Objective
 
-Describe the intended outcome and what the plan must stay aligned with.
+User-owned.
+
+Record the confirmed outcome the work must achieve and what the plan must stay aligned with.
+
+Keep it focused on the intended result. Do not include implementation decisions, recovery mechanisms, or verification procedures here.
+
+Do not modify this section unless the user explicitly changes or asks to revise it.
+
+## Intent
+
+User-owned.
+
+Record the confirmed problem, motivation, or desired direction that explains why the objective exists and how the user intends the objective to be interpreted.
+
+Preserve context that could materially change the meaning of success, failure, or acceptable behavior when implementation choices arise.
+
+Do not repeat implementation decisions, mechanisms, detailed contracts, or verification procedures here.
+
+Do not modify this section unless the user explicitly changes or asks to revise it.
+
+## Verification Requirements
+
+User-owned.
+
+Record the confirmed facts, guarantees, or externally observable outcomes that must be demonstrated for the objective to count as achieved.
+
+State what must be proven, not how to prove it.
+
+Include requirements about the intended execution path, required external effects, failure behavior, authoritative outcomes, or boundaries when they materially affect whether the objective was actually achieved.
+
+Do not replace these requirements with lower-level tests, implementation-specific checks, or alternative evidence that proves a materially different claim.
+
+Do not modify this section unless the user explicitly changes or asks to revise it.
 
 ## Definitions
 
 Define terms that are specific to the domain or repository, or that could reasonably be misunderstood.
 
-## Intent
-
-Record the problem, motivation, or desired direction that explains why the objective exists and helps interpret it when implementation choices arise.
-
-Preserve user-provided context when losing it could lead to a materially different implementation.
-
-Do not repeat decisions or implementation requirements here.
-
 ## Decisions
 
-Record the decisions, assumptions, and defaults that define the objective or its boundaries.
+Record only the decisions, assumptions, and defaults that materially determine the intended behavior, contracts, responsibilities, boundaries, or verification.
 
-Include implementation details only where they are necessary to express or preserve a decision, contract, responsibility, boundary, or required verification. Prefer stating what must remain true over prescribing incidental internal structure or execution steps.
+Prefer stating what must remain true. Include implementation details only when the mechanism itself is a necessary part of the decision; otherwise leave it to implementation.
+
+Do not partially prescribe incidental implementation details or leave incomplete internal rules that appear contractual.
 
 Include rationale, constraints, alternatives, or accepted tradeoffs only when they are needed to understand a recorded decision.
 
@@ -73,9 +101,11 @@ Do not repeat background already captured in Intent.
 
 ## Verification
 
-Describe the observable evidence that will show whether the objective has been achieved through the intended execution path.
+Describe how each material Verification Requirement will be demonstrated through the intended execution path and observable evidence.
 
-Prefer verification through a representative end-to-end flow that exercises the real entry point, orchestration, integrations, required external effects, and authoritative readback applicable to the objective. Make required external effects explicit in the plan rather than leaving them implicit or substituting lower-level verification.
+Prefer verification through a representative end-to-end flow that exercises the real entry point, orchestration, integrations, required external effects, and authoritative readback applicable to the objective.
+
+For each material Verification Requirement, make clear what observable evidence establishes that it passed or failed.
 
 Treat the inability to perform representative end-to-end verification as a planning problem, not merely a verification limitation, when it leaves the objective or a central guarantee unverified through the real execution path.
 
