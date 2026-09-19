@@ -1,0 +1,17 @@
+[
+  {
+    "id": "publisher-plan-surface",
+    "hard_cap_ms": 2700000,
+    "accepted_plan": "# 2026-09-19-publisher-plan-surface\n\nInspect the canonical plan publication and task handoff in this repository. Create a concise Korean investigation note under docs/ describing the observed Publisher entry point, the canonical Plan/task relationship, and one concrete verification command. Do not change production behavior or credentials. Run the most direct focused check available, record its actual result, and prepare the repository change for the normal review and delivery workflow.\n"
+  },
+  {
+    "id": "workspace-contract-surface",
+    "hard_cap_ms": 2700000,
+    "accepted_plan": "# 2026-09-19-workspace-contract-surface\n\nInspect the workspace bootstrap and Git target contract in this repository. Create a concise Korean investigation note under docs/ describing how a configured base reaches a worker workspace and one concrete isolation or readiness risk. Do not change production behavior or credentials. Run the most direct focused check available, record its actual result, and prepare the repository change for the normal review and delivery workflow.\n"
+  },
+  {
+    "id": "review-job-surface",
+    "hard_cap_ms": 2700000,
+    "accepted_plan": "# 2026-09-19-review-job-surface\n\nInspect the worker-facing independent review boundary in this repository. Create a concise Korean investigation note under docs/ describing the submit/readback contract, the evidence retained for a terminal result, and one concrete verification command. Do not change production behavior or credentials. Run the most direct focused check available, record its actual result, and prepare the repository change for the normal review and delivery workflow.\n"
+  }
+]

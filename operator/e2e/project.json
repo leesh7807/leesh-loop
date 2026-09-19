@@ -1,0 +1,13 @@
+{
+  "repository_url": "https://github.com/leesh7807/leesh-loop.git",
+  "workflow_path": "../../WORKFLOW.md",
+  "notion_database_url": "https://app.notion.com/p/studyleesh/3e08a2658625805cad23fe1137be4a1e?v=3e08a26586258042a8e4000c945e56e7",
+  "seed_source_ref": "refs/heads/main",
+  "run_record_directory": "runs",
+  "poll_interval_ms": 15000,
+  "finalization_timeout_ms": 30000,
+  "runtime_start_timeout_ms": 1800000,
+  "runtime_stop_timeout_ms": 30000,
+  "symphony_port": 4410,
+  "ui_port": 4610
+}

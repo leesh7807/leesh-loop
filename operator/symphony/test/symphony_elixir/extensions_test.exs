@@ -57,6 +57,13 @@ defmodule SymphonyElixir.ExtensionsTest do
     def handle_call(:request_refresh, _from, state) do
       {:reply, Keyword.get(state, :refresh, :unavailable), state}
     end
+
+    def handle_call({:issue_input, issue_identifier}, _from, state) do
+      case Keyword.get(state, :issue_input) do
+        %{identifier: ^issue_identifier} = issue -> {:reply, {:ok, issue}, state}
+        _ -> {:reply, {:error, :not_found}, state}
+      end
+    end
   end
 
   setup do
@@ -252,6 +259,12 @@ defmodule SymphonyElixir.ExtensionsTest do
           coalesced: false,
           requested_at: DateTime.utc_now(),
           operations: ["poll", "reconcile"]
+        },
+        issue_input: %{
+          id: "issue-http",
+          identifier: "MT-HTTP",
+          description: "# Accepted Plan\n\nDispatch-bound description\n",
+          state: "In Progress"
         }
       )
 
@@ -349,6 +362,15 @@ defmodule SymphonyElixir.ExtensionsTest do
              "tracked" => %{}
            }
 
+    conn = get(build_conn(), "/api/v1/MT-HTTP/input")
+
+    assert json_response(conn, 200) == %{
+             "issue_identifier" => "MT-HTTP",
+             "issue_id" => "issue-http",
+             "state" => "In Progress",
+             "description" => "# Accepted Plan\n\nDispatch-bound description\n"
+           }
+
     conn = get(build_conn(), "/api/v1/MT-RETRY")
 
     assert %{"status" => "retrying", "retry" => %{"attempt" => 2, "error" => "boom"}} =
@@ -367,6 +389,12 @@ defmodule SymphonyElixir.ExtensionsTest do
            } = json_response(conn, 200)
 
     conn = get(build_conn(), "/api/v1/MT-MISSING")
+
+    assert json_response(conn, 404) == %{
+             "error" => %{"code" => "issue_not_found", "message" => "Issue not found"}
+           }
+
+    conn = get(build_conn(), "/api/v1/MT-MISSING/input")
 
     assert json_response(conn, 404) == %{
              "error" => %{"code" => "issue_not_found", "message" => "Issue not found"}

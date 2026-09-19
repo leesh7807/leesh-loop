@@ -39,6 +39,7 @@ defmodule SymphonyElixir.Orchestrator do
       completed: MapSet.new(),
       claimed: MapSet.new(),
       blocked: %{},
+      dispatch_inputs: %{},
       retry_attempts: %{},
       codex_totals: nil,
       codex_rate_limits: nil
@@ -972,6 +973,7 @@ defmodule SymphonyElixir.Orchestrator do
             pid: pid,
             ref: ref,
             identifier: issue.identifier,
+            dispatch_issue: issue,
             issue: issue,
             worker_host: worker_host,
             workspace_path: nil,
@@ -994,6 +996,7 @@ defmodule SymphonyElixir.Orchestrator do
         %{
           state
           | running: running,
+            dispatch_inputs: Map.put(state.dispatch_inputs, issue.id, issue),
             claimed: MapSet.put(state.claimed, issue.id),
             retry_attempts: Map.delete(state.retry_attempts, issue.id)
         }
@@ -1401,6 +1404,15 @@ defmodule SymphonyElixir.Orchestrator do
   @spec snapshot() :: map() | :timeout | :unavailable
   def snapshot, do: snapshot(__MODULE__, 15_000)
 
+  @spec issue_input(GenServer.server(), String.t(), timeout()) :: {:ok, Issue.t()} | {:error, :not_found | :unavailable}
+  def issue_input(server, issue_identifier, timeout \\ 15_000) when is_binary(issue_identifier) do
+    if Process.whereis(server) do
+      GenServer.call(server, {:issue_input, issue_identifier}, timeout)
+    else
+      {:error, :unavailable}
+    end
+  end
+
   @spec snapshot(GenServer.server(), timeout()) :: map() | :timeout | :unavailable
   def snapshot(server, timeout) do
     if Process.whereis(server) do
@@ -1412,6 +1424,22 @@ defmodule SymphonyElixir.Orchestrator do
       end
     else
       :unavailable
+    end
+  end
+
+  @impl true
+  def handle_call({:issue_input, issue_identifier}, _from, state) do
+    running = Enum.find(state.running, fn {_issue_id, metadata} -> metadata.identifier == issue_identifier end)
+
+    case running do
+      {_issue_id, %{dispatch_issue: %Issue{} = issue}} ->
+        {:reply, {:ok, issue}, state}
+
+      _ ->
+        case Enum.find(state.dispatch_inputs, fn {_issue_id, %Issue{identifier: identifier}} -> identifier == issue_identifier end) do
+          {_issue_id, %Issue{} = issue} -> {:reply, {:ok, issue}, state}
+          _ -> {:reply, {:error, :not_found}, state}
+        end
     end
   end
 

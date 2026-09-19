@@ -119,6 +119,21 @@ After that readiness and dispatch-acknowledgement boundary, `start` opens the lo
 
 Agents work against the target repository according to its `WORKFLOW.md`, then write results and state back to Notion.
 
+## Production E2E harness
+
+The production E2E harness lives under [`operator/e2e`](operator/e2e). Run it with
+`node operator/e2e/cli.mjs run operator/e2e/project.json` after configuring the normal Operator,
+Notion, GitHub, Codex, and `chatgpt-shot` credentials. The checked-in E2E project keeps its
+dedicated Notion database binding and seed source ref; each run creates an opaque run-scoped base,
+uses the normal Publisher/Operator/Symphony path, and stores durable evidence under the ignored
+`operator/e2e/runs/<run-id>/run.json` record.
+
+The harness records observed lifecycle, worker/review timing, external artifacts, finalization and
+cleanup separately. A run that ends at an observed production failure or finite hard cap is still a
+useful result when its evidence is preserved and admission reconciliation confirms that no residue
+blocks the next run. `node operator/e2e/cli.mjs admit operator/e2e/project.json` performs the same
+pre-dispatch safety check without publishing a task.
+
 ## Repository Harness
 
 Leesh Loop assumes that the target repository already has a harness suitable for agent work. This follows from Symphony's model of running workers against the repository's existing development environment and rules.
