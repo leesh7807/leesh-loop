@@ -182,6 +182,16 @@ The bracketed block is optional. Include it only when the Accepted Plan explicit
 
 After submission succeeds, poll `chatgpt-shot jobs <job-id>` every 30 seconds until the Review Job reaches a terminal State.
 
+Before recording the Review Job result, record the exact request binding in the Workpad immediately
+before its Job ID so lifecycle automation can distinguish a review of the delivered artifact from a
+stale or different review. Use these ordinary review fields, with no E2E-specific values:
+
+```text
+review target: <PR URL>
+review head: <exact HEAD SHA>
+Job ID: <UUID>
+```
+
 - `pending`: wait 30 seconds and poll the same Job again.
 - `in_progress`: wait 30 seconds and poll the same Job again.
 - `completed`: use the Job's `result` as the independent review Result.

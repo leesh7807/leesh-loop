@@ -20,10 +20,18 @@ export class LifecycleInterpreter {
   }
 
   verifiedThrough(observations) {
-    const observed = new Set(observations.map(observation => observation.state));
-    let contiguous = -1;
-    for (let index = 0; index < NORMAL_PATH.length && observed.has(NORMAL_PATH[index]); index += 1) contiguous = index;
-    return contiguous < 0 ? null : NORMAL_PATH[contiguous];
+    let next = 0;
+    for (const observation of observations) {
+      const index = NORMAL_PATH.indexOf(observation.state);
+      if (index < 0) continue;
+      if (index === next) {
+        next += 1;
+        continue;
+      }
+      if (index === next - 1) continue;
+      break;
+    }
+    return next === 0 ? null : NORMAL_PATH[next - 1];
   }
 
   gaps(verifiedThrough) {
@@ -47,6 +55,11 @@ export function mechanicalReviewAllowed(task, reviewEvidence) {
   if (!reviewEvidence?.job_id || !['completed', 'failed'].includes(reviewEvidence.terminal_state)) return { allowed: false, pending: true, reason: 'current independent review Job has not reached a terminal state', cycle: Number(cycle) };
   const currentJobIds = [...reviewWindow.matchAll(JOB_ID)].map(match => match[0].toLowerCase());
   if (!currentJobIds.includes(reviewEvidence.job_id.toLowerCase())) return { allowed: false, reason: 'current Human Review cycle is not bound to the observed independent review Job', cycle: Number(cycle) };
+  const jobPosition = reviewWindow.toLowerCase().indexOf(reviewEvidence.job_id.toLowerCase());
+  const reviewRequest = reviewWindow.slice(0, jobPosition);
+  const targetPrs = [...reviewRequest.matchAll(/(?:review target|target_pr)\s*:\s*([^\n]+)/gi)].map(match => match[1].trim());
+  const targetHeads = [...reviewRequest.matchAll(/(?:review head|target_head)\s*:\s*([^\n]+)/gi)].map(match => match[1].trim());
+  if (targetPrs.at(-1) !== deliveredPr.trim() || targetHeads.at(-1)?.toLowerCase() !== deliveredHead.trim().toLowerCase()) return { allowed: false, reason: 'independent review Job is not bound to the delivered PR and HEAD', cycle: Number(cycle) };
   if (reviewEvidence.terminal_state !== 'completed' || !reviewWindow.includes(deliveredPr.trim()) || !reviewWindow.includes(deliveredHead.trim()) || !/(?:# Verdict|Verdict)\s*\n?\s*PASS\b/i.test(reviewWindow) || !/(?:# Verdict|Verdict)\s*\n?\s*PASS\b/i.test(reviewEvidence.result || '')) return { allowed: false, reason: 'current Human Review cycle has no matching independent review PASS evidence', cycle: Number(cycle) };
   return { allowed: true, cycle: Number(cycle), delivered_pr: deliveredPr.trim(), delivered_head: deliveredHead.trim() };
 }

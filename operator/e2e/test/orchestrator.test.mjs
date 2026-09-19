@@ -104,3 +104,24 @@ test('Done without an approved and verified delivery is recorded as unverified',
   assert.equal(record.lifecycle.verified_through, null);
   assert.equal(record.failures.at(-1).phase, 'plan_binding');
 });
+
+test('Done rejects an unrelated merge into the run-scoped base', async () => {
+  let current = 0;
+  const harness = fixture({ states: ['Done'], clock: () => current++ });
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-unrelated-merge-'));
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+  const record = {
+    started_at: new Date(0).toISOString(),
+    artifacts: { approved_delivery: { pr: 'https://github.com/owner/repo/pull/4', head: '0123456789012345678901234567890123456789' } }
+  };
+  const original = harness.capabilities.github.pullRequestsForBase;
+  harness.capabilities.github.pullRequestsForBase = async baseBranch => [
+    ...(await original(baseBranch)),
+    { number: 5, url: 'https://github.com/owner/repo/pull/5', baseRefName: baseBranch, headRefOid: 'fedcbafedcbafedcbafedcbafedcbafedcbafedc', mergedAt: new Date(2).toISOString(), mergeCommit: { oid: 'fedcbafedcbafedcbafedcbafedcbafedcbabbbb' } }
+  ];
+  const orchestrator = new E2EOrchestrator({ ...harness, random: () => 0, clock: () => current++, sleepFn: async () => {} });
+  const result = await orchestrator.verifyDoneDelivery(record, 'e2e-base');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /unrelated PR/);
+});

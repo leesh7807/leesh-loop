@@ -14,6 +14,13 @@ test('verified-through stops at the first unobserved normal lifecycle phase', ()
   const observations = [{ state: 'Human Review' }, { state: 'Merging' }, { state: 'Done' }];
   assert.equal(interpreter.verifiedThrough(observations), null);
   assert.deepEqual(interpreter.gaps(null), ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done']);
+  assert.equal(interpreter.verifiedThrough([
+    { state: 'Ready' },
+    { state: 'Human Review' },
+    { state: 'In Progress' },
+    { state: 'Merging' },
+    { state: 'Done' }
+  ]), 'Ready');
 });
 
 test('mechanical approval only accepts normal review with matching delivery evidence and PASS', () => {
@@ -29,4 +36,5 @@ test('mechanical approval only accepts normal review with matching delivery evid
   assert.equal(mechanicalReviewAllowed(valid, { ...reviewEvidence, terminal_state: 'failed', result: null }).allowed, false);
   const staleJob = valid.workpad.replace('123e4567-e89b-42d3-a456-426614174000', '223e4567-e89b-42d3-a456-426614174000');
   assert.equal(mechanicalReviewAllowed({ ...valid, workpad: staleJob }, reviewEvidence).allowed, false);
+  assert.equal(mechanicalReviewAllowed({ ...valid, workpad: valid.workpad.replace('review head: 0123456789012345678901234567890123456789', 'review head: abcdefabcdefabcdefabcdefabcdefabcdefabcd') }, reviewEvidence).allowed, false);
 });
