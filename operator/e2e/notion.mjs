@@ -12,14 +12,14 @@ export class NotionCapability {
     this.bindings = new Map();
   }
 
-  async request(method, path, body) {
+  async request(method, path, body, signal) {
     let response;
     try {
       response = await this.fetcher(`${API}${path}`, {
         method,
         headers: { Authorization: `Bearer ${this.token}`, 'Notion-Version': '2025-09-03', 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(15_000)
+        signal: signal || AbortSignal.timeout(15_000)
       });
     } catch (error) {
       throw new Error(`Notion ${method} ${path} transport failed: ${error instanceof Error ? error.message : error}`);
@@ -29,15 +29,15 @@ export class NotionCapability {
     catch { throw new Error(`Notion ${method} ${path} returned invalid JSON`); }
   }
 
-  async resolveBinding(databaseUrl) {
+  async resolveBinding(databaseUrl, signal) {
     if (this.bindings.has(databaseUrl)) return this.bindings.get(databaseUrl);
     const databaseId = new URL(databaseUrl).pathname.split('/').pop();
-    const database = await this.request('GET', `/databases/${databaseId}`);
+    const database = await this.request('GET', `/databases/${databaseId}`, undefined, signal);
     if (!Array.isArray(database.data_sources)) throw new Error('Notion database returned no data sources');
     const sources = [];
     for (const source of database.data_sources) {
       if (typeof source?.id !== 'string') throw new Error('Notion database returned malformed data-source metadata');
-      sources.push({ id: source.id, schema: await this.request('GET', `/data_sources/${source.id}`) });
+      sources.push({ id: source.id, schema: await this.request('GET', `/data_sources/${source.id}`, undefined, signal) });
     }
     const plans = sources.filter(source => this.isPlanSchema(source.schema));
     const tasks = sources.filter(source => this.isTaskSchema(source.schema, source.id));
@@ -63,11 +63,11 @@ export class NotionCapability {
       && !properties.Plan?.relation?.dual_property;
   }
 
-  async queryDataSource(dataSourceId, body = {}) {
+  async queryDataSource(dataSourceId, body = {}, signal) {
     const pages = [];
     let cursor;
     do {
-      const response = await this.request('POST', `/data_sources/${dataSourceId}/query`, { page_size: PAGE_SIZE, ...body, ...(cursor ? { start_cursor: cursor } : {}) });
+      const response = await this.request('POST', `/data_sources/${dataSourceId}/query`, { page_size: PAGE_SIZE, ...body, ...(cursor ? { start_cursor: cursor } : {}) }, signal);
       if (!Array.isArray(response?.results) || typeof response.has_more !== 'boolean') throw new Error('Notion query returned malformed pagination data');
       pages.push(...response.results);
       cursor = response.has_more ? response.next_cursor : undefined;
@@ -76,11 +76,11 @@ export class NotionCapability {
     return pages;
   }
 
-  async children(id) {
+  async children(id, signal) {
     const blocks = [];
     let cursor;
     do {
-      const response = await this.request('GET', `/blocks/${id}/children?page_size=${PAGE_SIZE}${cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : ''}`);
+      const response = await this.request('GET', `/blocks/${id}/children?page_size=${PAGE_SIZE}${cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : ''}`, undefined, signal);
       if (!Array.isArray(response?.results) || typeof response.has_more !== 'boolean') throw new Error('Notion block response was malformed');
       blocks.push(...response.results);
       cursor = response.has_more ? response.next_cursor : undefined;
@@ -101,23 +101,23 @@ export class NotionCapability {
     };
   }
 
-  async readTask(databaseUrl, identifierOrId) {
-    const binding = await this.resolveBinding(databaseUrl);
+  async readTask(databaseUrl, identifierOrId, signal) {
+    const binding = await this.resolveBinding(databaseUrl, signal);
     let page;
     if (/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(identifierOrId)) {
-      page = await this.request('GET', `/pages/${identifierOrId}`);
+      page = await this.request('GET', `/pages/${identifierOrId}`, undefined, signal);
     } else {
-      const rows = await this.queryDataSource(binding.taskDataSourceId, { filter: { property: 'Identifier', rich_text: { equals: identifierOrId } } });
+      const rows = await this.queryDataSource(binding.taskDataSourceId, { filter: { property: 'Identifier', rich_text: { equals: identifierOrId } } }, signal);
       if (rows.length !== 1) throw new Error(`Notion task identifier ${identifierOrId} resolved to ${rows.length} pages`);
-      page = await this.request('GET', `/pages/${rows[0].id}`);
+      page = await this.request('GET', `/pages/${rows[0].id}`, undefined, signal);
     }
     if (page?.parent?.type !== 'data_source_id' || page.parent.data_source_id !== binding.taskDataSourceId) throw new Error('Notion page is outside the fixed E2E task data source');
     const summary = this.summary(page);
     const planIds = relationIds(page.properties?.[PLAN_PROPERTY]);
     if (!planIds || planIds.length !== 1) throw new Error('E2E task Plan relation is not exactly one page');
-    const planPage = await this.request('GET', `/pages/${planIds[0]}`);
+    const planPage = await this.request('GET', `/pages/${planIds[0]}`, undefined, signal);
     if (planPage?.parent?.type !== 'data_source_id' || planPage.parent.data_source_id !== binding.planDataSourceId) throw new Error('E2E task Plan points outside the fixed Plan data source');
-    const [planBlocks, workpadBlocks] = await Promise.all([this.children(planIds[0]), this.children(page.id)]);
+    const [planBlocks, workpadBlocks] = await Promise.all([this.children(planIds[0], signal), this.children(page.id, signal)]);
     return {
       ...summary,
       plan_id: planIds[0],
@@ -128,15 +128,15 @@ export class NotionCapability {
     };
   }
 
-  async listTasks(databaseUrl) {
-    const binding = await this.resolveBinding(databaseUrl);
-    const pages = await this.queryDataSource(binding.taskDataSourceId);
+  async listTasks(databaseUrl, signal) {
+    const binding = await this.resolveBinding(databaseUrl, signal);
+    const pages = await this.queryDataSource(binding.taskDataSourceId, {}, signal);
     return pages.map(page => this.summary(page));
   }
 
-  async updateState(databaseUrl, pageId, state) {
-    await this.request('PATCH', `/pages/${pageId}`, { properties: { State: { select: { name: state } } } });
-    return this.readTask(databaseUrl, pageId);
+  async updateState(databaseUrl, pageId, state, signal) {
+    await this.request('PATCH', `/pages/${pageId}`, { properties: { State: { select: { name: state } } } }, signal);
+    return this.readTask(databaseUrl, pageId, signal);
   }
 
   async appendWorkpad(pageId, text) {

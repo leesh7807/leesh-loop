@@ -44,7 +44,7 @@ test('successful reconciliation clears an earlier unresolved action', async () =
   let stopCalls = 0;
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
   const store = { async save() {} };
-  const runtime = { async stop() { stopCalls += 1; if (stopCalls === 1) throw new Error('temporary stop failure'); return { stopped: true }; } };
+  const runtime = { async stop() { stopCalls += 1; if (stopCalls === 1) throw new Error('temporary stop failure'); return { stopped: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
   const git = { async remoteRefs() { return {}; }, async deleteBranch() { return { already_absent: true }; } };
   const evidence = { async snapshot() { return { observed_at: new Date().toISOString(), notion: { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }, github: { delivery_prs: [] }, symphony: {}, git: { remote_refs: {} }, chatgpt_shot: null, errors: [] }; } };
   const finalizer = new Finalizer({ config, store, notion, runtime, git, github: {}, evidence });

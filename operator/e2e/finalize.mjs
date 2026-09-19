@@ -1,4 +1,4 @@
-import { nowIso, bounded, pathWithin } from './common.mjs';
+import { nowIso, bounded } from './common.mjs';
 import { TERMINAL_STATES } from './lifecycle.mjs';
 import { addFailure, recordAction } from './record.mjs';
 
@@ -79,8 +79,8 @@ export class Finalizer {
       });
     }
 
-    await this.action(record, 'final_evidence_snapshot', async () => {
-      const snapshot = await this.evidence.snapshot({ record, databaseUrl: this.config.notion_database_url, identifier: record.artifacts.task_identifier, dashboard, baseBranch, workspaceRoot });
+    await this.action(record, 'final_evidence_snapshot', async signal => {
+      const snapshot = await this.evidence.snapshot({ record, databaseUrl: this.config.notion_database_url, identifier: record.artifacts.task_identifier, dashboard, baseBranch, workspaceRoot, signal });
       record.evidence.snapshots.push(snapshot);
       return { observed_at: snapshot.observed_at, errors: snapshot.errors };
     });
@@ -126,15 +126,11 @@ export class Finalizer {
         record.evidence.branch_isolation = { unrelated_changes: [...unrelatedChanges], remaining_run_owned_refs: remainingRunBranches, transient_mutations_unobservable: true };
         return record.evidence.branch_isolation;
       });
-      const observedWorkspaces = [...record.evidence.workspace_paths, ...record.evidence.snapshots.flatMap(snapshot => {
-        const path = snapshot.symphony?.issue?.workspace?.path;
-        return path && pathWithin(path, workspaceRoot) ? [path] : [];
-      })];
-      for (const workspace of new Set(observedWorkspaces)) {
-        await this.action(record, `delete_workspace:${workspace}`, async () => {
-          const result = await this.runtime.removeWorkspace?.(workspace, workspaceRoot);
-          record.cleanup.workspaces_deleted.push(workspace);
-          return result ?? { path: workspace };
+      if (workspaceRoot) {
+        await this.action(record, `delete_workspace_root:${workspaceRoot}`, async signal => {
+          const result = await this.runtime.removeWorkspaceRoot(workspaceRoot, this.config.workspace_root, { timeout: this.config.finalization_timeout_ms, signal });
+          record.cleanup.workspaces_deleted.push(workspaceRoot);
+          return result;
         });
       }
     }

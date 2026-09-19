@@ -7,8 +7,6 @@ import { ACTIVE_STATES, LifecycleInterpreter, mechanicalReviewAllowed } from './
 import { newRunRecord, addFailure, RunStore } from './record.mjs';
 import { Finalizer } from './finalize.mjs';
 
-const REVIEW_MARKER = cycle => `E2E Operator mechanical approval\ncycle: ${cycle}\nresult: approved\n`;
-
 export class E2EOrchestrator {
   constructor({ config, catalog, capabilities, random = Math.random, clock = () => Date.now(), sleepFn = sleep } = {}) {
     this.config = config;
@@ -39,6 +37,10 @@ export class E2EOrchestrator {
     for (const previous of records.filter(needsReconciliation)) {
       await this.reconcile(previous);
       if (previous.finalization?.complete !== true || previous.evidence?.branch_isolation?.unrelated_changes?.length || previous.evidence?.branch_isolation?.remaining_run_owned_refs?.length) throw new Error(`previous E2E run ${previous.run_id} remains unresolved; refusing a new dispatch`);
+    }
+    for (const previous of records) {
+      const workspace = previous.paths?.workspace_root;
+      if (workspace && this.runtime.workspaceExists && await this.runtime.workspaceExists(workspace)) throw new Error(`previous E2E workspace remains: ${workspace}`);
     }
     const tasks = await this.notion.listTasks(this.config.notion_database_url);
     const conflicting = tasks.filter(task => ACTIVE_STATES.has(task.state) || task.state === 'Publisher Pending');
@@ -215,7 +217,6 @@ export class E2EOrchestrator {
             await this.store.save(record);
             return this.finalizer.finalize({ record, reason: 'human_review_delivery_mismatch', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
           }
-          await this.notion.appendWorkpad(task.id, REVIEW_MARKER(approval.cycle));
           const merging = await this.notion.updateState(this.config.notion_database_url, task.id, 'Merging');
           if (merging.state !== 'Merging') throw new Error(`Human Review mechanical approval readback was ${merging.state}`);
           record.artifacts.approved_delivery = { pr: approval.delivered_pr, head: approval.delivered_head, cycle: approval.cycle };

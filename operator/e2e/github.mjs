@@ -12,8 +12,8 @@ export class GitHubCapability {
     this.ghCommand = ghCommand;
   }
 
-  async pullRequestsForBase(baseBranch) {
-    const { stdout } = await this.ghCommand('gh', ['pr', 'list', '--repo', this.repository, '--base', baseBranch, '--state', 'all', '--limit', '100', '--json', 'number,url,state,isDraft,headRefName,headRefOid,baseRefName,mergedAt,mergeCommit,createdAt,headRepository,headRepositoryOwner,isCrossRepository'], { timeout: 30_000 });
+  async pullRequestsForBase(baseBranch, signal) {
+    const { stdout } = await this.ghCommand('gh', ['pr', 'list', '--repo', this.repository, '--base', baseBranch, '--state', 'all', '--limit', '100', '--json', 'number,url,state,isDraft,headRefName,headRefOid,baseRefName,mergedAt,mergeCommit,createdAt,headRepository,headRepositoryOwner,isCrossRepository'], { timeout: 30_000, signal });
     const rows = parseJsonOutput(stdout, 'GitHub PR inspection');
     if (!Array.isArray(rows)) throw new Error('GitHub PR inspection returned a non-array');
     return rows;

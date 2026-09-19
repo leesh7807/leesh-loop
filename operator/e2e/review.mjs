@@ -9,11 +9,11 @@ export class ChatgptShotCapability {
     return [...new Set((workpad.match(uuid) || []).map(value => value.toLowerCase()))];
   }
 
-  async inspect(workpad) {
+  async inspect(workpad, signal) {
     const jobs = [];
     for (const id of this.jobIds(workpad)) {
       try {
-        const { stdout } = await this.commandRunner('chatgpt-shot', ['jobs', id], { timeout: 10_000 });
+        const { stdout } = await this.commandRunner('chatgpt-shot', ['jobs', id], { timeout: 10_000, signal });
         const snapshot = JSON.parse(stdout.trim());
         jobs.push({ id, observed_at: new Date().toISOString(), state: snapshot.state ?? null, result: snapshot.result ?? null, error: snapshot.error ?? null, started_at: snapshot.started_at ?? snapshot.created_at ?? null, finished_at: snapshot.finished_at ?? snapshot.completed_at ?? null, duration_ms: Number.isFinite(snapshot.duration_ms) ? snapshot.duration_ms : null });
       } catch (error) {

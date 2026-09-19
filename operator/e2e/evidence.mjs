@@ -1,7 +1,7 @@
 import { nowIso, sha256 } from './common.mjs';
 
-async function observed(operation) {
-  try { return { value: await operation(), error: null }; }
+async function observed(operation, signal) {
+  try { return { value: await operation(signal), error: null }; }
   catch (error) { return { value: null, error: String(error?.message || error) }; }
 }
 
@@ -14,19 +14,19 @@ export class EvidenceCollector {
     this.review = review;
   }
 
-  async snapshot({ record, databaseUrl, identifier, dashboard, baseBranch, workspaceRoot }) {
+  async snapshot({ record, databaseUrl, identifier, dashboard, baseBranch, workspaceRoot, signal }) {
     const at = nowIso();
     const [task, runtime, state, issue, trackerInput, prs, refs] = await Promise.all([
-      observed(() => this.notion.readTask(databaseUrl, identifier)),
-      observed(() => dashboard ? this.runtime.runtime(dashboard) : null),
-      observed(() => dashboard ? this.runtime.state(dashboard) : null),
-      observed(() => dashboard ? this.runtime.issue(dashboard, identifier) : null),
-      observed(() => dashboard ? this.runtime.trackerInput(dashboard, identifier) : null),
-      observed(() => baseBranch ? this.github.pullRequestsForBase(baseBranch) : []),
-      observed(() => this.git.remoteRefs())
+      observed(activeSignal => this.notion.readTask(databaseUrl, identifier, activeSignal), signal),
+      observed(activeSignal => dashboard ? this.runtime.runtime(dashboard, activeSignal) : null, signal),
+      observed(activeSignal => dashboard ? this.runtime.state(dashboard, activeSignal) : null, signal),
+      observed(activeSignal => dashboard ? this.runtime.issue(dashboard, identifier, activeSignal) : null, signal),
+      observed(activeSignal => dashboard ? this.runtime.trackerInput(dashboard, identifier, activeSignal) : null, signal),
+      observed(activeSignal => baseBranch ? this.github.pullRequestsForBase(baseBranch, activeSignal) : [], signal),
+      observed(activeSignal => this.git.remoteRefs({ signal: activeSignal }), signal)
     ]);
     const taskValue = task.value;
-    const review = taskValue ? await observed(() => this.review.inspect(taskValue.workpad || '')) : { value: null, error: null };
+    const review = taskValue ? await observed(activeSignal => this.review.inspect(taskValue.workpad || '', activeSignal), signal) : { value: null, error: null };
     const snapshot = {
       observed_at: at,
       notion: taskValue ? { id: taskValue.id, url: taskValue.url, identifier: taskValue.identifier, state: taskValue.state, accepted_plan_sha256: sha256(taskValue.accepted_plan || ''), accepted_plan: taskValue.accepted_plan, workpad: taskValue.workpad } : null,
