@@ -30,15 +30,19 @@ export class LifecycleInterpreter {
   }
 }
 
-export function mechanicalReviewAllowed(task) {
+export function mechanicalReviewAllowed(task, reviewEvidence) {
   if (task?.state !== 'Human Review') return { allowed: false, reason: 'authoritative task is not Human Review' };
   const workpad = task.workpad || '';
-  const marker = [...workpad.matchAll(/Human Review\s*\ncycle:\s*(\d+)\s*\nreason:\s*([^\n]+)\s*\ndelivered_pr:\s*([^\n]+)\s*\ndelivered_head:\s*([^\n]+)[\s\S]*?(?=\nHuman Review\s*\ncycle:|$)/g)].at(-1);
+  const markers = [...workpad.matchAll(/Human Review\s*\ncycle:\s*(\d+)\s*\nreason:\s*([^\n]+)\s*\ndelivered_pr:\s*([^\n]+)\s*\ndelivered_head:\s*([^\n]+)/g)];
+  const marker = markers.at(-1);
   if (!marker) return { allowed: false, reason: 'latest Human Review marker is unavailable' };
   const [, cycle, reason, deliveredPr, deliveredHead] = marker;
   if (reason.trim() !== 'review') return { allowed: false, reason: `Human Review reason is ${reason.trim()}, not review`, cycle: Number(cycle) };
   if (deliveredPr.trim() === 'none' || deliveredHead.trim() === 'none') return { allowed: false, reason: 'review delivery identity is incomplete', cycle: Number(cycle) };
   if (!/^[0-9a-f]{40}$/i.test(deliveredHead.trim())) return { allowed: false, reason: 'delivered_head is not an immutable commit', cycle: Number(cycle) };
-  if (!/(?:# Verdict|Verdict)\s*\n?\s*PASS\b/i.test(workpad)) return { allowed: false, reason: 'independent review PASS evidence is unavailable', cycle: Number(cycle) };
+  const previous = markers.at(-2);
+  const reviewWindow = workpad.slice(previous ? previous.index + previous[0].length : 0, marker.index);
+  if (!reviewEvidence?.job_id || !['completed', 'failed'].includes(reviewEvidence.terminal_state)) return { allowed: false, pending: true, reason: 'current independent review Job has not reached a terminal state', cycle: Number(cycle) };
+  if (reviewEvidence.terminal_state !== 'completed' || !reviewWindow.includes(deliveredPr.trim()) || !reviewWindow.includes(deliveredHead.trim()) || !/(?:# Verdict|Verdict)\s*\n?\s*PASS\b/i.test(reviewWindow) || !/(?:# Verdict|Verdict)\s*\n?\s*PASS\b/i.test(reviewEvidence.result || '')) return { allowed: false, reason: 'current Human Review cycle has no matching independent review PASS evidence', cycle: Number(cycle) };
   return { allowed: true, cycle: Number(cycle), delivered_pr: deliveredPr.trim(), delivered_head: deliveredHead.trim() };
 }

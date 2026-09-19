@@ -22,4 +22,9 @@ export class GitHubCapability {
   async branchNamesForBase(baseBranch) {
     return (await this.pullRequestsForBase(baseBranch)).map(pr => pr.headRefName).filter(Boolean);
   }
+
+  findDelivery(prs, deliveredPr) {
+    const number = String(deliveredPr || '').match(/(?:\/|#)(\d+)$/)?.[1] || String(deliveredPr || '');
+    return prs.find(pr => pr.url === deliveredPr || String(pr.number) === number) || null;
+  }
 }

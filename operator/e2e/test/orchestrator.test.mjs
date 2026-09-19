@@ -26,12 +26,17 @@ function fixture({ states, clock }) {
     symphony_port: 4410,
     ui_port: 4610
   };
-  let current = 0;
-  const task = state => ({ id: 'page-1', url: 'https://notion/page-1', identifier: deriveIdentifier(plan), state, accepted_plan: plan, workpad: '' });
+  let snapshotIndex = 0;
+  let observedState = states[0];
+  const deliveryHead = '0123456789012345678901234567890123456789';
+  const mergeCommit = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd';
+  const deliveryUrl = 'https://github.com/owner/repo/pull/4';
+  const reviewWorkpad = `review target: ${deliveryUrl}\nreview head: ${deliveryHead}\n# Verdict\nPASS\nHuman Review\ncycle: 1\nreason: review\ndelivered_pr: ${deliveryUrl}\ndelivered_head: ${deliveryHead}\n`;
+  const task = state => ({ id: 'page-1', url: 'https://notion/page-1', identifier: deriveIdentifier(plan), state, accepted_plan: plan, workpad: state === 'Human Review' ? reviewWorkpad : '' });
   const notion = {
     async listTasks() { return []; },
-    async readTask() { return task(states[Math.min(current, states.length - 1)]); },
-    async updateState() { return task('Merging'); },
+    async readTask() { return task(observedState); },
+    async updateState() { observedState = 'Merging'; return task(observedState); },
     async appendWorkpad() {}
   };
   const runtime = { async start() { return { dashboard: 'http://127.0.0.1:4410' }; }, async stop() { return { stopped: true }; } };
@@ -39,14 +44,21 @@ function fixture({ states, clock }) {
     async remoteRefs() { return {}; },
     async resolveSeedCommit() { return '0123456789012345678901234567890123456789'; },
     async createBaseBranch(_branch, commit) { return commit; },
+    async remoteBranchCommit() { return mergeCommit; },
+    async containsCommit() { return true; },
     async deleteBranch() {}
   };
   const publisher = { async publish() { return { page_id: 'page-1', url: 'https://notion/page-1' }; }, async prepare() {} };
-  const github = { async pullRequestsForBase() { return []; } };
+  const github = {
+    async pullRequestsForBase(baseBranch) {
+      return [{ number: 4, url: deliveryUrl, baseRefName: baseBranch, headRefName: 'feature', headRefOid: deliveryHead, mergedAt: observedState === 'Done' ? new Date(clock()).toISOString() : null, mergeCommit: observedState === 'Done' ? { oid: mergeCommit } : null }];
+    },
+    findDelivery(prs, deliveredPr) { return prs.find(pr => pr.url === deliveredPr || String(pr.number) === String(deliveredPr).split('/').at(-1)); }
+  };
   const evidence = {
-    async snapshot() {
-      const state = states[Math.min(current++, states.length - 1)];
-      return { observed_at: new Date(clock()).toISOString(), notion: { id: 'page-1', url: 'https://notion/page-1', identifier: deriveIdentifier(plan), state, accepted_plan: plan, workpad: '' }, symphony: { runtime: {}, state: {}, issue: null }, github: { delivery_prs: [] }, git: { remote_refs: {} }, chatgpt_shot: null, errors: [] };
+    async snapshot({ baseBranch }) {
+      observedState = states[Math.min(snapshotIndex++, states.length - 1)];
+      return { observed_at: new Date(clock()).toISOString(), notion: { id: 'page-1', url: 'https://notion/page-1', identifier: deriveIdentifier(plan), state: observedState, accepted_plan: plan, workpad: observedState === 'Human Review' ? reviewWorkpad : '' }, symphony: { runtime: {}, state: {}, issue: null }, github: { delivery_prs: await github.pullRequestsForBase(baseBranch) }, git: { remote_refs: {} }, chatgpt_shot: observedState === 'Human Review' ? { job_id: '123e4567-e89b-42d3-a456-426614174000', terminal_state: 'completed', result: '# Verdict\nPASS' } : null, errors: [] };
     }
   };
   const store = new RunStore(config);
@@ -58,7 +70,7 @@ function fixture({ states, clock }) {
 test('central orchestration reaches terminal Done through injected capabilities', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-orchestrator-'));
   let current = 0;
-  const harness = fixture({ states: ['Ready', 'In Progress', 'Done'], clock: () => current++ });
+  const harness = fixture({ states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done'], clock: () => current++ });
   harness.config.run_record_directory = directory + '/runs';
   harness.config.workspace_root = directory + '/workspaces';
   const record = await new E2EOrchestrator({ ...harness, random: () => 0, clock: () => current++, sleepFn: async () => {} }).run();
@@ -78,4 +90,17 @@ test('hard cap converges through the same finalization boundary', async () => {
   const record = await new E2EOrchestrator({ ...harness, random: () => 0, clock: () => base + current++ * 10, sleepFn: async () => {} }).run();
   assert.equal(record.status, 'finished');
   assert.deepEqual(harness.finalized, ['hard_cap_reached']);
+});
+
+test('Done without an approved and verified delivery is recorded as unverified', async () => {
+  let current = 0;
+  const harness = fixture({ states: ['Done'], clock: () => current++ });
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-unverified-done-'));
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+  const record = await new E2EOrchestrator({ ...harness, random: () => 0, clock: () => current++, sleepFn: async () => {} }).run();
+  assert.equal(record.status, 'finished');
+  assert.deepEqual(harness.finalized, ['done_unverified']);
+  assert.equal(record.lifecycle.verified_through, null);
+  assert.equal(record.failures.at(-1).phase, 'done_verification');
 });

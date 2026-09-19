@@ -10,3 +10,13 @@ test('review evidence preserves Job terminal state and authoritative duration wh
   assert.equal(evidence.observed_duration_ms, 2_000);
   assert.match(evidence.result, /PASS/);
 });
+
+test('review evidence does not reuse an older completed Job when the latest Job is still running', async () => {
+  const completed = '123e4567-e89b-42d3-a456-426614174000';
+  const running = '223e4567-e89b-42d3-a456-426614174000';
+  const review = new ChatgptShotCapability({ commandRunner: async (_command, args) => ({ stdout: JSON.stringify(args[1] === completed ? { id: completed, state: 'completed', result: '# Verdict\nPASS' } : { id: running, state: 'running', result: null }) }) });
+  const evidence = await review.inspect(`old Job ID: ${completed}\ncurrent Job ID: ${running}`);
+  assert.equal(evidence.job_id, running);
+  assert.equal(evidence.terminal_state, 'running');
+  assert.equal(evidence.result, null);
+});

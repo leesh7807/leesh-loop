@@ -3,7 +3,7 @@ defmodule SymphonyElixirWeb.Presenter do
   Shared projections for the observability API and dashboard.
   """
 
-  alias SymphonyElixir.{Config, Orchestrator, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{Config, Orchestrator, StatusDashboard, Workspace}
 
   @spec state_payload(GenServer.name(), timeout()) :: map()
   def state_payload(orchestrator, snapshot_timeout_ms) do
@@ -54,32 +54,15 @@ defmodule SymphonyElixirWeb.Presenter do
 
   @spec issue_input_payload(String.t(), GenServer.name(), timeout()) :: {:ok, map()} | {:error, term()}
   def issue_input_payload(issue_identifier, orchestrator, snapshot_timeout_ms) when is_binary(issue_identifier) do
-    case Orchestrator.snapshot(orchestrator, snapshot_timeout_ms) do
-      %{} = snapshot ->
-        entry =
-          Enum.find(snapshot.running, &(&1.identifier == issue_identifier)) ||
-            Enum.find(snapshot.retrying, &(&1.identifier == issue_identifier)) ||
-            Enum.find(Map.get(snapshot, :blocked, []), &(&1.identifier == issue_identifier))
+    case Orchestrator.issue_input(orchestrator, issue_identifier, snapshot_timeout_ms) do
+      {:ok, %{id: issue_id, identifier: ^issue_identifier, description: description, state: state}} ->
+        {:ok, %{issue_identifier: issue_identifier, issue_id: issue_id, state: state, description: description}}
 
-        case entry do
-          %{issue_id: issue_id} ->
-            case Tracker.fetch_issues_by_ids([issue_id]) do
-              {:ok, [%{id: ^issue_id, identifier: ^issue_identifier, description: description, state: state}]} ->
-                {:ok, %{issue_identifier: issue_identifier, issue_id: issue_id, state: state, description: description}}
-
-              {:ok, _} ->
-                {:error, :issue_input_not_found}
-
-              {:error, reason} ->
-                {:error, {:issue_input_unavailable, reason}}
-            end
-
-          _ ->
-            {:error, :issue_not_found}
-        end
-
-      _ ->
+      {:error, :not_found} ->
         {:error, :issue_not_found}
+
+      {:error, :unavailable} ->
+        {:error, {:issue_input_unavailable, :orchestrator_unavailable}}
     end
   end
 

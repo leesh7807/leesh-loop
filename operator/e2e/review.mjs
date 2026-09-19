@@ -20,8 +20,8 @@ export class ChatgptShotCapability {
         jobs.push({ id, observed_at: new Date().toISOString(), state: null, result: null, error: commandError(error) || 'chatgpt-shot job inspection failed', started_at: null, finished_at: null, duration_ms: null });
       }
     }
-    const terminal = jobs.findLast(job => ['completed', 'failed'].includes(job.state));
+    const terminal = ['completed', 'failed'].includes(jobs.at(-1)?.state) ? jobs.at(-1) : null;
     const duration = terminal?.duration_ms ?? (terminal?.started_at && terminal?.finished_at ? Date.parse(terminal.finished_at) - Date.parse(terminal.started_at) : null);
-    return { job_id: jobs.at(-1)?.id ?? null, observations: jobs, terminal_state: terminal?.state ?? null, result: jobs.findLast(job => job.state === 'completed')?.result ?? null, error: jobs.findLast(job => job.state === 'failed')?.error ?? null, observed_duration_ms: Number.isFinite(duration) ? duration : null };
+    return { job_id: jobs.at(-1)?.id ?? null, observations: jobs, terminal_state: jobs.at(-1)?.state ?? null, result: terminal?.state === 'completed' ? terminal.result : null, error: terminal?.state === 'failed' ? terminal.error : null, observed_duration_ms: Number.isFinite(duration) ? duration : null };
   }
 }

@@ -29,7 +29,7 @@ export async function loadConfig(configPath) {
     notion_database_id: E2E_DATABASE_ID,
     seed_source_ref: normalizeRef(raw.seed_source_ref),
     run_record_directory: resolve(base, raw.run_record_directory || 'runs'),
-    workspace_root: raw.workspace_root ? resolve(base, raw.workspace_root) : join(tmpdir(), 'leesh-loop-e2e-workspaces'),
+    workspace_root: raw.workspace_root ? resolve(base, raw.workspace_root) : join(tmpdir(), 'leesh-loop-workspaces'),
     poll_interval_ms: positiveInteger(raw.poll_interval_ms ?? 15_000, 'poll_interval_ms'),
     finalization_timeout_ms: positiveInteger(raw.finalization_timeout_ms ?? 30_000, 'finalization_timeout_ms'),
     runtime_start_timeout_ms: positiveInteger(raw.runtime_start_timeout_ms ?? 1_800_000, 'runtime_start_timeout_ms'),

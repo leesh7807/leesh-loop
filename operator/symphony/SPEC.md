@@ -1618,7 +1618,7 @@ Minimum endpoints:
     example `{\"error\":{\"code\":\"issue_not_found\",\"message\":\"...\"}}`).
 
 - `GET /api/v1/<issue_identifier>/input`
-  - Returns the normalized production tracker representation currently bound to an observed issue,
+  - Returns the normalized production tracker representation captured at dispatch for an observed issue,
     including its `issue_id`, `state`, and exact `description` passed to the worker prompt builder.
   - This is a read-only evidence surface. It must not mutate tracker state, dispatch work, or create
     a worker-specific execution path. If the issue is not currently observed or the tracker read

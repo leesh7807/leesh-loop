@@ -33,9 +33,6 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
       {:error, :issue_not_found} ->
         error_response(conn, 404, "issue_not_found", "Issue not found")
 
-      {:error, :issue_input_not_found} ->
-        error_response(conn, 404, "issue_input_not_found", "Tracker input not found")
-
       {:error, {:issue_input_unavailable, reason}} ->
         error_response(conn, 503, "issue_input_unavailable", inspect(reason))
     end

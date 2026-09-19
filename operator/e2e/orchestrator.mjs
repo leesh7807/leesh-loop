@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { deriveIdentifier, newRunId, nowIso, sha256, sleep, bounded } from './common.mjs';
 import { runPaths, runBranch, runtimeProject } from './config.mjs';
+import { selectWorkload } from './catalog.mjs';
 import { ACTIVE_STATES, LifecycleInterpreter, mechanicalReviewAllowed } from './lifecycle.mjs';
 import { newRunRecord, addFailure, RunStore } from './record.mjs';
 import { Finalizer } from './finalize.mjs';
@@ -54,6 +55,7 @@ export class E2EOrchestrator {
   async reconcile(record) {
     let task = null;
     try { task = record.artifacts?.task_id ? await this.notion.readTask(this.config.notion_database_url, record.artifacts.task_id) : null; } catch (error) { addFailure(record, error, 'admission_reconciliation'); }
+    if (!task && record.artifacts?.task_id) task = { id: record.artifacts.task_id, state: null };
     try {
       await this.finalizer.finalize({ record, reason: 'admission_reconciliation', task, dashboard: record.runtime?.dashboard, baseBranch: record.binding?.base_branch, workspaceRoot: record.paths?.workspace_root, normalDone: task?.state === 'Done' });
     } catch (error) {
@@ -72,7 +74,7 @@ export class E2EOrchestrator {
     }
     const candidates = admission.workload;
     if (!candidates.length) throw new Error('all E2E workload candidates already have a task in the fixed E2E database');
-    const workload = candidates[Math.min(candidates.length - 1, Math.floor(Math.max(0, Math.min(0.999999, Number(this.random()))) * candidates.length))];
+    const workload = selectWorkload(candidates, { random: this.random });
     const runId = newRunId();
     const paths = runPaths(this.config, runId);
     const branch = runBranch(runId);
@@ -108,6 +110,7 @@ export class E2EOrchestrator {
       record.artifacts.publisher_result = publication;
       record.artifacts.task_id = publication.page_id;
       record.artifacts.task_url = publication.url || null;
+      task = { id: publication.page_id, state: null };
       record.status = 'published';
       await this.store.save(record);
       task = await this.notion.readTask(this.config.notion_database_url, publication.page_id);
@@ -159,16 +162,40 @@ export class E2EOrchestrator {
         }
         if (snapshot.symphony?.issue?.running?.workspace_path) record.evidence.workspace_paths.push(snapshot.symphony.issue.running.workspace_path);
         const interpretation = this.interpreter.interpret(task);
-        if (state === 'Done') return this.finalizer.finalize({ record, reason: 'production_done', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: true });
+        if (state === 'Done') {
+          const verification = await this.verifyDoneDelivery(record, baseBranch);
+          if (!verification.ok) {
+            addFailure(record, new Error(verification.reason), 'done_verification');
+            const preDone = record.lifecycle.observations.filter(observation => observation.state !== 'Done');
+            record.lifecycle.verified_through = this.interpreter.verifiedThrough(preDone);
+            record.lifecycle.verification_gaps = this.interpreter.gaps(record.lifecycle.verified_through);
+            await this.store.save(record);
+            return this.finalizer.finalize({ record, reason: 'done_unverified', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: true });
+          }
+          record.artifacts.merged_head = verification.delivered_head;
+          record.artifacts.remote_base_commit = verification.remote_base_commit;
+          await this.store.save(record);
+          return this.finalizer.finalize({ record, reason: 'production_done', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: true });
+        }
         if (state === 'Cancelled') return this.finalizer.finalize({ record, reason: 'production_cancelled', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
         if (interpretation.capability === 'mechanical_review_approval') {
-          const approval = mechanicalReviewAllowed(task);
+          const approval = mechanicalReviewAllowed(task, snapshot.chatgpt_shot);
           if (!approval.allowed) {
+            if (approval.pending) {
+              await this.store.save(record);
+              if (this.clock() >= Date.parse(record.deadline_at)) {
+                record.status = 'finalizing';
+                await this.store.save(record);
+                return this.finalizer.finalize({ record, reason: 'hard_cap_reached', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
+              }
+              await this.sleep(this.config.poll_interval_ms);
+              continue;
+            }
             addFailure(record, new Error(approval.reason), 'human_review');
             await this.store.save(record);
             return this.finalizer.finalize({ record, reason: 'human_review_cannot_be_approved', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
           }
-          const delivery = record.artifacts.delivery_prs.find(pr => String(pr.number) === approval.delivered_pr.replace(/^.*\/(\d+)$/, '$1') || pr.url === approval.delivered_pr);
+          const delivery = this.github.findDelivery(record.artifacts.delivery_prs, approval.delivered_pr);
           if (!delivery || delivery.baseRefName !== baseBranch || delivery.headRefOid?.toLowerCase() !== approval.delivered_head.toLowerCase()) {
             addFailure(record, new Error('Human Review delivery identity does not match the configured run-scoped base or delivered HEAD'), 'human_review');
             await this.store.save(record);
@@ -177,6 +204,7 @@ export class E2EOrchestrator {
           await this.notion.appendWorkpad(task.id, REVIEW_MARKER(approval.cycle));
           const merging = await this.notion.updateState(this.config.notion_database_url, task.id, 'Merging');
           if (merging.state !== 'Merging') throw new Error(`Human Review mechanical approval readback was ${merging.state}`);
+          record.artifacts.approved_delivery = { pr: approval.delivered_pr, head: approval.delivered_head, cycle: approval.cycle };
           record.lifecycle.observations.push({ state: 'Merging', first_observed_at: nowIso(), last_observed_at: nowIso(), observed_duration_ms: null });
           await this.store.save(record);
           continue;
@@ -200,5 +228,28 @@ export class E2EOrchestrator {
       }
       await this.sleep(this.config.poll_interval_ms);
     }
+  }
+
+  async verifyDoneDelivery(record, baseBranch) {
+    const approved = record.artifacts.approved_delivery;
+    if (!approved) return { ok: false, reason: 'Done was observed without an E2E mechanical approval identity' };
+    let prs;
+    try { prs = await this.github.pullRequestsForBase(baseBranch); }
+    catch (error) { return { ok: false, reason: `GitHub delivery inspection failed: ${error.message}` }; }
+    const pr = this.github.findDelivery(prs, approved.pr);
+    if (!pr) return { ok: false, reason: 'approved delivery PR was not found for the configured run-scoped base' };
+    if (pr.baseRefName !== baseBranch || pr.headRefOid?.toLowerCase() !== approved.head.toLowerCase()) return { ok: false, reason: 'approved delivery PR base or head does not match the Human Review identity' };
+    if (!pr.mergedAt) return { ok: false, reason: 'approved delivery PR is not merged' };
+    const mergeCommit = pr.mergeCommit?.oid;
+    if (!/^[0-9a-f]{40}$/i.test(mergeCommit || '')) return { ok: false, reason: 'merged delivery PR has no authoritative merge commit' };
+    let remoteBaseCommit;
+    try { remoteBaseCommit = await this.git.remoteBranchCommit(baseBranch); }
+    catch (error) { return { ok: false, reason: `configured base remote readback failed: ${error.message}` }; }
+    if (!remoteBaseCommit) return { ok: false, reason: 'configured base remote ref is missing after Done' };
+    let contained;
+    try { contained = await this.git.containsCommit(baseBranch, mergeCommit); }
+    catch (error) { return { ok: false, reason: `configured base merge readback failed: ${error.message}` }; }
+    if (!contained) return { ok: false, reason: 'merged delivery commit is not present on fetched remote configured base' };
+    return { ok: true, delivered_head: approved.head, merge_commit: mergeCommit, remote_base_commit: remoteBaseCommit };
   }
 }

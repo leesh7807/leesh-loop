@@ -33,6 +33,7 @@ export class Finalizer {
     record.finalization.reason = reason;
     if (!normalDone) {
       await this.action(record, 'stop_run_owned_symphony', async () => {
+        if (record.cleanup.runtime_stopped === true) return { skipped: true, already_stopped: true };
         if (!record.timing.symphony.started_at) {
           record.cleanup.runtime_stopped = true;
           return { skipped: true };
@@ -43,9 +44,12 @@ export class Finalizer {
         return value;
       });
       if (record.cleanup.runtime_stopped) {
-        const reread = await this.action(record, 'reread_task_after_runtime_stop', () => task?.id ? this.notion.readTask(this.config.notion_database_url, task.id) : null);
-        task = reread || task;
-        if (task && !TERMINAL_STATES.has(task.state)) {
+        const reread = task?.id
+          ? await this.action(record, 'reread_task_after_runtime_stop', () => this.notion.readTask(this.config.notion_database_url, task.id))
+          : null;
+        const rereadAction = record.finalization.actions.at(-1);
+        if (rereadAction?.status === 'completed' && reread) task = reread;
+        if (rereadAction?.status === 'completed' && task && !TERMINAL_STATES.has(task.state)) {
           await this.action(record, 'cancel_nonterminal_task', async () => {
             const cancelled = await this.notion.updateState(this.config.notion_database_url, task.id, 'Cancelled');
             if (cancelled.state !== 'Cancelled') throw new Error(`Cancelled transition readback was ${cancelled.state}`);
@@ -63,6 +67,7 @@ export class Finalizer {
       }
     } else {
       await this.action(record, 'stop_run_owned_symphony_after_done', async () => {
+        if (record.cleanup.runtime_stopped === true) return { skipped: true, already_stopped: true };
         if (!record.timing.symphony.started_at) {
           record.cleanup.runtime_stopped = true;
           return { skipped: true };
@@ -80,7 +85,7 @@ export class Finalizer {
       return { observed_at: snapshot.observed_at, errors: snapshot.errors };
     });
 
-    const prs = record.evidence.snapshots.at(-1)?.github?.delivery_prs || [];
+    const prs = record.evidence.snapshots.flatMap(snapshot => snapshot.github?.delivery_prs || []);
     const branches = new Set(prs.map(pr => pr.headRefName).filter(Boolean));
     for (const branch of branches) {
       await this.action(record, `delete_delivery_branch:${branch}`, async () => {
@@ -118,7 +123,7 @@ export class Finalizer {
         return result ?? { path: workspace };
       });
     }
-    const finalState = record.evidence.snapshots.at(-1)?.notion?.state || task?.state || null;
+    const finalState = task?.state || record.evidence.snapshots.at(-1)?.notion?.state || null;
     record.lifecycle.terminal_state = finalState;
     record.finalization.complete = record.finalization.unresolved.length === 0;
     record.status = 'finished';

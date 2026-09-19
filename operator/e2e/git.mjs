@@ -60,4 +60,25 @@ export class GitCapability {
     if (refs[`refs/heads/${branch}`]) throw new Error(`run-scoped branch ${branch} remained after deletion`);
     return { branch, deleted: true };
   }
+
+  async remoteBranchCommit(branch) {
+    return (await this.remoteRefs())[`refs/heads/${branch}`] || null;
+  }
+
+  async containsCommit(branch, commit) {
+    if (!/^[0-9a-f]{40}$/i.test(commit || '')) return false;
+    const temporary = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-verify-'));
+    try {
+      await this.gitCommand('git', ['init', '--bare', temporary], { timeout: 30_000 });
+      await this.gitCommand('git', ['--git-dir', temporary, 'fetch', '--no-tags', this.repositoryUrl, `refs/heads/${branch}:refs/base`], { timeout: 60_000 });
+      try {
+        await this.gitCommand('git', ['--git-dir', temporary, 'merge-base', '--is-ancestor', commit, 'refs/base'], { timeout: 30_000 });
+        return true;
+      } catch {
+        return false;
+      }
+    } finally {
+      await remove(temporary);
+    }
+  }
 }
