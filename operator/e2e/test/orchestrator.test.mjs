@@ -10,7 +10,7 @@ import { RunStore } from '../record.mjs';
 
 const plan = '# Representative task\n\nInspect the repository and write a concise note under docs/.\n';
 
-function fixture({ states, clock }) {
+function fixture({ states, clock, includeTrackerInput = true }) {
   const root = '/repo';
   const config = {
     repository_url: 'git@github.com:owner/repo.git',
@@ -31,7 +31,7 @@ function fixture({ states, clock }) {
   const deliveryHead = '0123456789012345678901234567890123456789';
   const mergeCommit = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd';
   const deliveryUrl = 'https://github.com/owner/repo/pull/4';
-  const reviewWorkpad = `review target: ${deliveryUrl}\nreview head: ${deliveryHead}\n# Verdict\nPASS\nHuman Review\ncycle: 1\nreason: review\ndelivered_pr: ${deliveryUrl}\ndelivered_head: ${deliveryHead}\n`;
+  const reviewWorkpad = `review target: ${deliveryUrl}\nreview head: ${deliveryHead}\nJob ID: 123e4567-e89b-42d3-a456-426614174000\n# Verdict\nPASS\nHuman Review\ncycle: 1\nreason: review\ndelivered_pr: ${deliveryUrl}\ndelivered_head: ${deliveryHead}\n`;
   const task = state => ({ id: 'page-1', url: 'https://notion/page-1', identifier: deriveIdentifier(plan), state, accepted_plan: plan, workpad: state === 'Human Review' ? reviewWorkpad : '' });
   const notion = {
     async listTasks() { return []; },
@@ -58,7 +58,7 @@ function fixture({ states, clock }) {
   const evidence = {
     async snapshot({ baseBranch }) {
       observedState = states[Math.min(snapshotIndex++, states.length - 1)];
-      return { observed_at: new Date(clock()).toISOString(), notion: { id: 'page-1', url: 'https://notion/page-1', identifier: deriveIdentifier(plan), state: observedState, accepted_plan: plan, workpad: observedState === 'Human Review' ? reviewWorkpad : '' }, symphony: { runtime: {}, state: {}, issue: null }, github: { delivery_prs: await github.pullRequestsForBase(baseBranch) }, git: { remote_refs: {} }, chatgpt_shot: observedState === 'Human Review' ? { job_id: '123e4567-e89b-42d3-a456-426614174000', terminal_state: 'completed', result: '# Verdict\nPASS' } : null, errors: [] };
+      return { observed_at: new Date(clock()).toISOString(), notion: { id: 'page-1', url: 'https://notion/page-1', identifier: deriveIdentifier(plan), state: observedState, accepted_plan: plan, workpad: observedState === 'Human Review' ? reviewWorkpad : '' }, symphony: { runtime: {}, state: {}, issue: null, tracker_input: includeTrackerInput ? { description: plan } : null }, github: { delivery_prs: await github.pullRequestsForBase(baseBranch) }, git: { remote_refs: {} }, chatgpt_shot: observedState === 'Human Review' ? { job_id: '123e4567-e89b-42d3-a456-426614174000', terminal_state: 'completed', result: '# Verdict\nPASS' } : null, errors: [] };
     }
   };
   const store = new RunStore(config);
@@ -94,7 +94,7 @@ test('hard cap converges through the same finalization boundary', async () => {
 
 test('Done without an approved and verified delivery is recorded as unverified', async () => {
   let current = 0;
-  const harness = fixture({ states: ['Done'], clock: () => current++ });
+  const harness = fixture({ states: ['Done'], clock: () => current++, includeTrackerInput: false });
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-unverified-done-'));
   harness.config.run_record_directory = directory + '/runs';
   harness.config.workspace_root = directory + '/workspaces';
@@ -102,5 +102,5 @@ test('Done without an approved and verified delivery is recorded as unverified',
   assert.equal(record.status, 'finished');
   assert.deepEqual(harness.finalized, ['done_unverified']);
   assert.equal(record.lifecycle.verified_through, null);
-  assert.equal(record.failures.at(-1).phase, 'done_verification');
+  assert.equal(record.failures.at(-1).phase, 'plan_binding');
 });

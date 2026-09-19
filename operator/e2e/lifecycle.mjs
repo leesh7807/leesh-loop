@@ -1,6 +1,7 @@
 export const NORMAL_PATH = ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done'];
 export const TERMINAL_STATES = new Set(['Done', 'Cancelled']);
 export const ACTIVE_STATES = new Set(['Ready', 'In Progress', 'Rework', 'Human Review', 'Merging']);
+const JOB_ID = /[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/ig;
 
 const strategies = new Map([
   ['Ready', { phase: 'Ready', capability: 'observe' }],
@@ -43,6 +44,8 @@ export function mechanicalReviewAllowed(task, reviewEvidence) {
   const previous = markers.at(-2);
   const reviewWindow = workpad.slice(previous ? previous.index + previous[0].length : 0, marker.index);
   if (!reviewEvidence?.job_id || !['completed', 'failed'].includes(reviewEvidence.terminal_state)) return { allowed: false, pending: true, reason: 'current independent review Job has not reached a terminal state', cycle: Number(cycle) };
+  const currentJobIds = [...reviewWindow.matchAll(JOB_ID)].map(match => match[0].toLowerCase());
+  if (!currentJobIds.includes(reviewEvidence.job_id.toLowerCase())) return { allowed: false, reason: 'current Human Review cycle is not bound to the observed independent review Job', cycle: Number(cycle) };
   if (reviewEvidence.terminal_state !== 'completed' || !reviewWindow.includes(deliveredPr.trim()) || !reviewWindow.includes(deliveredHead.trim()) || !/(?:# Verdict|Verdict)\s*\n?\s*PASS\b/i.test(reviewWindow) || !/(?:# Verdict|Verdict)\s*\n?\s*PASS\b/i.test(reviewEvidence.result || '')) return { allowed: false, reason: 'current Human Review cycle has no matching independent review PASS evidence', cycle: Number(cycle) };
   return { allowed: true, cycle: Number(cycle), delivered_pr: deliveredPr.trim(), delivered_head: deliveredHead.trim() };
 }

@@ -12,7 +12,7 @@ test('interpreter selects a capability without owning a competing lifecycle stat
 test('mechanical approval only accepts normal review with matching delivery evidence and PASS', () => {
   const valid = {
     state: 'Human Review',
-    workpad: 'review target: https://github.com/a/b/pull/4\nreview head: 0123456789012345678901234567890123456789\n# Verdict\nPASS\nHuman Review\ncycle: 2\nreason: review\ndelivered_pr: https://github.com/a/b/pull/4\ndelivered_head: 0123456789012345678901234567890123456789\n'
+    workpad: 'review target: https://github.com/a/b/pull/4\nreview head: 0123456789012345678901234567890123456789\nJob ID: 123e4567-e89b-42d3-a456-426614174000\n# Verdict\nPASS\nHuman Review\ncycle: 2\nreason: review\ndelivered_pr: https://github.com/a/b/pull/4\ndelivered_head: 0123456789012345678901234567890123456789\n'
   };
   const reviewEvidence = { job_id: '123e4567-e89b-42d3-a456-426614174000', terminal_state: 'completed', result: '# Verdict\nPASS' };
   assert.equal(mechanicalReviewAllowed(valid, reviewEvidence).allowed, true);
@@ -20,4 +20,6 @@ test('mechanical approval only accepts normal review with matching delivery evid
   assert.equal(mechanicalReviewAllowed({ ...valid, workpad: valid.workpad.replace('reason: review', 'reason: blocker') }).allowed, false);
   assert.equal(mechanicalReviewAllowed({ ...valid, workpad: valid.workpad.replace('# Verdict\nPASS', '# Verdict\nFINDINGS') }, reviewEvidence).allowed, false);
   assert.equal(mechanicalReviewAllowed(valid, { ...reviewEvidence, terminal_state: 'failed', result: null }).allowed, false);
+  const staleJob = valid.workpad.replace('123e4567-e89b-42d3-a456-426614174000', '223e4567-e89b-42d3-a456-426614174000');
+  assert.equal(mechanicalReviewAllowed({ ...valid, workpad: staleJob }, reviewEvidence).allowed, false);
 });

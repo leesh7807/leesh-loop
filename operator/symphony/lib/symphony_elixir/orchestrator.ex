@@ -39,6 +39,7 @@ defmodule SymphonyElixir.Orchestrator do
       completed: MapSet.new(),
       claimed: MapSet.new(),
       blocked: %{},
+      dispatch_inputs: %{},
       retry_attempts: %{},
       codex_totals: nil,
       codex_rate_limits: nil
@@ -995,6 +996,7 @@ defmodule SymphonyElixir.Orchestrator do
         %{
           state
           | running: running,
+            dispatch_inputs: Map.put(state.dispatch_inputs, issue.id, issue),
             claimed: MapSet.put(state.claimed, issue.id),
             retry_attempts: Map.delete(state.retry_attempts, issue.id)
         }
@@ -1427,9 +1429,17 @@ defmodule SymphonyElixir.Orchestrator do
 
   @impl true
   def handle_call({:issue_input, issue_identifier}, _from, state) do
-    case Enum.find(state.running, fn {_issue_id, metadata} -> metadata.identifier == issue_identifier end) do
-      {_issue_id, %{dispatch_issue: %Issue{} = issue}} -> {:reply, {:ok, issue}, state}
-      _ -> {:reply, {:error, :not_found}, state}
+    running = Enum.find(state.running, fn {_issue_id, metadata} -> metadata.identifier == issue_identifier end)
+
+    case running do
+      {_issue_id, %{dispatch_issue: %Issue{} = issue}} ->
+        {:reply, {:ok, issue}, state}
+
+      _ ->
+        case Enum.find(state.dispatch_inputs, fn {_issue_id, %Issue{identifier: identifier}} -> identifier == issue_identifier end) do
+          {_issue_id, %Issue{} = issue} -> {:reply, {:ok, issue}, state}
+          _ -> {:reply, {:error, :not_found}, state}
+        end
     end
   end
 

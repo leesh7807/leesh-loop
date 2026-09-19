@@ -113,8 +113,9 @@ export class E2EOrchestrator {
       task = { id: publication.page_id, state: null };
       record.status = 'published';
       await this.store.save(record);
-      task = await this.notion.readTask(this.config.notion_database_url, publication.page_id);
-      if (task.identifier !== deriveIdentifier(workload.accepted_plan) || task.accepted_plan !== workload.accepted_plan) throw new Error('Publisher authoritative readback does not match the selected Accepted Plan');
+      const publishedTask = await this.notion.readTask(this.config.notion_database_url, publication.page_id);
+      if (!publishedTask || publishedTask.identifier !== deriveIdentifier(workload.accepted_plan) || publishedTask.accepted_plan !== workload.accepted_plan) throw new Error('Publisher authoritative readback does not match the selected Accepted Plan');
+      task = publishedTask;
       record.artifacts.task_identifier = task.identifier;
       record.artifacts.plan_binding = { task_id: task.id, publisher_plan_sha256: sha256(workload.accepted_plan), tracker_description_sha256: sha256(task.accepted_plan), worker_input_sha256: null, status: 'published_and_tracker_readback' };
       record.status = 'observing';
@@ -163,6 +164,14 @@ export class E2EOrchestrator {
         if (snapshot.symphony?.issue?.running?.workspace_path) record.evidence.workspace_paths.push(snapshot.symphony.issue.running.workspace_path);
         const interpretation = this.interpreter.interpret(task);
         if (state === 'Done') {
+          if (record.artifacts.plan_binding?.status !== 'verified_by_production_tracker_input') {
+            addFailure(record, new Error('Done was observed without dispatch-bound production tracker input evidence'), 'plan_binding');
+            const preDone = record.lifecycle.observations.filter(observation => observation.state !== 'Done');
+            record.lifecycle.verified_through = this.interpreter.verifiedThrough(preDone);
+            record.lifecycle.verification_gaps = this.interpreter.gaps(record.lifecycle.verified_through);
+            await this.store.save(record);
+            return this.finalizer.finalize({ record, reason: 'done_unverified', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: true });
+          }
           const verification = await this.verifyDoneDelivery(record, baseBranch);
           if (!verification.ok) {
             addFailure(record, new Error(verification.reason), 'done_verification');
@@ -179,6 +188,11 @@ export class E2EOrchestrator {
         }
         if (state === 'Cancelled') return this.finalizer.finalize({ record, reason: 'production_cancelled', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
         if (interpretation.capability === 'mechanical_review_approval') {
+          if (record.artifacts.plan_binding?.status !== 'verified_by_production_tracker_input') {
+            addFailure(record, new Error('Human Review was reached before dispatch-bound production tracker input could be verified'), 'plan_binding');
+            await this.store.save(record);
+            return this.finalizer.finalize({ record, reason: 'plan_binding_unverified', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
+          }
           const approval = mechanicalReviewAllowed(task, snapshot.chatgpt_shot);
           if (!approval.allowed) {
             if (approval.pending) {

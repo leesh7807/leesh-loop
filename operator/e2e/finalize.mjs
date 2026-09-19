@@ -17,13 +17,16 @@ export class Finalizer {
     try {
       const value = await bounded(operation, this.config.finalization_timeout_ms, name);
       recordAction(record, name, { status: 'completed', value });
+      record.finalization.unresolved = record.finalization.unresolved.filter(action => action !== name);
+      record.cleanup.unresolved = record.cleanup.unresolved.filter(action => action !== name);
+      record.finalization.incomplete = record.finalization.unresolved.length > 0;
       await this.store.save(record);
       return value;
     } catch (error) {
       recordAction(record, name, { status: 'failed', error: String(error?.message || error) });
       record.finalization.incomplete = true;
-      record.finalization.unresolved.push(name);
-      record.cleanup.unresolved.push(name);
+      if (!record.finalization.unresolved.includes(name)) record.finalization.unresolved.push(name);
+      if (!record.cleanup.unresolved.includes(name)) record.cleanup.unresolved.push(name);
       await this.store.save(record).catch(() => {});
       return null;
     }
@@ -60,9 +63,6 @@ export class Finalizer {
         }
       } else {
         recordAction(record, 'skip_task_terminalization_without_runtime_confirmation', { status: 'blocked', reason: 'run-owned Symphony stop was not confirmed' });
-        record.finalization.incomplete = true;
-        record.finalization.unresolved.push('run-owned Symphony stop confirmation');
-        record.cleanup.unresolved.push('run-owned Symphony stop confirmation');
         await this.store.save(record);
       }
     } else {
@@ -86,7 +86,8 @@ export class Finalizer {
     });
 
     const prs = record.evidence.snapshots.flatMap(snapshot => snapshot.github?.delivery_prs || []);
-    const branches = new Set(prs.map(pr => pr.headRefName).filter(Boolean));
+    const ownedBranches = this.github.runOwnedDeliveryBranches?.(prs, record) || [];
+    const branches = new Set(ownedBranches);
     for (const branch of branches) {
       await this.action(record, `delete_delivery_branch:${branch}`, async () => {
         await this.git.deleteBranch(branch);
@@ -105,7 +106,7 @@ export class Finalizer {
       const after = await this.git.remoteRefs();
       record.evidence.branch_refs_after = after;
       const before = record.evidence.branch_refs_before || {};
-      const knownDeliveryBranches = record.evidence.snapshots.flatMap(snapshot => snapshot.github?.delivery_prs || []).map(pr => pr.headRefName).filter(Boolean);
+      const knownDeliveryBranches = this.github.runOwnedDeliveryBranches?.(record.evidence.snapshots.flatMap(snapshot => snapshot.github?.delivery_prs || []), record) || [];
       const runBranches = new Set([baseBranch, ...knownDeliveryBranches, ...record.cleanup.branches_deleted].filter(Boolean).map(branch => `refs/heads/${branch}`));
       const unrelatedChanges = new Set([...new Set([...Object.keys(before), ...Object.keys(after)])].filter(ref => !runBranches.has(ref)).filter(ref => before[ref] !== after[ref]));
       const remainingRunBranches = Object.keys(after).filter(ref => runBranches.has(ref));

@@ -29,3 +29,25 @@ test('finalization preserves an external stop failure and still converges finite
   assert.equal(result.finalization.complete, false);
   assert.ok(result.finalization.unresolved.some(action => action === 'stop_run_owned_symphony'));
 });
+
+test('successful reconciliation clears an earlier unresolved action', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-retry-'));
+  const config = { notion_database_url: 'https://app.notion.com/p/studyleesh/3e08a2658625805cad23fe1137be4a1e?v=3e08a26586258042a8e4000c945e56e7', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
+  const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
+  const record = newRunRecord({ config, runId: 'run-1', workload, paths: runPaths(config, 'run-1') });
+  record.binding.base_branch = 'base/run-1';
+  record.timing.symphony.started_at = new Date().toISOString();
+  let stopCalls = 0;
+  const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
+  const store = { async save() {} };
+  const runtime = { async stop() { stopCalls += 1; if (stopCalls === 1) throw new Error('temporary stop failure'); return { stopped: true }; } };
+  const git = { async remoteRefs() { return {}; }, async deleteBranch() { return { already_absent: true }; } };
+  const evidence = { async snapshot() { return { observed_at: new Date().toISOString(), notion: { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }, github: { delivery_prs: [] }, symphony: {}, git: { remote_refs: {} }, chatgpt_shot: null, errors: [] }; } };
+  const finalizer = new Finalizer({ config, store, notion, runtime, git, github: {}, evidence });
+  const first = await finalizer.finalize({ record, reason: 'first_attempt', task: await notion.readTask(), baseBranch: 'base/run-1', workspaceRoot: directory + '/workspaces' });
+  assert.equal(first.finalization.complete, false);
+  const second = await finalizer.finalize({ record, reason: 'reconciliation', task: await notion.readTask(), baseBranch: 'base/run-1', workspaceRoot: directory + '/workspaces' });
+  assert.equal(second.finalization.complete, true);
+  assert.deepEqual(second.finalization.unresolved, []);
+  assert.deepEqual(second.cleanup.unresolved, []);
+});
