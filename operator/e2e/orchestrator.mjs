@@ -58,13 +58,45 @@ export class E2EOrchestrator {
   async reconcile(record) {
     let task = null;
     try { task = await this.readOwnedTask(record); } catch (error) { addFailure(record, error, 'admission_reconciliation'); }
+    let normalDone = false;
+    let reason = 'admission_reconciliation';
+    if (task?.state === 'Done') {
+      const verification = await this.verifyReconciledDone(record, task);
+      normalDone = verification.ok;
+      if (!verification.ok) {
+        addFailure(record, new Error(verification.reason), 'done_verification');
+        reason = 'done_unverified_reconciliation';
+      }
+    }
     try {
-      await this.finalizer.finalize({ record, reason: 'admission_reconciliation', task, dashboard: record.runtime?.dashboard, baseBranch: record.binding?.base_branch, workspaceRoot: record.paths?.workspace_root, normalDone: task?.state === 'Done' });
+      await this.finalizer.finalize({ record, reason, task, dashboard: record.runtime?.dashboard, baseBranch: record.binding?.base_branch, workspaceRoot: record.paths?.workspace_root, normalDone });
     } catch (error) {
       addFailure(record, error, 'admission_reconciliation');
       await this.store.save(record);
     }
     return record;
+  }
+
+  async verifyReconciledDone(record, task) {
+    if (!this.evidence) return { ok: false, reason: 'Done recovery has no evidence capability' };
+    try {
+      const snapshot = await bounded(() => this.evidence.snapshot({ record, databaseUrl: this.config.notion_database_url, identifier: record.artifacts.task_identifier, dashboard: record.runtime?.dashboard, baseBranch: record.binding?.base_branch, workspaceRoot: record.paths?.workspace_root }), 30_000, 'E2E Done recovery evidence snapshot');
+      record.evidence.snapshots.push(snapshot);
+      if (!record.artifacts.plan_binding) record.artifacts.plan_binding = { task_id: task.id, publisher_plan_sha256: sha256(record.workload.accepted_plan), tracker_description_sha256: sha256(task.accepted_plan), worker_input_sha256: null, status: 'published_and_tracker_readback' };
+      const description = snapshot.symphony?.tracker_input?.description;
+      if (description === undefined) return { ok: false, reason: 'Done recovery has no dispatch-bound production tracker input evidence' };
+      record.artifacts.plan_binding.worker_input_sha256 = sha256(description || '');
+      record.artifacts.plan_binding.status = description === task.accepted_plan ? 'verified_by_production_tracker_input' : 'mismatch';
+      if (record.artifacts.plan_binding.status !== 'verified_by_production_tracker_input') return { ok: false, reason: 'Done recovery tracker input does not match the Publisher Accepted Plan' };
+      if (Array.isArray(snapshot.github?.delivery_prs)) record.artifacts.delivery_prs = snapshot.github.delivery_prs;
+      const verification = await this.verifyDoneDelivery(record, record.binding?.base_branch);
+      if (!verification.ok) return verification;
+      record.artifacts.merged_head = verification.delivered_head;
+      record.artifacts.remote_base_commit = verification.remote_base_commit;
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, reason: `Done recovery evidence failed: ${error.message}` };
+    }
   }
 
   async readOwnedTask(record) {

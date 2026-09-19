@@ -184,3 +184,17 @@ test('reconciliation rebinds a published task from its workload identity after a
   await orchestrator.reconcile(record);
   assert.equal(record.artifacts.task_id, 'page-1');
 });
+
+test('reconciliation does not accept Done without the normal delivery proof', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-done-crash-'));
+  const harness = fixture({ states: ['Done'], clock: () => 0 });
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+  const workload = harness.catalog[0];
+  const record = newRunRecord({ config: harness.config, runId: 'run-done-crash', workload, paths: runPaths(harness.config, 'run-done-crash') });
+  record.status = 'observing';
+  const orchestrator = new E2EOrchestrator({ ...harness, random: () => 0 });
+  await orchestrator.reconcile(record);
+  assert.deepEqual(harness.finalized, ['done_unverified_reconciliation']);
+  assert.equal(record.failures.at(-1).phase, 'done_verification');
+});
