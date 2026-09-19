@@ -83,7 +83,7 @@ test('branch isolation distinguishes external changes from unresolved new refs',
   const record = newRunRecord({ config, runId: 'run-refs', workload, paths: runPaths(config, 'run-refs') });
   record.binding.base_branch = 'base/run-refs';
   record.timing.symphony.started_at = new Date().toISOString();
-  record.evidence.branch_refs_before = { 'refs/heads/main': 'a' };
+  record.evidence.branch_refs_before = { 'refs/heads/main': 'a', 'refs/heads/deleted-before-run': 'd' };
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
   const store = { async save() {} };
   const runtime = { async stop() { return { stopped: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
@@ -92,6 +92,7 @@ test('branch isolation distinguishes external changes from unresolved new refs',
   const finalizer = new Finalizer({ config, store, notion, runtime, git, github: {}, evidence });
   const result = await finalizer.finalize({ record, reason: 'hard_cap_reached', task: await notion.readTask(), baseBranch: 'base/run-refs', workspaceRoot: directory + '/workspaces' });
   assert.deepEqual(result.evidence.branch_isolation.unrelated_changes, ['refs/heads/main']);
+  assert.deepEqual(result.evidence.branch_isolation.unrelated_deletions, ['refs/heads/deleted-before-run']);
   assert.deepEqual(result.evidence.branch_isolation.unresolved_new_refs, ['refs/heads/worker-leftover']);
   assert.equal(result.finalization.complete, true);
 });

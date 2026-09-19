@@ -324,6 +324,7 @@ export class E2EOrchestrator {
     try { remoteBaseCommit = await this.git.remoteBranchCommit(baseBranch); }
     catch (error) { return { ok: false, reason: `configured base remote readback failed: ${error.message}` }; }
     if (!remoteBaseCommit) return { ok: false, reason: 'configured base remote ref is missing after Done' };
+    if (remoteBaseCommit.toLowerCase() !== mergeCommit.toLowerCase()) return { ok: false, reason: 'configured base tip contains changes after the approved delivery merge' };
     let contained;
     try { contained = await this.git.containsCommit(baseBranch, mergeCommit); }
     catch (error) { return { ok: false, reason: `configured base merge readback failed: ${error.message}` }; }

@@ -137,6 +137,16 @@ test('Done rejects an unrelated merge into the run-scoped base', async () => {
   assert.match(result.reason, /unrelated PR/);
 });
 
+test('Done rejects a configured base advanced after the approved merge', async () => {
+  let current = 0;
+  const harness = fixture({ states: ['Done'], clock: () => current++ });
+  harness.capabilities.git.remoteBranchCommit = async () => 'fedcbafedcbafedcbafedcbafedcbafedcbafedc';
+  const record = { started_at: new Date(0).toISOString(), artifacts: { approved_delivery: { pr: 'https://github.com/owner/repo/pull/4', head: '0123456789012345678901234567890123456789' } } };
+  const result = await new E2EOrchestrator({ ...harness, random: () => 0, clock: () => current++, sleepFn: async () => {} }).verifyDoneDelivery(record, 'e2e-base');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /contains changes after/);
+});
+
 test('admission does not treat unrelated branch changes as run-owned residue', async () => {
   const harness = fixture({ states: ['Ready'], clock: () => 0 });
   const previous = {
