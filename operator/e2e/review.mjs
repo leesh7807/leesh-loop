@@ -1,12 +1,13 @@
 import { command, commandError } from './common.mjs';
 
-const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/ig;
+const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+const jobId = new RegExp(`(?:\\bJob ID\\b|\\bjob_id\\b|\\breview job(?: id)?\\b)\\s*:\\s*(${uuid})`, 'ig');
 
 export class ChatgptShotCapability {
   constructor({ commandRunner = command } = {}) { this.commandRunner = commandRunner; }
 
   jobIds(workpad) {
-    return [...new Set((workpad.match(uuid) || []).map(value => value.toLowerCase()))];
+    return [...new Set([...workpad.matchAll(jobId)].map(match => match[1].toLowerCase()))];
   }
 
   async inspect(workpad, signal) {

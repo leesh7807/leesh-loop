@@ -20,3 +20,10 @@ test('review evidence does not reuse an older completed Job when the latest Job 
   assert.equal(evidence.terminal_state, 'running');
   assert.equal(evidence.result, null);
 });
+
+test('review evidence ignores unrelated workspace UUIDs', () => {
+  const id = '123e4567-e89b-42d3-a456-426614174000';
+  const runId = '223e4567-e89b-42d3-a456-426614174000';
+  const review = new ChatgptShotCapability();
+  assert.deepEqual(review.jobIds(`workspace: /tmp/${runId}\nJob ID: ${id}`), [id]);
+});
