@@ -14,13 +14,15 @@ test('finalization preserves an external stop failure and still converges finite
   const record = newRunRecord({ config, runId: 'run-1', workload, paths: runPaths(config, 'run-1') });
   record.binding.base_branch = 'base/run-1';
   record.timing.symphony.started_at = new Date().toISOString();
+  record.evidence.workspace_paths = [directory + '/workspaces/page-1'];
   const notion = {
     async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'In Progress', accepted_plan: '# Fixture\n', workpad: '' }; },
     async updateState() { throw new Error('must not mutate task while runtime stop is unconfirmed'); }
   };
   const store = { async save() {} };
   const runtime = { async stop() { throw new Error('stop unavailable'); } };
-  const git = { async remoteRefs() { return {}; }, async deleteBranch() { return { already_absent: true }; } };
+  let deleteCalls = 0;
+  const git = { async remoteRefs() { return {}; }, async deleteBranch() { deleteCalls += 1; return { already_absent: true }; } };
   const evidence = { async snapshot() { return { observed_at: new Date().toISOString(), notion: { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'In Progress', accepted_plan: '# Fixture\n', workpad: '' }, github: { delivery_prs: [] }, symphony: {}, git: { remote_refs: {} }, chatgpt_shot: null, errors: [] }; } };
   const finalizer = new Finalizer({ config, store, notion, runtime, git, github: {}, evidence });
   const result = await finalizer.finalize({ record, reason: 'hard_cap_reached', task: await notion.readTask(), baseBranch: 'base/run-1', workspaceRoot: directory + '/workspaces' });
@@ -28,6 +30,8 @@ test('finalization preserves an external stop failure and still converges finite
   assert.equal(result.cleanup.task_terminalized, false);
   assert.equal(result.finalization.complete, false);
   assert.ok(result.finalization.unresolved.some(action => action === 'stop_run_owned_symphony'));
+  assert.equal(deleteCalls, 0);
+  assert.deepEqual(result.cleanup.workspaces_deleted, []);
 });
 
 test('successful reconciliation clears an earlier unresolved action', async () => {

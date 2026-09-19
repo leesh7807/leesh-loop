@@ -20,9 +20,10 @@ export class LifecycleInterpreter {
   }
 
   verifiedThrough(observations) {
-    let highest = -1;
-    for (const observation of observations) highest = Math.max(highest, NORMAL_PATH.indexOf(observation.state));
-    return highest < 0 ? null : NORMAL_PATH[highest];
+    const observed = new Set(observations.map(observation => observation.state));
+    let contiguous = -1;
+    for (let index = 0; index < NORMAL_PATH.length && observed.has(NORMAL_PATH[index]); index += 1) contiguous = index;
+    return contiguous < 0 ? null : NORMAL_PATH[contiguous];
   }
 
   gaps(verifiedThrough) {

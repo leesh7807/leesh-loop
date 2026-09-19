@@ -9,6 +9,13 @@ test('interpreter selects a capability without owning a competing lifecycle stat
   assert.deepEqual(interpreter.gaps('In Progress'), ['Human Review', 'Merging', 'Done']);
 });
 
+test('verified-through stops at the first unobserved normal lifecycle phase', () => {
+  const interpreter = new LifecycleInterpreter();
+  const observations = [{ state: 'Human Review' }, { state: 'Merging' }, { state: 'Done' }];
+  assert.equal(interpreter.verifiedThrough(observations), null);
+  assert.deepEqual(interpreter.gaps(null), ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done']);
+});
+
 test('mechanical approval only accepts normal review with matching delivery evidence and PASS', () => {
   const valid = {
     state: 'Human Review',

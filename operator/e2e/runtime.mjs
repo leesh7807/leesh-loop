@@ -13,8 +13,8 @@ export class RuntimeCapability {
     return parseJsonOutput(stdout, 'Operator start');
   }
 
-  async stop(projectPath, timeoutMs) {
-    const { stdout } = await this.commandRunner('node', [this.app, 'stop', projectPath], { cwd: this.root, timeout: timeoutMs });
+  async stop(projectPath, timeoutMs, signal) {
+    const { stdout } = await this.commandRunner('node', [this.app, 'stop', projectPath], { cwd: this.root, timeout: timeoutMs, signal });
     return parseJsonOutput(stdout, 'Operator stop');
   }
 

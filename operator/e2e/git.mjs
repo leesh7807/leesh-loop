@@ -16,8 +16,8 @@ export class GitCapability {
     this.gitCommand = gitCommand;
   }
 
-  async remoteRefs() {
-    const { stdout } = await this.gitCommand('git', ['ls-remote', '--heads', this.repositoryUrl], { timeout: 30_000 });
+  async remoteRefs({ timeout = 30_000, signal } = {}) {
+    const { stdout } = await this.gitCommand('git', ['ls-remote', '--heads', this.repositoryUrl], { timeout, signal });
     const refs = {};
     for (const [ref, commit] of parseLsRemote(stdout)) if (/^refs\/heads\//.test(ref)) refs[ref] = commit;
     return refs;
@@ -51,12 +51,12 @@ export class GitCapability {
     return resolved;
   }
 
-  async deleteBranch(branch) {
+  async deleteBranch(branch, { timeout = 60_000, signal } = {}) {
     assertBranch(branch);
-    const before = await this.remoteRefs();
+    const before = await this.remoteRefs({ timeout, signal });
     if (!before[`refs/heads/${branch}`]) return { branch, already_absent: true };
-    await this.gitCommand('git', ['push', this.repositoryUrl, '--delete', `refs/heads/${branch}`], { timeout: 60_000 });
-    const refs = await this.remoteRefs();
+    await this.gitCommand('git', ['push', this.repositoryUrl, '--delete', `refs/heads/${branch}`], { timeout, signal });
+    const refs = await this.remoteRefs({ timeout, signal });
     if (refs[`refs/heads/${branch}`]) throw new Error(`run-scoped branch ${branch} remained after deletion`);
     return { branch, deleted: true };
   }

@@ -38,12 +38,21 @@ export class EvidenceCollector {
       workspace_root: workspaceRoot || null
     };
     if (review.value) {
-      record.timing.chatgpt_shot = {
-        job_id: review.value.job_id ?? null,
-        observations: review.value.observations ?? [],
-        terminal_state: review.value.terminal_state ?? null,
-        observed_duration_ms: review.value.observed_duration_ms ?? null
-      };
+      const timing = record.timing.chatgpt_shot;
+      const jobId = review.value.job_id ?? null;
+      if (jobId && timing.job_id !== jobId) {
+        timing.job_id = jobId;
+        timing.first_observed_at = at;
+        timing.observed_duration_ms = review.value.observed_duration_ms ?? 0;
+      } else if (jobId) {
+        const authoritativeDuration = review.value.observed_duration_ms;
+        timing.observed_duration_ms = Number.isFinite(authoritativeDuration)
+          ? authoritativeDuration
+          : Date.parse(at) - Date.parse(timing.first_observed_at);
+      }
+      timing.last_observed_at = jobId ? at : timing.last_observed_at;
+      timing.terminal_state = review.value.terminal_state ?? null;
+      timing.observations.push({ observed_at: at, job_id: jobId, state: review.value.terminal_state ?? null, result: review.value.result ?? null, error: review.value.error ?? null });
     }
     const workerStartedAt = issue.value?.running?.started_at || issue.value?.retry?.started_at || null;
     if (workerStartedAt) {

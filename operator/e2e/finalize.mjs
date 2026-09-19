@@ -35,13 +35,13 @@ export class Finalizer {
   async finalize({ record, reason, task, dashboard, baseBranch, workspaceRoot, normalDone = false }) {
     record.finalization.reason = reason;
     if (!normalDone) {
-      await this.action(record, 'stop_run_owned_symphony', async () => {
+      await this.action(record, 'stop_run_owned_symphony', async signal => {
         if (record.cleanup.runtime_stopped === true) return { skipped: true, already_stopped: true };
         if (!record.timing.symphony.started_at) {
           record.cleanup.runtime_stopped = true;
           return { skipped: true };
         }
-        const value = await this.runtime.stop(record.paths.runtime_project, this.config.runtime_stop_timeout_ms);
+        const value = await this.runtime.stop(record.paths.runtime_project, this.config.runtime_stop_timeout_ms, signal);
         record.cleanup.runtime_stopped = true;
         record.timing.symphony.stopped_at = nowIso();
         return value;
@@ -66,13 +66,13 @@ export class Finalizer {
         await this.store.save(record);
       }
     } else {
-      await this.action(record, 'stop_run_owned_symphony_after_done', async () => {
+      await this.action(record, 'stop_run_owned_symphony_after_done', async signal => {
         if (record.cleanup.runtime_stopped === true) return { skipped: true, already_stopped: true };
         if (!record.timing.symphony.started_at) {
           record.cleanup.runtime_stopped = true;
           return { skipped: true };
         }
-        const value = await this.runtime.stop(record.paths.runtime_project, this.config.runtime_stop_timeout_ms);
+        const value = await this.runtime.stop(record.paths.runtime_project, this.config.runtime_stop_timeout_ms, signal);
         record.cleanup.runtime_stopped = true;
         record.timing.symphony.stopped_at = nowIso();
         return value;
@@ -85,44 +85,58 @@ export class Finalizer {
       return { observed_at: snapshot.observed_at, errors: snapshot.errors };
     });
 
-    const prs = record.evidence.snapshots.flatMap(snapshot => snapshot.github?.delivery_prs || []);
-    const ownedBranches = this.github.runOwnedDeliveryBranches?.(prs, record) || [];
-    const branches = new Set(ownedBranches);
-    for (const branch of branches) {
-      await this.action(record, `delete_delivery_branch:${branch}`, async () => {
-        await this.git.deleteBranch(branch);
-        record.cleanup.branches_deleted.push(branch);
-        return { branch };
+    const cleanupAllowed = record.cleanup.runtime_stopped === true;
+    if (!cleanupAllowed) {
+      const action = 'skip_run_owned_resource_cleanup_without_runtime_confirmation';
+      recordAction(record, action, { status: 'blocked', reason: 'run-owned Symphony stop was not confirmed' });
+      if (!record.finalization.unresolved.includes(action)) record.finalization.unresolved.push(action);
+      if (!record.cleanup.unresolved.includes(action)) record.cleanup.unresolved.push(action);
+      record.finalization.incomplete = true;
+      await this.store.save(record);
+    } else {
+      const skippedCleanupAction = 'skip_run_owned_resource_cleanup_without_runtime_confirmation';
+      record.finalization.unresolved = record.finalization.unresolved.filter(action => action !== skippedCleanupAction);
+      record.cleanup.unresolved = record.cleanup.unresolved.filter(action => action !== skippedCleanupAction);
+      record.finalization.incomplete = record.finalization.unresolved.length > 0;
+      const prs = record.evidence.snapshots.flatMap(snapshot => snapshot.github?.delivery_prs || []);
+      const ownedBranches = this.github.runOwnedDeliveryBranches?.(prs, record) || [];
+      const branches = new Set(ownedBranches);
+      for (const branch of branches) {
+        await this.action(record, `delete_delivery_branch:${branch}`, async signal => {
+          await this.git.deleteBranch(branch, { timeout: this.config.finalization_timeout_ms, signal });
+          record.cleanup.branches_deleted.push(branch);
+          return { branch };
+        });
+      }
+      if (baseBranch) {
+        await this.action(record, `delete_run_scoped_base:${baseBranch}`, async signal => {
+          await this.git.deleteBranch(baseBranch, { timeout: this.config.finalization_timeout_ms, signal });
+          record.cleanup.branches_deleted.push(baseBranch);
+          return { branch: baseBranch };
+        });
+      }
+      await this.action(record, 'verify_remote_branch_isolation', async signal => {
+        const after = await this.git.remoteRefs({ timeout: this.config.finalization_timeout_ms, signal });
+        record.evidence.branch_refs_after = after;
+        const before = record.evidence.branch_refs_before || {};
+        const knownDeliveryBranches = this.github.runOwnedDeliveryBranches?.(record.evidence.snapshots.flatMap(snapshot => snapshot.github?.delivery_prs || []), record) || [];
+        const runBranches = new Set([baseBranch, ...knownDeliveryBranches, ...record.cleanup.branches_deleted].filter(Boolean).map(branch => `refs/heads/${branch}`));
+        const unrelatedChanges = new Set([...new Set([...Object.keys(before), ...Object.keys(after)])].filter(ref => !runBranches.has(ref)).filter(ref => before[ref] !== after[ref]));
+        const remainingRunBranches = Object.keys(after).filter(ref => runBranches.has(ref));
+        record.evidence.branch_isolation = { unrelated_changes: [...unrelatedChanges], remaining_run_owned_refs: remainingRunBranches, transient_mutations_unobservable: true };
+        return record.evidence.branch_isolation;
       });
-    }
-    if (baseBranch) {
-      await this.action(record, `delete_run_scoped_base:${baseBranch}`, async () => {
-        await this.git.deleteBranch(baseBranch);
-        record.cleanup.branches_deleted.push(baseBranch);
-        return { branch: baseBranch };
-      });
-    }
-    await this.action(record, 'verify_remote_branch_isolation', async () => {
-      const after = await this.git.remoteRefs();
-      record.evidence.branch_refs_after = after;
-      const before = record.evidence.branch_refs_before || {};
-      const knownDeliveryBranches = this.github.runOwnedDeliveryBranches?.(record.evidence.snapshots.flatMap(snapshot => snapshot.github?.delivery_prs || []), record) || [];
-      const runBranches = new Set([baseBranch, ...knownDeliveryBranches, ...record.cleanup.branches_deleted].filter(Boolean).map(branch => `refs/heads/${branch}`));
-      const unrelatedChanges = new Set([...new Set([...Object.keys(before), ...Object.keys(after)])].filter(ref => !runBranches.has(ref)).filter(ref => before[ref] !== after[ref]));
-      const remainingRunBranches = Object.keys(after).filter(ref => runBranches.has(ref));
-      record.evidence.branch_isolation = { unrelated_changes: [...unrelatedChanges], remaining_run_owned_refs: remainingRunBranches, transient_mutations_unobservable: true };
-      return record.evidence.branch_isolation;
-    });
-    const observedWorkspaces = [...record.evidence.workspace_paths, ...record.evidence.snapshots.flatMap(snapshot => {
-      const path = snapshot.symphony?.issue?.workspace?.path;
-      return path && pathWithin(path, workspaceRoot) ? [path] : [];
-    })];
-    for (const workspace of new Set(observedWorkspaces)) {
-      await this.action(record, `delete_workspace:${workspace}`, async () => {
-        const result = await this.runtime.removeWorkspace?.(workspace, workspaceRoot);
-        record.cleanup.workspaces_deleted.push(workspace);
-        return result ?? { path: workspace };
-      });
+      const observedWorkspaces = [...record.evidence.workspace_paths, ...record.evidence.snapshots.flatMap(snapshot => {
+        const path = snapshot.symphony?.issue?.workspace?.path;
+        return path && pathWithin(path, workspaceRoot) ? [path] : [];
+      })];
+      for (const workspace of new Set(observedWorkspaces)) {
+        await this.action(record, `delete_workspace:${workspace}`, async () => {
+          const result = await this.runtime.removeWorkspace?.(workspace, workspaceRoot);
+          record.cleanup.workspaces_deleted.push(workspace);
+          return result ?? { path: workspace };
+        });
+      }
     }
     const finalState = task?.state || record.evidence.snapshots.at(-1)?.notion?.state || null;
     record.lifecycle.terminal_state = finalState;

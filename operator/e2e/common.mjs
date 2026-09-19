@@ -22,12 +22,16 @@ export async function readJson(path) {
 }
 
 export async function bounded(operation, timeoutMs, description) {
+  const controller = new AbortController();
   let timeout;
   try {
     return await Promise.race([
-      Promise.resolve().then(operation),
+      Promise.resolve().then(() => operation(controller.signal)),
       new Promise((_, reject) => {
-        timeout = setTimeout(() => reject(new Error(`${description} timed out after ${timeoutMs}ms`)), timeoutMs);
+        timeout = setTimeout(() => {
+          controller.abort();
+          reject(new Error(`${description} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
       })
     ]);
   } finally {
@@ -40,9 +44,9 @@ export function commandError(error) {
   return detail.replace(/\s+/g, ' ').slice(0, 1_000);
 }
 
-export async function command(command, args, { cwd, timeout = 30_000, env = process.env } = {}) {
+export async function command(command, args, { cwd, timeout = 30_000, env = process.env, signal } = {}) {
   try {
-    const result = await execFile(command, args, { cwd, env: { ...env, GIT_TERMINAL_PROMPT: '0' }, timeout, maxBuffer: 4 * 1024 * 1024 });
+    const result = await execFile(command, args, { cwd, env: { ...env, GIT_TERMINAL_PROMPT: '0' }, timeout, signal, maxBuffer: 4 * 1024 * 1024 });
     return { stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
     throw new Error(`${command} ${args.join(' ')} failed${commandError(error) ? `: ${commandError(error)}` : ''}`);

@@ -17,7 +17,7 @@ export function newRunRecord({ config, runId, workload, paths, startedAt = nowIs
     binding: { notion_database_url: config.notion_database_url, repository_url: config.repository_url, seed_source_ref: config.seed_source_ref, seed_commit: null, base_branch: null, base_commit: null },
     artifacts: { task_id: null, task_url: null, task_identifier: workload.identifier, publisher_result: null, plan_binding: null, delivery_prs: [], approved_delivery: null, delivered_head: null, merged_head: null, remote_base_commit: null },
     lifecycle: { observations: [], verified_through: null, verification_gaps: [], terminal_state: null },
-    timing: { run: { started_at: startedAt, ended_at: null, observed_duration_ms: null }, lifecycle: {}, symphony: { started_at: null, worker_started_at: null, stopped_at: null, observed_duration_ms: null }, chatgpt_shot: { job_id: null, observations: [], terminal_state: null, observed_duration_ms: null } },
+    timing: { run: { started_at: startedAt, ended_at: null, observed_duration_ms: null }, lifecycle: {}, symphony: { started_at: null, worker_started_at: null, stopped_at: null, observed_duration_ms: null }, chatgpt_shot: { job_id: null, first_observed_at: null, last_observed_at: null, observations: [], terminal_state: null, observed_duration_ms: null } },
     evidence: { snapshots: [], errors: [], branch_refs_before: null, branch_refs_after: null, branch_isolation: null, workspace_paths: [] },
     failures: [],
     finalization: { reason: null, actor: 'e2e-harness', actions: [], complete: false, incomplete: false, unresolved: [] },
