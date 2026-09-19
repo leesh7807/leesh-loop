@@ -37,7 +37,7 @@ export class Finalizer {
     if (!normalDone) {
       await this.action(record, 'stop_run_owned_symphony', async signal => {
         if (record.cleanup.runtime_stopped === true) return { skipped: true, already_stopped: true };
-        if (!record.timing.symphony.started_at) {
+        if (!record.timing?.symphony?.start_requested_at && !record.timing?.symphony?.started_at) {
           record.cleanup.runtime_stopped = true;
           return { skipped: true };
         }
@@ -68,7 +68,7 @@ export class Finalizer {
     } else {
       await this.action(record, 'stop_run_owned_symphony_after_done', async signal => {
         if (record.cleanup.runtime_stopped === true) return { skipped: true, already_stopped: true };
-        if (!record.timing.symphony.started_at) {
+        if (!record.timing?.symphony?.start_requested_at && !record.timing?.symphony?.started_at) {
           record.cleanup.runtime_stopped = true;
           return { skipped: true };
         }

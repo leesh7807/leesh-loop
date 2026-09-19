@@ -55,3 +55,23 @@ test('successful reconciliation clears an earlier unresolved action', async () =
   assert.deepEqual(second.finalization.unresolved, []);
   assert.deepEqual(second.cleanup.unresolved, []);
 });
+
+test('reconciliation stops a runtime whose start was durably requested before a crash', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-starting-'));
+  const config = { notion_database_url: 'https://app.notion.com/p/studyleesh/3e08a2658625805cad23fe1137be4a1e?v=3e08a26586258042a8e4000c945e56e7', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
+  const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
+  const record = newRunRecord({ config, runId: 'run-starting', workload, paths: runPaths(config, 'run-starting') });
+  record.binding.base_branch = 'base/run-starting';
+  record.timing.symphony.start_requested_at = new Date().toISOString();
+  let stopCalls = 0;
+  const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
+  const store = { async save() {} };
+  const runtime = { async stop() { stopCalls += 1; return { stopped: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
+  const git = { async remoteRefs() { return {}; }, async deleteBranch() { return { already_absent: true }; } };
+  const evidence = { async snapshot() { return { observed_at: new Date().toISOString(), notion: { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }, github: { delivery_prs: [] }, symphony: {}, git: { remote_refs: {} }, chatgpt_shot: null, errors: [] }; } };
+  const finalizer = new Finalizer({ config, store, notion, runtime, git, github: {}, evidence });
+  const result = await finalizer.finalize({ record, reason: 'admission_reconciliation', task: await notion.readTask(), baseBranch: 'base/run-starting', workspaceRoot: directory + '/workspaces' });
+  assert.equal(stopCalls, 1);
+  assert.equal(result.cleanup.runtime_stopped, true);
+  assert.equal(result.finalization.complete, true);
+});

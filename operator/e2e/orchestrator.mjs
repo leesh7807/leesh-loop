@@ -31,12 +31,12 @@ export class E2EOrchestrator {
     const needsReconciliation = record => record.status !== 'finished'
       || record.finalization?.complete !== true
       || (record.cleanup?.unresolved?.length ?? 0) > 0
+      || (record.timing?.symphony?.start_requested_at && record.cleanup?.runtime_stopped !== true)
       || (record.timing?.symphony?.started_at && record.cleanup?.runtime_stopped !== true)
-      || (record.evidence?.branch_isolation?.unrelated_changes?.length ?? 0) > 0
       || (record.evidence?.branch_isolation?.remaining_run_owned_refs?.length ?? 0) > 0;
     for (const previous of records.filter(needsReconciliation)) {
       await this.reconcile(previous);
-      if (previous.finalization?.complete !== true || previous.evidence?.branch_isolation?.unrelated_changes?.length || previous.evidence?.branch_isolation?.remaining_run_owned_refs?.length) throw new Error(`previous E2E run ${previous.run_id} remains unresolved; refusing a new dispatch`);
+      if (previous.finalization?.complete !== true || previous.evidence?.branch_isolation?.remaining_run_owned_refs?.length) throw new Error(`previous E2E run ${previous.run_id} remains unresolved; refusing a new dispatch`);
     }
     for (const previous of records) {
       const workspace = previous.paths?.workspace_root;
@@ -101,8 +101,11 @@ export class E2EOrchestrator {
       record.runtime = { project: project, dashboard: `http://127.0.0.1:${project.symphony_port}` };
       await this.store.save(record);
 
-      record.timing.symphony.started_at = nowIso();
+      record.timing.symphony.start_requested_at = nowIso();
+      record.status = 'runtime_starting';
+      await this.store.save(record);
       const runtimeResult = await this.runtime.start(paths.runtimeProject, this.config.runtime_start_timeout_ms);
+      record.timing.symphony.started_at = nowIso();
       dashboard = runtimeResult.dashboard || record.runtime.dashboard;
       record.runtime.dashboard = dashboard;
       record.status = 'runtime_ready';
@@ -120,6 +123,7 @@ export class E2EOrchestrator {
       task = publishedTask;
       record.artifacts.task_identifier = task.identifier;
       record.artifacts.plan_binding = { task_id: task.id, publisher_plan_sha256: sha256(workload.accepted_plan), tracker_description_sha256: sha256(task.accepted_plan), worker_input_sha256: null, status: 'published_and_tracker_readback' };
+      this.observeLifecycle(record, task.state, nowIso());
       record.status = 'observing';
       await this.store.save(record);
       return await this.observeUntilTerminal(record, task, dashboard, branch);
@@ -131,6 +135,21 @@ export class E2EOrchestrator {
     }
   }
 
+  observeLifecycle(record, state, observedAt) {
+    const previous = record.lifecycle.observations.at(-1);
+    const same = previous?.state === state;
+    if (!same) record.lifecycle.observations.push({ state, first_observed_at: observedAt, last_observed_at: observedAt, observed_duration_ms: null });
+    else {
+      previous.last_observed_at = observedAt;
+      previous.observed_duration_ms = Date.parse(previous.last_observed_at) - Date.parse(previous.first_observed_at);
+    }
+    record.lifecycle.verified_through = this.interpreter.verifiedThrough(record.lifecycle.observations);
+    record.lifecycle.verification_gaps = this.interpreter.gaps(record.lifecycle.verified_through);
+    record.timing.lifecycle[state] ||= { first_observed_at: observedAt, last_observed_at: observedAt, observed_duration_ms: null };
+    record.timing.lifecycle[state].last_observed_at = observedAt;
+    record.timing.lifecycle[state].observed_duration_ms = Date.parse(observedAt) - Date.parse(record.timing.lifecycle[state].first_observed_at);
+  }
+
   async observeUntilTerminal(record, task, dashboard, baseBranch) {
     while (true) {
       const snapshot = await bounded(() => this.evidence.snapshot({ record, databaseUrl: this.config.notion_database_url, identifier: record.artifacts.task_identifier, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root }), 30_000, 'E2E evidence snapshot');
@@ -139,18 +158,7 @@ export class E2EOrchestrator {
       if (observedTask) {
         task = observedTask;
         const state = task.state;
-        const previous = record.lifecycle.observations.at(-1);
-        const same = previous?.state === state;
-        if (!same) record.lifecycle.observations.push({ state, first_observed_at: snapshot.observed_at, last_observed_at: snapshot.observed_at, observed_duration_ms: null });
-        else {
-          previous.last_observed_at = snapshot.observed_at;
-          previous.observed_duration_ms = Date.parse(previous.last_observed_at) - Date.parse(previous.first_observed_at);
-        }
-        record.lifecycle.verified_through = this.interpreter.verifiedThrough(record.lifecycle.observations);
-        record.lifecycle.verification_gaps = this.interpreter.gaps(record.lifecycle.verified_through);
-        record.timing.lifecycle[state] ||= { first_observed_at: snapshot.observed_at, last_observed_at: snapshot.observed_at, observed_duration_ms: null };
-        record.timing.lifecycle[state].last_observed_at = snapshot.observed_at;
-        record.timing.lifecycle[state].observed_duration_ms = Date.parse(snapshot.observed_at) - Date.parse(record.timing.lifecycle[state].first_observed_at);
+        this.observeLifecycle(record, state, snapshot.observed_at);
         record.artifacts.delivery_prs = snapshot.github.delivery_prs || [];
         record.artifacts.delivered_head = record.artifacts.delivery_prs.find(pr => pr.headRefOid)?.headRefOid || record.artifacts.delivered_head;
         if (snapshot.symphony?.tracker_input?.description !== undefined && record.artifacts.plan_binding) {
@@ -220,7 +228,7 @@ export class E2EOrchestrator {
           const merging = await this.notion.updateState(this.config.notion_database_url, task.id, 'Merging');
           if (merging.state !== 'Merging') throw new Error(`Human Review mechanical approval readback was ${merging.state}`);
           record.artifacts.approved_delivery = { pr: approval.delivered_pr, head: approval.delivered_head, cycle: approval.cycle };
-          record.lifecycle.observations.push({ state: 'Merging', first_observed_at: nowIso(), last_observed_at: nowIso(), observed_duration_ms: null });
+          this.observeLifecycle(record, 'Merging', nowIso());
           await this.store.save(record);
           continue;
         }

@@ -73,10 +73,20 @@ test('central orchestration reaches terminal Done through injected capabilities'
   const harness = fixture({ states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done'], clock: () => current++ });
   harness.config.run_record_directory = directory + '/runs';
   harness.config.workspace_root = directory + '/workspaces';
+  const persistedStartRequests = [];
+  const start = harness.capabilities.runtime.start;
+  harness.capabilities.runtime.start = async (...args) => {
+    const persisted = (await harness.capabilities.store.list()).at(-1);
+    persistedStartRequests.push(persisted.timing.symphony.start_requested_at);
+    return start(...args);
+  };
   const record = await new E2EOrchestrator({ ...harness, random: () => 0, clock: () => current++, sleepFn: async () => {} }).run();
   assert.equal(record.status, 'finished');
   assert.deepEqual(harness.finalized, ['production_done']);
   assert.equal(record.binding.seed_commit.length, 40);
+  assert.equal(persistedStartRequests.length, 1);
+  assert.ok(persistedStartRequests[0]);
+  assert.equal(record.lifecycle.observations[0].state, 'Ready');
   assert.match(await readFile(record.paths.record, 'utf8'), /production_done/);
 });
 
@@ -124,4 +134,20 @@ test('Done rejects an unrelated merge into the run-scoped base', async () => {
   const result = await orchestrator.verifyDoneDelivery(record, 'e2e-base');
   assert.equal(result.ok, false);
   assert.match(result.reason, /unrelated PR/);
+});
+
+test('admission does not treat unrelated branch changes as run-owned residue', async () => {
+  const harness = fixture({ states: ['Ready'], clock: () => 0 });
+  const previous = {
+    run_id: 'run-previous',
+    status: 'finished',
+    finalization: { complete: true },
+    cleanup: { unresolved: [], runtime_stopped: true },
+    evidence: { branch_isolation: { unrelated_changes: ['refs/heads/main'], remaining_run_owned_refs: [] } },
+    timing: { symphony: { start_requested_at: null, started_at: null } },
+    paths: {}
+  };
+  harness.capabilities.store = { async list() { return [previous]; } };
+  const result = await new E2EOrchestrator({ ...harness, random: () => 0 }).admit();
+  assert.equal(result.workload.length, 1);
 });
