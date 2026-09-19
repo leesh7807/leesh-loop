@@ -41,6 +41,7 @@ export class NotionCapability {
     }
     const plans = sources.filter(source => this.isPlanSchema(source.schema));
     const tasks = sources.filter(source => this.isTaskSchema(source.schema, source.id));
+    if (sources.length === 1 && this.isPristineSchema(sources[0].schema)) return { databaseId, pristine: true, pristineTaskDataSourceId: sources[0].id };
     if (plans.length !== 1 || tasks.length !== 1) throw new Error('fixed E2E Notion database does not have one canonical task source and one Plan source');
     const task = tasks[0];
     if (task.schema.properties.Plan?.relation?.data_source_id !== plans[0].id) throw new Error('E2E task Plan relation points outside the canonical Plan source');
@@ -48,6 +49,13 @@ export class NotionCapability {
     this.bindings.set(databaseUrl, binding);
     return binding;
   }
+
+  isPristineSchema(schema) {
+    const properties = schema?.properties || {};
+    return Object.keys(properties).length === 1 && Object.values(properties)[0]?.type === 'title';
+  }
+
+  invalidateBinding(databaseUrl) { this.bindings.delete(databaseUrl); }
 
   isPlanSchema(schema) {
     const properties = schema?.properties;
@@ -103,6 +111,7 @@ export class NotionCapability {
 
   async readTask(databaseUrl, identifierOrId, signal) {
     const binding = await this.resolveBinding(databaseUrl, signal);
+    if (binding.pristine) throw new Error('fixed E2E Notion database is still pristine; the production Publisher must bootstrap it before task readback');
     let page;
     if (/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(identifierOrId)) {
       page = await this.request('GET', `/pages/${identifierOrId}`, undefined, signal);
@@ -130,6 +139,11 @@ export class NotionCapability {
 
   async listTasks(databaseUrl, signal) {
     const binding = await this.resolveBinding(databaseUrl, signal);
+    if (binding.pristine) {
+      const pages = await this.queryDataSource(binding.pristineTaskDataSourceId, {}, signal);
+      if (pages.length) throw new Error('fixed E2E Notion database is pristine but already contains pages; canonical binding cannot be established safely');
+      return [];
+    }
     const pages = await this.queryDataSource(binding.taskDataSourceId, {}, signal);
     return pages.map(page => this.summary(page));
   }

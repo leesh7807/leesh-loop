@@ -27,8 +27,10 @@ export class PublisherCapability {
     await writeFile(planPath, plan, { mode: 0o600 });
     try {
       const result = await command('node', [this.cli, '--plan', planPath, '--config', this.publisherConfig, '--database-url', databaseUrl], { cwd: this.root, timeout: 120_000 });
+      this.notion.invalidateBinding?.(databaseUrl);
       return parseJsonOutput(result.stdout, 'Notion Publisher');
     } finally {
+      this.notion.invalidateBinding?.(databaseUrl);
       await remove(planPath);
     }
   }
