@@ -24,6 +24,23 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
     end
   end
 
+  @spec input(Conn.t(), map()) :: Conn.t()
+  def input(conn, %{"issue_identifier" => issue_identifier}) do
+    case Presenter.issue_input_payload(issue_identifier, orchestrator(), snapshot_timeout_ms()) do
+      {:ok, payload} ->
+        json(conn, payload)
+
+      {:error, :issue_not_found} ->
+        error_response(conn, 404, "issue_not_found", "Issue not found")
+
+      {:error, :issue_input_not_found} ->
+        error_response(conn, 404, "issue_input_not_found", "Tracker input not found")
+
+      {:error, {:issue_input_unavailable, reason}} ->
+        error_response(conn, 503, "issue_input_unavailable", inspect(reason))
+    end
+  end
+
   @spec refresh(Conn.t(), map()) :: Conn.t()
   def refresh(conn, _params) do
     case Presenter.refresh_payload(orchestrator()) do

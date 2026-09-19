@@ -1,0 +1,204 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { deriveIdentifier, newRunId, nowIso, sha256, sleep, bounded } from './common.mjs';
+import { runPaths, runBranch, runtimeProject } from './config.mjs';
+import { ACTIVE_STATES, LifecycleInterpreter, mechanicalReviewAllowed } from './lifecycle.mjs';
+import { newRunRecord, addFailure, RunStore } from './record.mjs';
+import { Finalizer } from './finalize.mjs';
+
+const REVIEW_MARKER = cycle => `E2E Operator mechanical approval\ncycle: ${cycle}\nresult: approved\n`;
+
+export class E2EOrchestrator {
+  constructor({ config, catalog, capabilities, random = Math.random, clock = () => Date.now(), sleepFn = sleep } = {}) {
+    this.config = config;
+    this.catalog = catalog;
+    this.notion = capabilities.notion;
+    this.publisher = capabilities.publisher;
+    this.git = capabilities.git;
+    this.github = capabilities.github;
+    this.runtime = capabilities.runtime;
+    this.review = capabilities.review;
+    this.random = random;
+    this.clock = clock;
+    this.sleep = sleepFn;
+    this.interpreter = capabilities.lifecycle || new LifecycleInterpreter();
+    this.store = capabilities.store || new RunStore(config);
+    this.evidence = capabilities.evidence;
+    this.finalizer = capabilities.finalizer || new Finalizer({ config, store: this.store, notion: this.notion, runtime: this.runtime, git: this.git, github: this.github, evidence: this.evidence });
+  }
+
+  async admit() {
+    const records = await this.store.list();
+    const needsReconciliation = record => record.status !== 'finished'
+      || record.finalization?.complete !== true
+      || (record.cleanup?.unresolved?.length ?? 0) > 0
+      || (record.timing?.symphony?.started_at && record.cleanup?.runtime_stopped !== true)
+      || (record.evidence?.branch_isolation?.unrelated_changes?.length ?? 0) > 0
+      || (record.evidence?.branch_isolation?.remaining_run_owned_refs?.length ?? 0) > 0;
+    for (const previous of records.filter(needsReconciliation)) {
+      await this.reconcile(previous);
+      if (previous.finalization?.complete !== true || previous.evidence?.branch_isolation?.unrelated_changes?.length || previous.evidence?.branch_isolation?.remaining_run_owned_refs?.length) throw new Error(`previous E2E run ${previous.run_id} remains unresolved; refusing a new dispatch`);
+    }
+    const tasks = await this.notion.listTasks(this.config.notion_database_url);
+    const conflicting = tasks.filter(task => ACTIVE_STATES.has(task.state) || task.state === 'Publisher Pending');
+    if (conflicting.length) throw new Error(`fixed E2E Notion database has active or dispatchable residue: ${conflicting.map(task => `${task.identifier}:${task.state}`).join(', ')}`);
+    const refs = await this.git.remoteRefs();
+    for (const previous of records) {
+      const branch = previous.binding?.base_branch;
+      if (branch && refs[`refs/heads/${branch}`]) throw new Error(`previous run-scoped base branch remains: ${branch}`);
+    }
+    const unavailable = new Set(tasks.map(task => task.identifier).filter(Boolean));
+    return { workload: this.catalog.filter(candidate => !unavailable.has(candidate.identifier)), refs, tasks };
+  }
+
+  async reconcile(record) {
+    let task = null;
+    try { task = record.artifacts?.task_id ? await this.notion.readTask(this.config.notion_database_url, record.artifacts.task_id) : null; } catch (error) { addFailure(record, error, 'admission_reconciliation'); }
+    try {
+      await this.finalizer.finalize({ record, reason: 'admission_reconciliation', task, dashboard: record.runtime?.dashboard, baseBranch: record.binding?.base_branch, workspaceRoot: record.paths?.workspace_root, normalDone: task?.state === 'Done' });
+    } catch (error) {
+      addFailure(record, error, 'admission_reconciliation');
+      await this.store.save(record);
+    }
+    return record;
+  }
+
+  async run() {
+    let admission;
+    try { admission = await this.admit(); }
+    catch (error) {
+      await this.store.saveAdmissionFailure(error);
+      throw error;
+    }
+    const candidates = admission.workload;
+    if (!candidates.length) throw new Error('all E2E workload candidates already have a task in the fixed E2E database');
+    const workload = candidates[Math.min(candidates.length - 1, Math.floor(Math.max(0, Math.min(0.999999, Number(this.random()))) * candidates.length))];
+    const runId = newRunId();
+    const paths = runPaths(this.config, runId);
+    const branch = runBranch(runId);
+    const seedCommit = await this.git.resolveSeedCommit(this.config.seed_source_ref);
+    const record = newRunRecord({ config: this.config, runId, workload, paths });
+    record.binding.base_branch = branch;
+    record.binding.seed_commit = seedCommit;
+    record.evidence.branch_refs_before = admission.refs;
+    record.status = 'preparing';
+    await this.store.save(record);
+
+    let task = null;
+    let dashboard = null;
+    try {
+      const baseCommit = await this.git.createBaseBranch(branch, seedCommit, this.config.seed_source_ref);
+      record.binding.base_commit = baseCommit;
+      await this.store.save(record);
+
+      const project = runtimeProject(this.config, paths, branch);
+      await mkdir(dirname(paths.runtimeProject), { recursive: true, mode: 0o700 });
+      await writeFile(paths.runtimeProject, `${JSON.stringify(project, null, 2)}\n`, { mode: 0o600 });
+      record.runtime = { project: project, dashboard: `http://127.0.0.1:${project.symphony_port}` };
+      await this.store.save(record);
+
+      record.timing.symphony.started_at = nowIso();
+      const runtimeResult = await this.runtime.start(paths.runtimeProject, this.config.runtime_start_timeout_ms);
+      dashboard = runtimeResult.dashboard || record.runtime.dashboard;
+      record.runtime.dashboard = dashboard;
+      record.status = 'runtime_ready';
+      await this.store.save(record);
+
+      const publication = await this.publisher.publish({ plan: workload.accepted_plan, databaseUrl: this.config.notion_database_url, directory: paths.directory });
+      record.artifacts.publisher_result = publication;
+      record.artifacts.task_id = publication.page_id;
+      record.artifacts.task_url = publication.url || null;
+      record.status = 'published';
+      await this.store.save(record);
+      task = await this.notion.readTask(this.config.notion_database_url, publication.page_id);
+      if (task.identifier !== deriveIdentifier(workload.accepted_plan) || task.accepted_plan !== workload.accepted_plan) throw new Error('Publisher authoritative readback does not match the selected Accepted Plan');
+      record.artifacts.task_identifier = task.identifier;
+      record.artifacts.plan_binding = { task_id: task.id, publisher_plan_sha256: sha256(workload.accepted_plan), tracker_description_sha256: sha256(task.accepted_plan), worker_input_sha256: null, status: 'published_and_tracker_readback' };
+      record.status = 'observing';
+      await this.store.save(record);
+      return await this.observeUntilTerminal(record, task, dashboard, branch);
+    } catch (error) {
+      addFailure(record, error, 'orchestration');
+      record.status = 'finalizing';
+      await this.store.save(record);
+      return await this.finalizer.finalize({ record, reason: 'harness_or_production_failure', task, dashboard, baseBranch: branch, workspaceRoot: paths.workspaceRoot, normalDone: false });
+    }
+  }
+
+  async observeUntilTerminal(record, task, dashboard, baseBranch) {
+    while (true) {
+      const snapshot = await bounded(() => this.evidence.snapshot({ record, databaseUrl: this.config.notion_database_url, identifier: record.artifacts.task_identifier, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root }), 30_000, 'E2E evidence snapshot');
+      record.evidence.snapshots.push(snapshot);
+      const observedTask = snapshot.notion ? await this.notion.readTask(this.config.notion_database_url, record.artifacts.task_id) : task;
+      if (observedTask) {
+        task = observedTask;
+        const state = task.state;
+        const previous = record.lifecycle.observations.at(-1);
+        const same = previous?.state === state;
+        if (!same) record.lifecycle.observations.push({ state, first_observed_at: snapshot.observed_at, last_observed_at: snapshot.observed_at, observed_duration_ms: null });
+        else {
+          previous.last_observed_at = snapshot.observed_at;
+          previous.observed_duration_ms = Date.parse(previous.last_observed_at) - Date.parse(previous.first_observed_at);
+        }
+        record.lifecycle.verified_through = this.interpreter.verifiedThrough(record.lifecycle.observations);
+        record.lifecycle.verification_gaps = this.interpreter.gaps(record.lifecycle.verified_through);
+        record.timing.lifecycle[state] ||= { first_observed_at: snapshot.observed_at, last_observed_at: snapshot.observed_at, observed_duration_ms: null };
+        record.timing.lifecycle[state].last_observed_at = snapshot.observed_at;
+        record.timing.lifecycle[state].observed_duration_ms = Date.parse(snapshot.observed_at) - Date.parse(record.timing.lifecycle[state].first_observed_at);
+        record.artifacts.delivery_prs = snapshot.github.delivery_prs || [];
+        record.artifacts.delivered_head = record.artifacts.delivery_prs.find(pr => pr.headRefOid)?.headRefOid || record.artifacts.delivered_head;
+        if (snapshot.symphony?.tracker_input?.description !== undefined && record.artifacts.plan_binding) {
+          const workerInput = snapshot.symphony.tracker_input;
+          record.artifacts.plan_binding.worker_input_sha256 = sha256(workerInput.description || '');
+          record.artifacts.plan_binding.status = workerInput.description === task.accepted_plan ? 'verified_by_production_tracker_input' : 'mismatch';
+          if (record.artifacts.plan_binding.status === 'mismatch') {
+            addFailure(record, new Error('production Tracker.Issue.description does not match the Publisher Accepted Plan'), 'plan_binding');
+            await this.store.save(record);
+            return this.finalizer.finalize({ record, reason: 'plan_binding_mismatch', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
+          }
+        }
+        if (snapshot.symphony?.issue?.running?.workspace_path) record.evidence.workspace_paths.push(snapshot.symphony.issue.running.workspace_path);
+        const interpretation = this.interpreter.interpret(task);
+        if (state === 'Done') return this.finalizer.finalize({ record, reason: 'production_done', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: true });
+        if (state === 'Cancelled') return this.finalizer.finalize({ record, reason: 'production_cancelled', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
+        if (interpretation.capability === 'mechanical_review_approval') {
+          const approval = mechanicalReviewAllowed(task);
+          if (!approval.allowed) {
+            addFailure(record, new Error(approval.reason), 'human_review');
+            await this.store.save(record);
+            return this.finalizer.finalize({ record, reason: 'human_review_cannot_be_approved', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
+          }
+          const delivery = record.artifacts.delivery_prs.find(pr => String(pr.number) === approval.delivered_pr.replace(/^.*\/(\d+)$/, '$1') || pr.url === approval.delivered_pr);
+          if (!delivery || delivery.baseRefName !== baseBranch || delivery.headRefOid?.toLowerCase() !== approval.delivered_head.toLowerCase()) {
+            addFailure(record, new Error('Human Review delivery identity does not match the configured run-scoped base or delivered HEAD'), 'human_review');
+            await this.store.save(record);
+            return this.finalizer.finalize({ record, reason: 'human_review_delivery_mismatch', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
+          }
+          await this.notion.appendWorkpad(task.id, REVIEW_MARKER(approval.cycle));
+          const merging = await this.notion.updateState(this.config.notion_database_url, task.id, 'Merging');
+          if (merging.state !== 'Merging') throw new Error(`Human Review mechanical approval readback was ${merging.state}`);
+          record.lifecycle.observations.push({ state: 'Merging', first_observed_at: nowIso(), last_observed_at: nowIso(), observed_duration_ms: null });
+          await this.store.save(record);
+          continue;
+        }
+        if (interpretation.capability === 'unsupported_state') {
+          addFailure(record, new Error(`lifecycle state ${state || 'null'} is outside the configured E2E path`), 'lifecycle');
+          await this.store.save(record);
+          return this.finalizer.finalize({ record, reason: 'unsupported_lifecycle_state', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
+        }
+        if (snapshot.symphony?.issue?.status === 'blocked') {
+          addFailure(record, new Error(snapshot.symphony.issue.last_error || 'Symphony reported a blocked worker'), 'symphony');
+          await this.store.save(record);
+          return this.finalizer.finalize({ record, reason: 'observed_symphony_failure', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
+        }
+      }
+      await this.store.save(record);
+      if (this.clock() >= Date.parse(record.deadline_at)) {
+        record.status = 'finalizing';
+        await this.store.save(record);
+        return this.finalizer.finalize({ record, reason: 'hard_cap_reached', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
+      }
+      await this.sleep(this.config.poll_interval_ms);
+    }
+  }
+}

@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Finalizer } from '../finalize.mjs';
+import { runPaths } from '../config.mjs';
+import { newRunRecord } from '../record.mjs';
+
+test('finalization preserves an external stop failure and still converges finitely', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-'));
+  const config = { notion_database_url: 'https://app.notion.com/p/studyleesh/3e08a2658625805cad23fe1137be4a1e?v=3e08a26586258042a8e4000c945e56e7', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
+  const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
+  const record = newRunRecord({ config, runId: 'run-1', workload, paths: runPaths(config, 'run-1') });
+  record.binding.base_branch = 'base/run-1';
+  record.timing.symphony.started_at = new Date().toISOString();
+  const notion = {
+    async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'In Progress', accepted_plan: '# Fixture\n', workpad: '' }; },
+    async updateState() { throw new Error('must not mutate task while runtime stop is unconfirmed'); }
+  };
+  const store = { async save() {} };
+  const runtime = { async stop() { throw new Error('stop unavailable'); } };
+  const git = { async remoteRefs() { return {}; }, async deleteBranch() { return { already_absent: true }; } };
+  const evidence = { async snapshot() { return { observed_at: new Date().toISOString(), notion: { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'In Progress', accepted_plan: '# Fixture\n', workpad: '' }, github: { delivery_prs: [] }, symphony: {}, git: { remote_refs: {} }, chatgpt_shot: null, errors: [] }; } };
+  const finalizer = new Finalizer({ config, store, notion, runtime, git, github: {}, evidence });
+  const result = await finalizer.finalize({ record, reason: 'hard_cap_reached', task: await notion.readTask(), baseBranch: 'base/run-1', workspaceRoot: directory + '/workspaces' });
+  assert.equal(result.status, 'finished');
+  assert.equal(result.cleanup.task_terminalized, false);
+  assert.equal(result.finalization.complete, false);
+  assert.ok(result.finalization.unresolved.some(action => action === 'stop_run_owned_symphony'));
+});

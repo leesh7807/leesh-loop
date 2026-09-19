@@ -214,7 +214,10 @@ codex:
 - If a later reload fails, Symphony keeps running with the last known good workflow and logs the
   reload error until the file is fixed.
 - `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
-  `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, and `/api/v1/refresh`.
+  `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, `/api/v1/<issue_identifier>/input`, and
+  `/api/v1/refresh`. The read-only `input` surface re-reads the production tracker adapter for a
+  currently observed issue and returns the exact normalized `Tracker.Issue.description`; it is
+  intended for operator evidence and does not change dispatch or worker behavior.
 
 ### Linear adapter profile
 

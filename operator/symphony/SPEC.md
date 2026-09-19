@@ -1617,6 +1617,13 @@ Minimum endpoints:
   - If the issue is unknown to the current in-memory state, return `404` with an error response (for
     example `{\"error\":{\"code\":\"issue_not_found\",\"message\":\"...\"}}`).
 
+- `GET /api/v1/<issue_identifier>/input`
+  - Returns the normalized production tracker representation currently bound to an observed issue,
+    including its `issue_id`, `state`, and exact `description` passed to the worker prompt builder.
+  - This is a read-only evidence surface. It must not mutate tracker state, dispatch work, or create
+    a worker-specific execution path. If the issue is not currently observed or the tracker read
+    fails, return an appropriate `404` or `503` error envelope.
+
 - `POST /api/v1/refresh`
   - Queues an immediate tracker poll + reconciliation cycle (best-effort trigger; implementations
     MAY coalesce repeated requests).

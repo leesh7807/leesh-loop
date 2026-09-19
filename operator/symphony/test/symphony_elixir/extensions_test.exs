@@ -372,6 +372,12 @@ defmodule SymphonyElixir.ExtensionsTest do
              "error" => %{"code" => "issue_not_found", "message" => "Issue not found"}
            }
 
+    conn = get(build_conn(), "/api/v1/MT-MISSING/input")
+
+    assert json_response(conn, 404) == %{
+             "error" => %{"code" => "issue_not_found", "message" => "Issue not found"}
+           }
+
     conn = post(build_conn(), "/api/v1/refresh", %{})
 
     assert %{"queued" => true, "coalesced" => false, "operations" => ["poll", "reconcile"]} =

@@ -9,6 +9,8 @@
 !.env.example
 operator/.runtime/
 operator/project.json
+operator/e2e/runs/*
+!operator/e2e/runs/.gitkeep
 
 # Legacy component locations moved beneath operator/
 /symphony/
