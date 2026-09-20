@@ -19,6 +19,8 @@ import { RunFinalizer } from './run/finalization/run-finalizer.mjs';
 import { RunAdmission } from './run/admission/run-admission.mjs';
 import { RunCompletionVerifier } from './run/lifecycle/run-completion-verifier.mjs';
 import { RunLifecycleObserver } from './run/lifecycle/run-lifecycle-observer.mjs';
+import { RunDoneVerifier } from './run/lifecycle/run-done-verifier.mjs';
+import { RunTimingRecorder } from './run/run-timing.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
@@ -41,12 +43,14 @@ async function createProductionRunDependencies(config, catalog) {
   const githubClient = new GitHubClient({ repositoryUrl: config.repository_url });
   const chatgptShotClient = new ChatgptShotClient();
   const runEvidenceCollector = new RunEvidenceCollector({ notionClient, operatorClient, githubClient, gitClient, chatgptShotClient });
-  const runFinalizer = new RunFinalizer({ config, runRecordStore, notionClient, operatorClient, gitClient, githubClient, runEvidenceCollector });
+  const runTimingRecorder = new RunTimingRecorder();
+  const runFinalizer = new RunFinalizer({ config, runRecordStore, notionClient, operatorClient, gitClient, githubClient, runEvidenceCollector, runTimingRecorder });
   const runCompletionVerifier = new RunCompletionVerifier({ gitClient, githubClient });
-  const runAdmission = new RunAdmission({ config, catalog, runRecordStore, notionClient, gitClient, operatorClient, runFinalizer, runEvidenceCollector, runCompletionVerifier });
-  const runLifecycleObserver = new RunLifecycleObserver({ config, notionClient, githubClient, runEvidenceCollector, runRecordStore, lifecycleInterpreter: new E2ELifecycleInterpreter(), runCompletionVerifier, runFinalizer });
+  const runDoneVerifier = new RunDoneVerifier({ runCompletionVerifier });
+  const runAdmission = new RunAdmission({ config, catalog, runRecordStore, notionClient, gitClient, operatorClient, runFinalizer, runEvidenceCollector, runCompletionVerifier, runDoneVerifier, runTimingRecorder });
+  const runLifecycleObserver = new RunLifecycleObserver({ config, notionClient, githubClient, runEvidenceCollector, runRecordStore, lifecycleInterpreter: new E2ELifecycleInterpreter(), runCompletionVerifier, runDoneVerifier, runFinalizer, runTimingRecorder });
   const notionPublisherClient = new NotionPublisherClient({ root, notionClient });
-  return { notionClient, notionPublisherClient, gitClient, githubClient, operatorClient, chatgptShotClient, runEvidenceCollector, runRecordStore, runFinalizer, runCompletionVerifier, runAdmission, runLifecycleObserver };
+  return { notionClient, notionPublisherClient, gitClient, githubClient, operatorClient, chatgptShotClient, runEvidenceCollector, runRecordStore, runFinalizer, runCompletionVerifier, runDoneVerifier, runTimingRecorder, runAdmission, runLifecycleObserver };
 }
 
 async function main() {

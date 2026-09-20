@@ -1,17 +1,18 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { deriveIdentifier, sha256 } from '../model/plan-identity.mjs';
+import { deriveIdentifier } from '../model/plan-identity.mjs';
 import { createRunPaths, createRunScopedBaseBranchName, createOperatorProjectConfig } from '../model/e2e-project-config.mjs';
 import { selectAvailableWorkload } from '../model/workload-catalog.mjs';
 import { createRunRecord, addFailure, RunRecordStore } from '../model/run-record-store.mjs';
 import { RunFinalizer } from './finalization/run-finalizer.mjs';
-import { createRunId, currentTimeIso, waitForNextPoll } from './run-timing.mjs';
+import { RunTimingRecorder, createRunId, currentTimeIso, waitForNextPoll } from './run-timing.mjs';
 import { RunAdmission } from './admission/run-admission.mjs';
 import { RunCompletionVerifier } from './lifecycle/run-completion-verifier.mjs';
+import { RunDoneVerifier } from './lifecycle/run-done-verifier.mjs';
 import { RunLifecycleObserver } from './lifecycle/run-lifecycle-observer.mjs';
 
 export class E2ERunner {
-  constructor({ config, catalog, notionClient, notionPublisherClient, gitClient, githubClient, operatorClient, runEvidenceCollector, runRecordStore, lifecycleInterpreter, runFinalizer, runAdmission, runCompletionVerifier, runLifecycleObserver, random = Math.random, clock = () => Date.now(), waitForPoll = waitForNextPoll } = {}) {
+  constructor({ config, catalog, notionClient, notionPublisherClient, gitClient, githubClient, operatorClient, runEvidenceCollector, runRecordStore, lifecycleInterpreter, runFinalizer, runAdmission, runCompletionVerifier, runDoneVerifier, runTimingRecorder, runLifecycleObserver, random = Math.random, clock = () => Date.now(), waitForPoll = waitForNextPoll } = {}) {
     this.config = config;
     this.catalog = catalog;
     this.notionClient = notionClient;
@@ -21,11 +22,13 @@ export class E2ERunner {
     this.operatorClient = operatorClient;
     this.random = random;
     this.runRecordStore = runRecordStore || new RunRecordStore(config);
+    this.runTimingRecorder = runTimingRecorder || new RunTimingRecorder();
     this.runEvidenceCollector = runEvidenceCollector;
-    this.runFinalizer = runFinalizer || new RunFinalizer({ config, runRecordStore: this.runRecordStore, notionClient: this.notionClient, operatorClient: this.operatorClient, gitClient: this.gitClient, githubClient: this.githubClient, runEvidenceCollector: this.runEvidenceCollector });
     this.completionVerifier = runCompletionVerifier || new RunCompletionVerifier({ gitClient: this.gitClient, githubClient: this.githubClient });
-    this.admission = runAdmission || new RunAdmission({ config, catalog, runRecordStore: this.runRecordStore, notionClient: this.notionClient, gitClient: this.gitClient, operatorClient: this.operatorClient, runFinalizer: this.runFinalizer, runEvidenceCollector: this.runEvidenceCollector, runCompletionVerifier: this.completionVerifier });
-    this.lifecycleObserver = runLifecycleObserver || new RunLifecycleObserver({ config, notionClient: this.notionClient, githubClient: this.githubClient, runEvidenceCollector: this.runEvidenceCollector, runRecordStore: this.runRecordStore, lifecycleInterpreter, runCompletionVerifier: this.completionVerifier, runFinalizer: this.runFinalizer, clock, waitForPoll });
+    this.doneVerifier = runDoneVerifier || new RunDoneVerifier({ runCompletionVerifier: this.completionVerifier });
+    this.runFinalizer = runFinalizer || new RunFinalizer({ config, runRecordStore: this.runRecordStore, notionClient: this.notionClient, operatorClient: this.operatorClient, gitClient: this.gitClient, githubClient: this.githubClient, runEvidenceCollector: this.runEvidenceCollector, runTimingRecorder: this.runTimingRecorder });
+    this.admission = runAdmission || new RunAdmission({ config, catalog, runRecordStore: this.runRecordStore, notionClient: this.notionClient, gitClient: this.gitClient, operatorClient: this.operatorClient, runFinalizer: this.runFinalizer, runEvidenceCollector: this.runEvidenceCollector, runCompletionVerifier: this.completionVerifier, runDoneVerifier: this.doneVerifier, runTimingRecorder: this.runTimingRecorder });
+    this.lifecycleObserver = runLifecycleObserver || new RunLifecycleObserver({ config, notionClient: this.notionClient, githubClient: this.githubClient, runEvidenceCollector: this.runEvidenceCollector, runRecordStore: this.runRecordStore, lifecycleInterpreter, runCompletionVerifier: this.completionVerifier, runDoneVerifier: this.doneVerifier, runFinalizer: this.runFinalizer, runTimingRecorder: this.runTimingRecorder, clock, waitForPoll });
   }
 
   async runProductionE2E() {
@@ -62,11 +65,11 @@ export class E2ERunner {
       record.runtime = { project: project, dashboard: `http://127.0.0.1:${project.symphony_port}` };
       await this.runRecordStore.save(record);
 
-      record.timing.symphony.start_requested_at = currentTimeIso();
+      this.runTimingRecorder.recordSymphonyStartRequested(record, currentTimeIso());
       record.status = 'runtime_starting';
       await this.runRecordStore.save(record);
       const runtimeResult = await this.operatorClient.startConfiguredOperatorProject(paths.runtimeProject, this.config.runtime_start_timeout_ms);
-      record.timing.symphony.started_at = currentTimeIso();
+      this.runTimingRecorder.recordSymphonyStarted(record, currentTimeIso());
       dashboard = runtimeResult.dashboard || record.runtime.dashboard;
       record.runtime.dashboard = dashboard;
       record.status = 'runtime_ready';
@@ -83,7 +86,7 @@ export class E2ERunner {
       if (!publishedTask || publishedTask.identifier !== deriveIdentifier(workload.accepted_plan) || publishedTask.accepted_plan !== workload.accepted_plan) throw new Error('Publisher authoritative readback does not match the selected Accepted Plan');
       task = publishedTask;
       record.artifacts.task_identifier = task.identifier;
-      record.artifacts.plan_binding = { task_id: task.id, publisher_plan_sha256: sha256(workload.accepted_plan), tracker_description_sha256: sha256(task.accepted_plan), worker_input_sha256: null, status: 'published_and_tracker_readback' };
+      this.doneVerifier.ensurePlanBinding(record, task);
       this.lifecycleObserver.recordLifecycleObservation(record, task.state, currentTimeIso());
       record.status = 'observing';
       await this.runRecordStore.save(record);

@@ -1,9 +1,9 @@
-import { runWithTimeout, currentTimeIso } from '../run-timing.mjs';
+import { RunTimingRecorder, runWithTimeout, currentTimeIso } from '../run-timing.mjs';
 import { TERMINAL_STATES } from '../lifecycle/lifecycle-interpreter.mjs';
 import { addFailure, recordFinalizationAction } from '../../model/run-record-store.mjs';
 
 export class RunFinalizer {
-  constructor({ config, runRecordStore, notionClient, operatorClient, gitClient, githubClient, runEvidenceCollector }) {
+  constructor({ config, runRecordStore, notionClient, operatorClient, gitClient, githubClient, runEvidenceCollector, runTimingRecorder }) {
     this.config = config;
     this.runRecordStore = runRecordStore;
     this.notionClient = notionClient;
@@ -11,6 +11,7 @@ export class RunFinalizer {
     this.gitClient = gitClient;
     this.githubClient = githubClient;
     this.runEvidenceCollector = runEvidenceCollector;
+    this.runTimingRecorder = runTimingRecorder || new RunTimingRecorder();
   }
 
   async runFinalizationAction(record, name, operation) {
@@ -43,7 +44,7 @@ export class RunFinalizer {
         }
         const value = await this.operatorClient.stopConfiguredOperatorProject(record.paths.runtime_project, this.config.runtime_stop_timeout_ms, signal);
         record.cleanup.runtime_stopped = true;
-        record.timing.symphony.stopped_at = currentTimeIso();
+        this.runTimingRecorder.recordSymphonyStopped(record, currentTimeIso());
         return value;
       });
       if (record.cleanup.runtime_stopped) {
@@ -74,14 +75,15 @@ export class RunFinalizer {
         }
         const value = await this.operatorClient.stopConfiguredOperatorProject(record.paths.runtime_project, this.config.runtime_stop_timeout_ms, signal);
         record.cleanup.runtime_stopped = true;
-        record.timing.symphony.stopped_at = currentTimeIso();
+        this.runTimingRecorder.recordSymphonyStopped(record, currentTimeIso());
         return value;
       });
     }
 
     await this.runFinalizationAction(record, 'final_evidence_snapshot', async signal => {
-      const snapshot = await this.runEvidenceCollector.collectSnapshot({ record, databaseUrl: this.config.notion_database_url, identifier: record.artifacts.task_identifier, dashboard, baseBranch, workspaceRoot, signal });
+      const snapshot = await this.runEvidenceCollector.collectSnapshot({ databaseUrl: this.config.notion_database_url, identifier: record.artifacts.task_identifier, dashboard, baseBranch, workspaceRoot, signal });
       record.evidence.snapshots.push(snapshot);
+      this.runTimingRecorder.recordEvidenceSnapshot(record, snapshot);
       return { observed_at: snapshot.observed_at, errors: snapshot.errors };
     });
 
@@ -141,9 +143,7 @@ export class RunFinalizer {
     record.lifecycle.terminal_state = finalState;
     record.finalization.complete = record.finalization.unresolved.length === 0;
     record.status = 'finished';
-    record.ended_at = currentTimeIso();
-    record.timing.run.ended_at = record.ended_at;
-    record.timing.run.observed_duration_ms = Date.parse(record.ended_at) - Date.parse(record.started_at);
+    this.runTimingRecorder.recordRunEnded(record, currentTimeIso());
     if (record.finalization.incomplete) addFailure(record, new Error('finalization completed with unresolved actions'), 'finalization');
     await this.runRecordStore.save(record);
     return record;

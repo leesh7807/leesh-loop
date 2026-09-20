@@ -88,6 +88,8 @@ test('E2ERunner reaches terminal Done through injected production dependencies',
   assert.equal(persistedStartRequests.length, 1);
   assert.ok(persistedStartRequests[0]);
   assert.equal(record.lifecycle.observations[0].state, 'Ready');
+  assert.equal(record.artifacts.merged_head, '0123456789012345678901234567890123456789');
+  assert.equal(record.artifacts.remote_base_commit, 'abcdefabcdefabcdefabcdefabcdefabcdefabcd');
   assert.match(await readFile(record.paths.record, 'utf8'), /production_done/);
 });
 
@@ -207,4 +209,24 @@ test('reconciliation does not accept Done without the normal delivery proof', as
   await runner.admission.reconcileInterruptedRun(record);
   assert.deepEqual(harness.finalized, ['done_unverified_reconciliation']);
   assert.equal(record.failures.at(-1).phase, 'done_verification');
+});
+
+test('reconciliation accepts Done with the same plan binding and delivery proof', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-done-recovery-'));
+  const harness = fixture({ states: ['Done'], clock: () => 0 });
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+  const workload = harness.catalog[0];
+  const record = createRunRecord({ config: harness.config, runId: 'run-done-recovery', workload, paths: createRunPaths(harness.config, 'run-done-recovery') });
+  record.status = 'observing';
+  record.artifacts.approved_delivery = { pr: 'https://github.com/owner/repo/pull/4', head: '0123456789012345678901234567890123456789' };
+
+  const runner = new E2ERunner({ ...harness, random: () => 0 });
+  await runner.admission.reconcileInterruptedRun(record);
+
+  assert.deepEqual(harness.finalized, ['admission_reconciliation']);
+  assert.equal(record.artifacts.plan_binding.status, 'verified_by_production_tracker_input');
+  assert.equal(record.artifacts.merged_head, '0123456789012345678901234567890123456789');
+  assert.equal(record.artifacts.remote_base_commit, 'abcdefabcdefabcdefabcdefabcdefabcdefabcd');
+  assert.equal(record.failures.length, 0);
 });

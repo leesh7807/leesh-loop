@@ -1,10 +1,10 @@
-import { runWithTimeout } from '../run-timing.mjs';
+import { RunTimingRecorder, runWithTimeout } from '../run-timing.mjs';
 import { ACTIVE_STATES } from '../lifecycle/lifecycle-interpreter.mjs';
-import { sha256 } from '../../model/plan-identity.mjs';
 import { addFailure } from '../../model/run-record-store.mjs';
+import { RunDoneVerifier } from '../lifecycle/run-done-verifier.mjs';
 
 export class RunAdmission {
-  constructor({ config, catalog, runRecordStore, notionClient, gitClient, operatorClient, runFinalizer, runEvidenceCollector, runCompletionVerifier }) {
+  constructor({ config, catalog, runRecordStore, notionClient, gitClient, operatorClient, runFinalizer, runEvidenceCollector, runCompletionVerifier, runDoneVerifier, runTimingRecorder }) {
     this.config = config;
     this.catalog = catalog;
     this.runRecordStore = runRecordStore;
@@ -13,7 +13,8 @@ export class RunAdmission {
     this.operatorClient = operatorClient;
     this.runFinalizer = runFinalizer;
     this.runEvidenceCollector = runEvidenceCollector;
-    this.runCompletionVerifier = runCompletionVerifier;
+    this.runDoneVerifier = runDoneVerifier || new RunDoneVerifier({ runCompletionVerifier });
+    this.runTimingRecorder = runTimingRecorder || new RunTimingRecorder();
   }
 
   async checkRunAdmission() {
@@ -55,7 +56,7 @@ export class RunAdmission {
       const verification = await this.verifyRecoveredDoneDelivery(record, task);
       normalDone = verification.ok;
       if (!verification.ok) {
-        addFailure(record, new Error(verification.reason), 'done_verification');
+        addFailure(record, new Error(verification.reason), verification.phase || 'done_verification');
         reason = 'done_unverified_reconciliation';
       }
     }
@@ -71,20 +72,10 @@ export class RunAdmission {
   async verifyRecoveredDoneDelivery(record, task) {
     if (!this.runEvidenceCollector) return { ok: false, reason: 'Done recovery has no evidence collector' };
     try {
-      const snapshot = await runWithTimeout(() => this.runEvidenceCollector.collectSnapshot({ record, databaseUrl: this.config.notion_database_url, identifier: record.artifacts.task_identifier, dashboard: record.runtime?.dashboard, baseBranch: record.binding?.base_branch, workspaceRoot: record.paths?.workspace_root }), 30_000, 'E2E Done recovery evidence snapshot');
+      const snapshot = await runWithTimeout(() => this.runEvidenceCollector.collectSnapshot({ databaseUrl: this.config.notion_database_url, identifier: record.artifacts.task_identifier, dashboard: record.runtime?.dashboard, baseBranch: record.binding?.base_branch, workspaceRoot: record.paths?.workspace_root }), 30_000, 'E2E Done recovery evidence snapshot');
       record.evidence.snapshots.push(snapshot);
-      if (!record.artifacts.plan_binding) record.artifacts.plan_binding = { task_id: task.id, publisher_plan_sha256: sha256(record.workload.accepted_plan), tracker_description_sha256: sha256(task.accepted_plan), worker_input_sha256: null, status: 'published_and_tracker_readback' };
-      const description = snapshot.symphony?.tracker_input?.description;
-      if (description === undefined) return { ok: false, reason: 'Done recovery has no dispatch-bound production tracker input evidence' };
-      record.artifacts.plan_binding.worker_input_sha256 = sha256(description || '');
-      record.artifacts.plan_binding.status = description === task.accepted_plan ? 'verified_by_production_tracker_input' : 'mismatch';
-      if (record.artifacts.plan_binding.status !== 'verified_by_production_tracker_input') return { ok: false, reason: 'Done recovery tracker input does not match the Publisher Accepted Plan' };
-      if (Array.isArray(snapshot.github?.delivery_prs)) record.artifacts.delivery_prs = snapshot.github.delivery_prs;
-      const verification = await this.runCompletionVerifier.verifyDoneDelivery(record, record.binding?.base_branch);
-      if (!verification.ok) return verification;
-      record.artifacts.merged_head = verification.delivered_head;
-      record.artifacts.remote_base_commit = verification.remote_base_commit;
-      return { ok: true };
+      this.runTimingRecorder.recordEvidenceSnapshot(record, snapshot);
+      return await this.runDoneVerifier.verifyDoneDelivery({ record, task, snapshot, baseBranch: record.binding?.base_branch });
     } catch (error) {
       return { ok: false, reason: `Done recovery evidence failed: ${error.message}` };
     }

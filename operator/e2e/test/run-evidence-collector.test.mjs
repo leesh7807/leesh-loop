@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createRunRecord } from '../model/run-record-store.mjs';
 import { createRunPaths } from '../model/e2e-project-config.mjs';
 import { RunEvidenceCollector } from '../run/evidence/run-evidence-collector.mjs';
+import { RunTimingRecorder } from '../run/run-timing.mjs';
 
 test('chatgpt-shot timing keeps an observation duration when Jobs has no timestamps', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-evidence-'));
@@ -20,7 +21,9 @@ test('chatgpt-shot timing keeps an observation duration when Jobs has no timesta
     gitClient: { async listRemoteBranchRefs() { return {}; } },
     chatgptShotClient: { async inspectReviewJobs() { return { job_id: '123e4567-e89b-42d3-a456-426614174000', terminal_state: 'running', result: null, error: null, observations: [], observed_duration_ms: null }; } }
   });
-  await collector.collectSnapshot({ record, databaseUrl: config.notion_database_url, identifier: task.identifier, dashboard: 'http://127.0.0.1:1', baseBranch: 'base/run-1', workspaceRoot: directory + '/workspaces' });
+  const snapshot = await collector.collectSnapshot({ databaseUrl: config.notion_database_url, identifier: task.identifier, dashboard: 'http://127.0.0.1:1', baseBranch: 'base/run-1', workspaceRoot: directory + '/workspaces' });
+  assert.equal(record.timing.chatgpt_shot.job_id, null);
+  new RunTimingRecorder().recordEvidenceSnapshot(record, snapshot);
   assert.equal(record.timing.chatgpt_shot.job_id, '123e4567-e89b-42d3-a456-426614174000');
   assert.ok(Number.isFinite(record.timing.chatgpt_shot.observed_duration_ms));
   assert.equal(record.timing.chatgpt_shot.observations.length, 1);
