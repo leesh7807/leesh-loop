@@ -1,65 +1,20 @@
----
-# The Notion adapter owns provider credentials and its concrete schema. These are
-# the repository's intended state names once that adapter is configured.
-tracker:
-  kind: notion
-  provider:
-    database_url: $LEESH_LOOP_NOTION_DATABASE_URL
-  # Backlog is a normal non-dispatch state and therefore intentionally stays
-  # outside the active state set below.
-  active_states:
-    - Ready
-    - In Progress
-    - Rework
-    - Merging
-  terminal_states:
-    - Done
-    - Cancelled
-polling:
-  interval_ms: 30000
-workspace:
-  # The Operator must set this to a dedicated absolute directory outside this repository.
-  root: $SYMPHONY_WORKSPACE_ROOT
-hooks:
-  # Symphony executes this only for a newly-created workspace. Continuations use
-  # the preserved workspace; Human Review -> Rework is the documented reset exception.
-  after_create: |
-    : "${SYMPHONY_GITHUB_REPOSITORY_URL:?SYMPHONY_GITHUB_REPOSITORY_URL is required}"
-    : "${SYMPHONY_GITHUB_BASE_BRANCH:?SYMPHONY_GITHUB_BASE_BRANCH is required}"
-    git clone --branch "$SYMPHONY_GITHUB_BASE_BRANCH" "$SYMPHONY_GITHUB_REPOSITORY_URL" .
-    node operator/app/workspace-files.mjs "$PWD"
-    (cd operator/notion_publisher && npm ci)
-    if command -v mise >/dev/null 2>&1; then
-      (cd operator/symphony && mise trust && mise exec -- mix deps.get)
-    else
-      (cd operator/symphony && mix deps.get)
-    fi
-agent:
-  max_turns: 20
-codex:
-  command: >-
-    env PATH="$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:$PATH"
-    codex
-    --config model="gpt-5.6-luna"
-    --config model_reasoning_effort="xhigh"
-    app-server
----
-
 # Leesh Loop repository workflow
 
 You are working on an Accepted Plan task.
 
-- Identifier: {{ issue.identifier }}
-- Title: {{ issue.title }}
-- Current state: {{ issue.state }}
-- URL: {{ issue.url }}
+* Identifier: {{ issue.identifier }}
+* Title: {{ issue.title }}
+* Current state: {{ issue.state }}
+* URL: {{ issue.url }}
 
 Accepted Plan:
 
 {{ issue.description }}
 
 {% if attempt %}
+
 This is a Symphony continuation or retry. Reconstruct the current State, Repository Plan, Workpad, and workspace before acting. Preserve the workspace except for the explicit Human Review → Rework reset protocol.
+
 {% endif %}
 
 Read `AGENTS.md`, then apply [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md). The template is the reusable Plan-based execution policy; this file supplies this repository's concrete rules.
@@ -82,11 +37,13 @@ If the task surface itself or its authentication is unavailable, it cannot recor
 
 The repository state vocabulary is:
 
-- `Backlog` is a normal non-active, non-terminal waiting state. It is valid for
-  storing work before execution approval, but it is never a dispatch candidate.
-- `Ready`, `In Progress`, `Rework`, and `Merging` are active states. Move `Ready` work to `In Progress` before implementation; use `Rework` only for the human-selected review-rejection path. `Merging` is only the human-authorized phase for merging the exact delivery from the preceding `Human Review`; it never authorizes general implementation or an arbitrary branch merge.
-- `Human Review` is the single non-active, non-terminal human pause state. A human may select `In Progress`, `Rework`, or `Merging` from it. Comments never constitute approval or dispatch. Workers use it after a validated PR, for a human-required blocker, or when independent review cannot continue; record `reason: review` or `reason: blocker` in the Workpad. A worker must never transition a task into `Rework` or `Merging`.
-- `Done` and `Cancelled` are terminal states. Move to `Done` only after the approved delivery has actually been merged through its GitHub PR and the resulting remote configured base has been verified. Never use terminal state merely because implementation, verification, independent review, or a successful merge command finished.
+* `Backlog` is a normal non-active, non-terminal waiting state. It is valid for storing work before execution approval, but it is never a dispatch candidate.
+
+* `Ready`, `In Progress`, `Rework`, and `Merging` are active states. Move `Ready` work to `In Progress` before implementation; use `Rework` only for the human-selected review-rejection path. `Merging` is only the human-authorized phase for merging the exact delivery from the preceding `Human Review`; it never authorizes general implementation or an arbitrary branch merge.
+
+* `Human Review` is the single non-active, non-terminal human pause state. A human may select `In Progress`, `Rework`, or `Merging` from it. Comments never constitute approval or dispatch. Workers use it after a validated PR, for a human-required blocker, or when independent review cannot continue; record `reason: review` or `reason: blocker` in the Workpad. A worker must never transition a task into `Rework` or `Merging`.
+
+* `Done` and `Cancelled` are terminal states. Move to `Done` only after the approved delivery has actually been merged through its GitHub PR and the resulting remote configured base has been verified. Never use terminal state merely because implementation, verification, independent review, or a successful merge command finished.
 
 ## Dispatch reconstruction and live Workpad
 
@@ -112,7 +69,6 @@ cycle: N
 mode: continue | rework
 from_comment: <comment-id | none>
 through_comment: <comment-id | none>
-
 <review input>
 
 Rework Reset Complete
@@ -155,25 +111,46 @@ After implementation and ordinary repository verification, obtain the current PR
 ```text
 PR <PR_URL>의 HEAD <HEAD_SHA>를 코드 리뷰하라.
 
-지정 HEAD의 실제 원문을 확인한 뒤에만 finding을 확정하라. 영향도와 재현 가능성을 기준으로 실제 결함만 보고하라. 개선 가능성, 스타일, 추측, 의도된 동작은 finding이 아니다.
+지정 HEAD의 실제 원문과 diff를 확인한 뒤에만 finding을 확정하라. 영향도와 재현 가능성을 기준으로 실제 결함만 보고하라. 개선 가능성, 스타일, 추측, 더 안전한 설계 제안, 의도된 동작은 finding이 아니다.
 
-[Additional review criteria:
-<criteria explicitly specified by the Accepted Plan>]
+Finding은 현재 Accepted Plan 또는 기존 운영 계약이 요구하는 동작을 실제로 도달 가능한 실행 경로에서 위반하는 경우에만 인정한다.
 
-각 finding에는 severity, 제목, 파일:줄, 실제 코드 근거, 재현 경로, 영향, 결함인 이유, confidence를 포함하라. 모든 결과는 하나의 Markdown 문서로 출력하라.
+다음은 그 자체로 finding이 아니다.
+
+* 현재 계약보다 더 강한 안전성이나 새로운 불변조건을 요구하는 경우
+* 증거가 완전하지 않지만 실제로 잘못된 동작이 허용된다는 근거는 없는 경우
+* 정상 운영 경로가 만들지 않는 인위적인 상태를 전제로 한 경우
+* 해당 실행이나 구성요소가 소유한다는 근거가 없는 외부 변화까지 방어하려는 경우
+* 드문 실패 가능성을 막기 위해 새로운 영구 상태, 조정 규칙, 소유권 규칙, 진입 차단 조건 또는 생명주기 분기를 추가해야 하지만 그 필요성이 실제 재현 경로로 입증되지 않은 경우
+
+가능한 실패와 현재 구현이 반드시 막아야 하는 실패를 구분하라. 어떤 상태가 이론적으로 가능하다는 이유만으로 운영 계약을 확장하지 마라. 증거 부족과 실제 동작 결함도 구분하라. 관측이나 증명이 불완전한 경우, 그것이 잘못된 동작으로 이어지는 구체적인 경로가 확인될 때만 finding으로 보고하라.
+
+수정이 현재 계약을 넓히거나 상태 공간을 늘려야만 가능한 경우에는 특히 엄격하게 판단하라. 실제 계약 위반이라는 근거가 불충분하면 finding을 만들지 마라.
+
+[Additional review criteria: <criteria explicitly specified by the Accepted Plan>]
+
+각 finding에는 severity, 제목, 파일:줄, 실제 코드 근거, 재현 경로, 영향, 결함인 이유, confidence를 포함하라.
+
+`Why defect`에서는 단순히 위험하거나 더 안전하게 만들 수 있다는 설명이 아니라, 어떤 Accepted Plan 또는 기존 운영 계약을 어떻게 위반하는지 설명하라. 명시적 계약 근거를 찾을 수 없다면 finding으로 확정하지 마라.
+
+모든 결과는 하나의 Markdown 문서로 출력하라.
 
 형식:
+
 # Verdict
+
 PASS | FINDINGS
 
 # Findings
-- [severity] 제목
-  - Location:
-  - Evidence:
-  - Reproduction:
-  - Impact:
-  - Why defect:
-  - Confidence:
+
+* [severity] 제목
+
+  * Location:
+  * Evidence:
+  * Reproduction:
+  * Impact:
+  * Why defect:
+  * Confidence:
 
 finding이 없으면 `# Findings`는 `None.`으로 출력하라.
 ```
@@ -182,10 +159,18 @@ The bracketed block is optional. Include it only when the Accepted Plan explicit
 
 After submission succeeds, poll `chatgpt-shot jobs <job-id>` every 30 seconds until the Review Job reaches a terminal State.
 
-- `pending`: wait 30 seconds and poll the same Job again.
-- `in_progress`: wait 30 seconds and poll the same Job again.
-- `completed`: use the Job's `result` as the independent review Result.
-- `failed`: use the existing independent-review blocker handoff described below.
+Before recording the Review Job result, record the exact request binding in the Workpad immediately before its Job ID so lifecycle automation can distinguish a review of the delivered artifact from a stale or different review. Use these ordinary review fields, with no E2E-specific values:
+
+```text
+review target: <PR URL>
+review head: <exact HEAD SHA>
+Job ID: <UUID>
+```
+
+* `pending`: wait 30 seconds and poll the same Job again.
+* `in_progress`: wait 30 seconds and poll the same Job again.
+* `completed`: use the Job's `result` as the independent review Result.
+* `failed`: use the existing independent-review blocker handoff described below.
 
 Do not submit another Review Job for the same review target while the current Job is `pending` or `in_progress`.
 
@@ -197,6 +182,59 @@ If the Review Job reaches `failed`, it has not passed this gate. Record the Job 
 
 If `chatgpt-shot submit` fails before returning a Job ID, use the existing submission-failure blocker handoff: record the failure reason and current implementation/verification state in the Korean Workpad, move the task to `Human Review` with `reason: blocker`, confirm authoritative readback, and stop. Do not create an automatic recovery or failure-code retry policy.
 
-After a passing review gate, move the task to `Human Review` with authoritative readback. A human may return it to `In Progress` or `Rework`; then follow the corresponding continuation/reset contract, perform the required verification and independent review again, and return it to `Human Review`. A human may instead select `Merging`, which follows the approved-delivery merge contract above.
+After the independent code review gate is settled, run one structural review against the same delivered PR and exact HEAD before moving the task to `Human Review`. Use the same `chatgpt-shot` submission, polling, result-recording, and failure-handling contract defined above.
+
+Use this request:
+
+```text
+PR <PR_URL>의 HEAD <HEAD_SHA>를 구조 리뷰하라.
+
+지정 HEAD의 실제 원문과 surrounding code를 확인한 뒤에만 finding을 확정하라. Behavior correctness는 별도 리뷰에서 이미 검증되었다고 가정한다. 구조가 다르게 설계될 수 있다는 사실, 일반적인 개선 가능성, 스타일 선호, 미래 확장 가능성만으로는 finding을 만들지 마라.
+
+다음 관점에서 현재 구조 때문에 실제로 발생하는 구체적인 변경 비용, 탐색 비용, 책임 중복, 상태 소유권 혼선, 검증 어려움만 보고하라.
+
+* Responsibility separation: 서로 다른 이유로 변하는 책임이 하나의 변경 단위에 결합되어 있는가.
+* Ownership / authority: 하나의 규칙, 결정, 상태에 대한 소유권이나 판단 권한이 둘 이상의 위치에 중복되어 있는가.
+* Change locality: 하나의 개념적 변경을 이해하거나 수정하기 위해 불필요하게 넓은 코드 영역이나 여러 간접 계층을 따라가야 하는가.
+* State / data ownership: mutable state나 핵심 데이터의 생성, 변경, 해석 책임이 여러 위치에 분산되어 있는가.
+* Abstraction quality: abstraction이 관련 정보를 압축하고 경계를 명확히 하는 대신 의미를 숨기거나 불필요한 indirection을 추가하는가.
+* Verification boundary: 하나의 책임이나 규칙을 검증하기 위해 unrelated setup, state, integration context까지 함께 구성해야 하는 구조인가.
+
+각 finding에는 severity, 제목, 파일:줄, 실제 코드 근거, 문제를 드러내는 구체적인 변경 또는 reasoning path, 구조적 비용 또는 위험, 추측성 개선이 아니라 현재 구조의 finding인 이유, confidence를 포함하라.
+
+다음은 finding이 아니다.
+
+* 파일이나 함수가 길다는 사실 자체
+* 코드를 더 나눌 수 있다는 사실
+* 일반적인 SOLID, DRY, clean-code 선호
+* 재사용 가능성
+* 미래 구현체나 확장 가능성만을 근거로 한 abstraction 제안
+* 개인적인 naming 또는 스타일 선호
+* 현재 구조에서 구체적인 비용이 확인되지 않는 개선 제안
+
+모든 결과는 하나의 Markdown 문서로 출력하라.
+
+형식:
+
+# Verdict
+
+PASS | FINDINGS
+
+# Findings
+
+* [severity] 제목
+  * Location:
+  * Evidence:
+  * Reproduction / Reasoning path:
+  * Structural cost:
+  * Why current finding:
+  * Confidence:
+
+finding이 없으면 `# Findings`는 `None.`으로 출력하라.
+```
+
+Do not automatically edit the repository because of structural-review findings. After the structural review completes, move the task to `Human Review` whether its Result is `PASS` or `FINDINGS`. Structural-review findings are advisory and do not block or qualify a human-selected `Merging` transition.
+
+If the task returns to `In Progress` or `Rework`, follow the existing continuation/reset contract and repeat the required verification and review cycle before returning to `Human Review`.
 
 When a task returns from `Human Review` to `Rework`, follow the Rework reset protocol above. This is the same task's non-terminal rework, not a terminal reopen; do not search for a different Plan. Before the next PR handoff, apply the normal final comparison and move it back to `completed/`.

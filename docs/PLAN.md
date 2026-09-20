@@ -91,6 +91,8 @@ Define terms that are specific to the domain or repository, or that could reason
 
 Record only the decisions, assumptions, and defaults that materially determine the intended behavior, contracts, responsibilities, boundaries, or verification.
 
+Include a naming decision that requires file names, module names, type names, and major function names to make their current responsibility and role identifiable from the name alone. Do not name around abstractions that do not yet exist.
+
 Prefer stating what must remain true. Include implementation details only when the mechanism itself is a necessary part of the decision; otherwise leave it to implementation.
 
 Do not partially prescribe incidental implementation details or leave incomplete internal rules that appear contractual.
