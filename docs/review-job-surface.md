@@ -18,7 +18,7 @@ review head: <exact HEAD SHA>
 Job ID: <UUID>
 ```
 
-따라서 terminal evidence는 최소한 정확한 PR URL, 그 시점의 exact HEAD, Job ID, terminal `state`, 그리고 `completed`의 `result` 또는 `failed`의 `error`와 구현·검증 상태다. `result` 문서의 `# Verdict`와 `# Findings`는 독립 리뷰 판단을 보존하는 내용이며, 다른 PR/HEAD의 Job과 섞어 쓰지 않는다. Repository Plan에는 전체 transcript를 복사하지 않고 reviewed identity, verdict, finding disposition, 적용 commit, verification summary만 간결하게 남긴다.
+따라서 terminal evidence는 최소한 정확한 PR URL, 그 시점의 exact HEAD, Job ID, terminal `state`, 그리고 `completed`의 `result` 또는 `failed`의 `error`와 구현·검증 상태다. `result` 문서의 `# Verdict`와 `# Findings`는 독립 리뷰 판단을 보존하는 내용이며, 다른 PR/HEAD의 Job과 섞어 쓰지 않는다. 이 review evidence는 Workpad에 보존하고, Repository Plan은 전체 transcript나 routine review history를 담지 않으며 objective, intent, boundary, requirement, assumption, constraint 또는 verification method가 material하게 바뀔 때만 갱신한다.
 
 ## Focused check
 
