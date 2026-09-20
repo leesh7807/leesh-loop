@@ -52,6 +52,20 @@ defmodule SymphonyElixirWeb.Presenter do
     end
   end
 
+  @spec issue_input_payload(String.t(), GenServer.name(), timeout()) :: {:ok, map()} | {:error, term()}
+  def issue_input_payload(issue_identifier, orchestrator, snapshot_timeout_ms) when is_binary(issue_identifier) do
+    case Orchestrator.issue_input(orchestrator, issue_identifier, snapshot_timeout_ms) do
+      {:ok, %{id: issue_id, identifier: ^issue_identifier, description: description, state: state}} ->
+        {:ok, %{issue_identifier: issue_identifier, issue_id: issue_id, state: state, description: description}}
+
+      {:error, :not_found} ->
+        {:error, :issue_not_found}
+
+      {:error, :unavailable} ->
+        {:error, {:issue_input_unavailable, :orchestrator_unavailable}}
+    end
+  end
+
   @spec refresh_payload(GenServer.name()) :: {:ok, map()} | {:error, :unavailable}
   def refresh_payload(orchestrator) do
     case Orchestrator.request_refresh(orchestrator) do
