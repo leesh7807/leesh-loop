@@ -20,9 +20,11 @@ node dist/src/cli.js \
 - Publisher는 명시된 Notion database container의 data source schema를 구조적으로 확인해
   task data source와 sibling Plan data source를 결정한다. task의 `Plan` relation은 해당
   Plan data source를 대상으로 하는 단일 relation이어야 한다.
-- task와 Plan page는 같은 publication `Identifier`를 가진다. task의 `Plan` property는
-  정확히 하나의 Plan page를 가리키고, 그 page는 Plan data source에 속하며 동일한
-  `Identifier`와 제목을 가져야 한다.
+- task와 Plan page는 같은 publication `Identifier`로 연결된다. task의 `Plan` property는
+  정확히 하나의 Plan page를 가리키고, 그 page는 Plan data source에 속하며 accepted
+  publication의 `Identifier`와 제목을 가져야 한다. task `Title`은 생성 시 extracted title로
+  초기화되지만, retry 시 canonical identity 검증 대상은 아니므로 제목을 relation identity
+  근거로 사용하지 않는다.
 - 완전한 Accepted Plan 본문은 Plan page에만 기록하고 검증한 뒤 page를 잠근다. task
   page의 body는 별도의 mutable Workpad 표면이며 publication 직후에는 비어 있다.
 - task는 처음 `Publisher Pending`으로 생성·복구되고, Plan 내용·잠금·relation·식별자를
