@@ -16,6 +16,15 @@ Run one workload through the production Publisher/Operator/Symphony path:
 node operator/e2e/cli.mjs run operator/e2e/project.json
 ```
 
+The implementation is grouped by responsibility:
+
+- `model/` contains the E2E project configuration, workload catalog, and durable run record.
+- `systems/` contains concrete Notion, Git, GitHub, Operator, Publisher, and `chatgpt-shot` clients.
+- `run/admission/` checks whether a new run is safe to start and resolves interrupted runs.
+- `run/lifecycle/` interprets observed task states, verifies completion, and observes lifecycle progression.
+- `run/finalization/` owns the ordered run stop, terminalization, evidence, cleanup, and isolation checks.
+- `run/e2e-runner.mjs` shows the production E2E procedure in order; `cli.mjs` only composes dependencies and invokes it.
+
 The catalog's Accepted Plan is the only E2E input published to Notion. Catalog id, hard cap and
 run identity stay in the harness and run record. Run records are written outside destructive
 workspace state at `operator/e2e/runs/<run-id>/run.json`; the directory is ignored by Git so the
