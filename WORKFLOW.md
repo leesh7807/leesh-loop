@@ -1,3 +1,50 @@
+---
+# The Notion adapter owns provider credentials and its concrete schema. These are
+# the repository's intended state names once that adapter is configured.
+tracker:
+  kind: notion
+  provider:
+    database_url: $LEESH_LOOP_NOTION_DATABASE_URL
+  # Backlog is a normal non-dispatch state and therefore intentionally stays
+  # outside the active state set below.
+  active_states:
+    - Ready
+    - In Progress
+    - Rework
+    - Merging
+  terminal_states:
+    - Done
+    - Cancelled
+polling:
+  interval_ms: 30000
+workspace:
+  # The Operator must set this to a dedicated absolute directory outside this repository.
+  root: $SYMPHONY_WORKSPACE_ROOT
+hooks:
+  # Symphony executes this only for a newly-created workspace. Continuations use
+  # the preserved workspace; Human Review -> Rework is the documented reset exception.
+  after_create: |
+    : "${SYMPHONY_GITHUB_REPOSITORY_URL:?SYMPHONY_GITHUB_REPOSITORY_URL is required}"
+    : "${SYMPHONY_GITHUB_BASE_BRANCH:?SYMPHONY_GITHUB_BASE_BRANCH is required}"
+    git clone --branch "$SYMPHONY_GITHUB_BASE_BRANCH" "$SYMPHONY_GITHUB_REPOSITORY_URL" .
+    node operator/app/workspace-files.mjs "$PWD"
+    (cd operator/notion_publisher && npm ci)
+    if command -v mise >/dev/null 2>&1; then
+      (cd operator/symphony && mise trust && mise exec -- mix deps.get)
+    else
+      (cd operator/symphony && mix deps.get)
+    fi
+agent:
+  max_turns: 20
+codex:
+  command: >-
+    env PATH="$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:$PATH"
+    codex
+    --config model="gpt-5.6-luna"
+    --config model_reasoning_effort="xhigh"
+    app-server
+---
+
 # Leesh Loop repository workflow
 
 You are working on an Accepted Plan task.
