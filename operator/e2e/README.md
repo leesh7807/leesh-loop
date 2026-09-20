@@ -25,10 +25,12 @@ The implementation is grouped by responsibility:
 - `run/finalization/` owns the ordered run stop, terminalization, evidence, cleanup, and isolation checks.
 - `run/e2e-runner.mjs` shows the production E2E procedure in order; `cli.mjs` only composes dependencies and invokes it.
 
-The catalog's Accepted Plan is the only E2E input published to Notion. Catalog id, hard cap and
-run identity stay in the harness and run record. Run records are written outside destructive
-workspace state at `operator/e2e/runs/<run-id>/run.json`; the directory is ignored by Git so the
-evidence remains local and durable across workspace cleanup.
+The catalog's Accepted Plan is the only workload content published to Notion. Before publication,
+the harness materializes the selected entry for that execution by adding the next numeric suffix
+(`-1`, `-2`, ...) to the Accepted Plan H1; that materialized Plan is what the Publisher receives.
+Catalog id, hard cap and opaque run identity stay in the harness and run record. Run records are
+written outside destructive workspace state at `operator/e2e/runs/<run-id>/run.json`; the directory
+is ignored by Git so the evidence remains local and durable across workspace cleanup.
 
 A terminal run is a useful result even when production stops before `Done`. Inspect
 `verified_through`, `verification_gaps`, `failures`, `finalization`, `cleanup` and the evidence

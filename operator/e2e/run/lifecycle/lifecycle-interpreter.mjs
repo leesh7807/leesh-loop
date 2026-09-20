@@ -60,6 +60,6 @@ export function verifyMechanicalReviewApproval(task, reviewEvidence) {
   const targetPrs = [...reviewRequest.matchAll(/(?:review target|target_pr)\s*:\s*([^\n]+)/gi)].map(match => match[1].trim());
   const targetHeads = [...reviewRequest.matchAll(/(?:review head|target_head)\s*:\s*([^\n]+)/gi)].map(match => match[1].trim());
   if (targetPrs.at(-1) !== deliveredPr.trim() || targetHeads.at(-1)?.toLowerCase() !== deliveredHead.trim().toLowerCase()) return { allowed: false, reason: 'independent review Job is not bound to the delivered PR and HEAD', cycle: Number(cycle) };
-  if (reviewEvidence.terminal_state !== 'completed' || !reviewWindow.includes(deliveredPr.trim()) || !reviewWindow.includes(deliveredHead.trim()) || !PASS_VERDICT.test(reviewWindow) || !PASS_VERDICT.test(reviewEvidence.result || '')) return { allowed: false, reason: 'current Human Review cycle has no matching independent review PASS evidence', cycle: Number(cycle) };
+  if (reviewEvidence.terminal_state !== 'completed' || !reviewWindow.includes(deliveredPr.trim()) || !reviewWindow.includes(deliveredHead.trim()) || !PASS_VERDICT.test(reviewEvidence.result || '')) return { allowed: false, reason: 'current Human Review cycle has no matching independent review PASS evidence', cycle: Number(cycle) };
   return { allowed: true, cycle: Number(cycle), delivered_pr: deliveredPr.trim(), delivered_head: deliveredHead.trim() };
 }

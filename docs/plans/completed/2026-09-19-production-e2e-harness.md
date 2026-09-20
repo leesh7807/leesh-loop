@@ -111,8 +111,9 @@ terminal state, evidence flush와 resource cleanup에 수렴시키는 과정.
    run마다 이 값을 주입하지 않고 resolved seed/base와 runtime/workspace만 생성한다.
 3. run-scoped base 이름은 worker가 E2E 의미를 추론할 수 없는 opaque run identity를 사용한다.
    Accepted Plan, task, branch와 worker environment에 E2E metadata를 추가하지 않는다.
-4. catalog entry가 hard cap과 Accepted Plan을 함께 제공하고, 이미 fixed database에 존재하는
-   identifier는 재게시 후보에서 제외한다. task/page는 evidence 보존을 위해 삭제하지 않는다.
+4. catalog entry가 hard cap과 Accepted Plan을 함께 제공한다. catalog entry는 반복 실행할 수
+   있으며, 매 실행에서 Accepted Plan의 H1 제목 뒤에 `-1`, `-2` 같은 증가 suffix를 붙여
+   materialize한 뒤 identifier를 생성한다. 동일 identifier는 재게시하지 않는다.
 5. `Ready`, `In Progress`, `Merging`은 관측만 하며, `Human Review`에서는 normal review와
    동일-cycle delivery identity를 독립적으로 확인한 경우에만 Merging을 승인한다. `Rework`와
    blocker는 이번 정상 경로의 범위 밖이므로 production 결과를 재해석하지 않고 finalization한다.

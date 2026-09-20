@@ -130,6 +130,7 @@ export class NotionClient {
     return {
       ...summary,
       plan_id: planIds[0],
+      plan_identifier: textValue(planPage.properties?.Identifier),
       accepted_plan: paragraphText(planBlocks),
       workpad: paragraphText(workpadBlocks),
       properties: page.properties,
@@ -146,6 +147,16 @@ export class NotionClient {
     }
     const pages = await this.queryDataSource(binding.taskDataSourceId, {}, signal);
     return pages.map(page => this.summarizeTaskPage(page));
+  }
+
+  async listTasksForPlanIdentifier(databaseUrl, planIdentifier, signal) {
+    const binding = await this.resolveE2ENotionDatabaseBinding(databaseUrl, signal);
+    if (binding.pristine) return [];
+    const plans = await this.queryDataSource(binding.planDataSourceId, { filter: { property: 'Identifier', rich_text: { equals: planIdentifier } } }, signal);
+    if (plans.length > 1) throw new Error(`Notion Plan identifier ${planIdentifier} resolved to ${plans.length} pages`);
+    if (!plans.length) return [];
+    const tasks = await this.queryDataSource(binding.taskDataSourceId, { filter: { property: 'Plan', relation: { contains: plans[0].id } } }, signal);
+    return tasks.map(page => this.summarizeTaskPage(page));
   }
 
   async updateTaskState(databaseUrl, pageId, state, signal) {

@@ -45,7 +45,7 @@ test('mechanical approval accepts the production workpad result rendering', () =
   const deliveredHead = '0123456789012345678901234567890123456789';
   const task = {
     state: 'Human Review',
-    workpad: `Independent review result\n- review target: ${deliveredPr}\n- review head: ${deliveredHead}\n- Job ID: 123e4567-e89b-42d3-a456-426614174000\n- Result: \`# Verdict\` / PASS\nHuman Review\ncycle: 1\nreason: review\ndelivered_pr: ${deliveredPr}\ndelivered_head: ${deliveredHead}\n`
+    workpad: `Independent review result\n- review target: ${deliveredPr}\n- review head: ${deliveredHead}\n- Job ID: 123e4567-e89b-42d3-a456-426614174000\n- Result: PASS\nHuman Review\ncycle: 1\nreason: review\ndelivered_pr: ${deliveredPr}\ndelivered_head: ${deliveredHead}\n`
   };
   const evidence = { job_id: '123e4567-e89b-42d3-a456-426614174000', terminal_state: 'completed', result: '# Verdict\n\nPASS' };
   assert.deepEqual(verifyMechanicalReviewApproval(task, evidence), { allowed: true, cycle: 1, delivered_pr: deliveredPr, delivered_head: deliveredHead });

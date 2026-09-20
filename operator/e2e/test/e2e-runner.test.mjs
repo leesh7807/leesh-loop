@@ -4,7 +4,7 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateWorkloadCatalog } from '../model/workload-catalog.mjs';
-import { deriveIdentifier } from '../model/plan-identity.mjs';
+import { derivePlanIdentifier } from '../model/plan-identity.mjs';
 import { E2ERunner } from '../run/e2e-runner.mjs';
 import { createRunRecord, RunRecordStore } from '../model/run-record-store.mjs';
 import { createRunPaths } from '../model/e2e-project-config.mjs';
@@ -33,9 +33,13 @@ function fixture({ states, clock, includeTrackerInput = true }) {
   const mergeCommit = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd';
   const deliveryUrl = 'https://github.com/owner/repo/pull/4';
   const reviewWorkpad = `review target: ${deliveryUrl}\nreview head: ${deliveryHead}\nJob ID: 123e4567-e89b-42d3-a456-426614174000\n# Verdict\nPASS\nHuman Review\ncycle: 1\nreason: review\ndelivered_pr: ${deliveryUrl}\ndelivered_head: ${deliveryHead}\n`;
-  const task = state => ({ id: 'page-1', url: 'https://notion/page-1', identifier: deriveIdentifier(plan), state, accepted_plan: plan, workpad: state === 'Human Review' ? reviewWorkpad : '' });
+  const taskIdentifier = 'TASK-fixture-1';
+  let publishedPlan = plan;
+  const publishedPlans = [];
+  const task = state => ({ id: 'page-1', url: 'https://notion/page-1', identifier: taskIdentifier, state, accepted_plan: publishedPlan, workpad: state === 'Human Review' ? reviewWorkpad : '' });
   const notion = {
     async listTasks() { return []; },
+    async listTasksForPlanIdentifier() { return [{ id: 'page-1', created_at: new Date(Date.now() + 1_000).toISOString() }]; },
     async readTask() { return task(observedState); },
     async updateTaskState() { observedState = 'Merging'; return task(observedState); },
     async appendWorkpad() {}
@@ -49,7 +53,7 @@ function fixture({ states, clock, includeTrackerInput = true }) {
     async verifyCommitOnRemoteBranch() { return true; },
     async deleteRemoteBranch() {}
   };
-  const publisher = { async publishAcceptedPlan() { return { page_id: 'page-1', url: 'https://notion/page-1' }; }, async prepareProductionPublisher() {} };
+  const publisher = { async publishAcceptedPlan({ plan: acceptedPlan }) { publishedPlan = acceptedPlan; publishedPlans.push(acceptedPlan); return { page_id: 'page-1', url: 'https://notion/page-1', identifier: taskIdentifier, plan_identifier: derivePlanIdentifier(acceptedPlan) }; }, async prepareProductionPublisher() {} };
   const github = {
     async pullRequestsForBase(baseBranch) {
       return [{ number: 4, url: deliveryUrl, baseRefName: baseBranch, headRefName: 'feature', headRefOid: deliveryHead, mergedAt: observedState === 'Done' ? new Date(clock()).toISOString() : null, mergeCommit: observedState === 'Done' ? { oid: mergeCommit } : null }];
@@ -59,13 +63,13 @@ function fixture({ states, clock, includeTrackerInput = true }) {
   const evidence = {
     async collectSnapshot({ baseBranch }) {
       observedState = states[Math.min(snapshotIndex++, states.length - 1)];
-      return { observed_at: new Date(clock()).toISOString(), notion: { id: 'page-1', url: 'https://notion/page-1', identifier: deriveIdentifier(plan), state: observedState, accepted_plan: plan, workpad: observedState === 'Human Review' ? reviewWorkpad : '' }, symphony: { runtime: {}, state: {}, issue: null, tracker_input: includeTrackerInput ? { description: plan } : null }, github: { delivery_prs: await github.pullRequestsForBase(baseBranch) }, git: { remote_refs: {} }, chatgpt_shot: observedState === 'Human Review' ? { job_id: '123e4567-e89b-42d3-a456-426614174000', terminal_state: 'completed', result: '# Verdict\nPASS' } : null, errors: [] };
+      return { observed_at: new Date(clock()).toISOString(), notion: { id: 'page-1', url: 'https://notion/page-1', identifier: taskIdentifier, state: observedState, accepted_plan: publishedPlan, workpad: observedState === 'Human Review' ? reviewWorkpad : '' }, symphony: { runtime: {}, state: {}, issue: null, tracker_input: includeTrackerInput ? { description: publishedPlan } : null }, github: { delivery_prs: await github.pullRequestsForBase(baseBranch) }, git: { remote_refs: {} }, chatgpt_shot: observedState === 'Human Review' ? { job_id: '123e4567-e89b-42d3-a456-426614174000', terminal_state: 'completed', result: '# Verdict\nPASS' } : null, errors: [] };
     }
   };
   const store = new RunRecordStore(config);
   const finalized = [];
   const finalizer = { async finalizeRun({ record, reason }) { finalized.push(reason); record.status = 'finished'; record.finalization.reason = reason; record.finalization.complete = true; record.ended_at = new Date(clock()).toISOString(); await store.save(record); return record; } };
-  return { config, catalog: validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 5, accepted_plan: plan }]), notionClient: notion, operatorClient: runtime, gitClient: git, notionPublisherClient: publisher, githubClient: github, runEvidenceCollector: evidence, runFinalizer: finalizer, runRecordStore: store, finalized };
+  return { config, catalog: validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 5, accepted_plan: plan }]), notionClient: notion, operatorClient: runtime, gitClient: git, notionPublisherClient: publisher, githubClient: github, runEvidenceCollector: evidence, runFinalizer: finalizer, runRecordStore: store, finalized, publishedPlans };
 }
 
 test('E2ERunner reaches terminal Done through injected production dependencies', async () => {
@@ -88,6 +92,8 @@ test('E2ERunner reaches terminal Done through injected production dependencies',
   assert.equal(persistedStartRequests.length, 1);
   assert.ok(persistedStartRequests[0]);
   assert.equal(record.lifecycle.observations[0].state, 'Ready');
+  assert.equal(record.workload.execution_number, 1);
+  assert.equal(harness.publishedPlans[0].startsWith('# Representative task-1\n'), true);
   assert.equal(record.artifacts.merged_head, '0123456789012345678901234567890123456789');
   assert.equal(record.artifacts.remote_base_commit, 'abcdefabcdefabcdefabcdefabcdefabcdefabcd');
   assert.match(await readFile(record.paths.record, 'utf8'), /production_done/);
@@ -166,6 +172,17 @@ test('admission does not treat unrelated branch changes as run-owned residue', a
   assert.equal(result.workload.length, 1);
 });
 
+test('admission keeps catalog workloads eligible when prior task instances are terminal', async () => {
+  const harness = fixture({ states: ['Ready'], clock: () => 0 });
+  harness.notionClient.listTasks = async () => [
+    { identifier: 'TASK-previous-done', state: 'Done' },
+    { identifier: 'TASK-previous-cancelled', state: 'Cancelled' }
+  ];
+  const result = await new E2ERunner({ ...harness, random: () => 0 }).admission.checkRunAdmission();
+  assert.equal(result.workload.length, 1);
+  assert.equal(result.workload[0].plan_identifier, harness.catalog[0].plan_identifier);
+});
+
 test('admission blocks an unresolved new remote ref', async () => {
   const harness = fixture({ states: ['Ready'], clock: () => 0 });
   const previous = {
@@ -191,7 +208,6 @@ test('reconciliation rebinds a published task from its workload identity after a
   const workload = harness.catalog[0];
   const record = createRunRecord({ config: harness.config, runId: 'run-publisher-crash', workload, paths: createRunPaths(harness.config, 'run-publisher-crash') });
   record.status = 'published';
-  record.artifacts.task_identifier = workload.identifier;
   const runner = new E2ERunner({ ...harness, random: () => 0 });
   await runner.admission.reconcileInterruptedRun(record);
   assert.equal(record.artifacts.task_id, 'page-1');

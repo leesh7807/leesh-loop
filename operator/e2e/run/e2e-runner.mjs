@@ -1,8 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { deriveIdentifier } from '../model/plan-identity.mjs';
+import { sha256 } from '../model/plan-identity.mjs';
 import { createRunPaths, createRunScopedBaseBranchName, createOperatorProjectConfig } from '../model/e2e-project-config.mjs';
-import { selectAvailableWorkload } from '../model/workload-catalog.mjs';
+import { materializeWorkloadForRun, selectAvailableWorkload } from '../model/workload-catalog.mjs';
 import { createRunRecord, addFailure, RunRecordStore } from '../model/run-record-store.mjs';
 import { RunFinalizer } from './finalization/run-finalizer.mjs';
 import { RunTimingRecorder, createRunId, currentTimeIso, waitForNextPoll } from './run-timing.mjs';
@@ -38,9 +38,8 @@ export class E2ERunner {
       await this.runRecordStore.saveAdmissionFailure(error);
       throw error;
     }
-    const candidates = admission.workload;
-    if (!candidates.length) throw new Error('all E2E workload candidates already have a task in the fixed E2E database');
-    const workload = selectAvailableWorkload(candidates, { random: this.random });
+    const selectedWorkload = selectAvailableWorkload(admission.workload, { random: this.random });
+    const workload = materializeWorkloadForRun(selectedWorkload, { tasks: admission.tasks });
     const runId = createRunId();
     const paths = createRunPaths(this.config, runId);
     const branch = createRunScopedBaseBranchName(runId);
@@ -79,11 +78,14 @@ export class E2ERunner {
       record.artifacts.publisher_result = publication;
       record.artifacts.task_id = publication.page_id;
       record.artifacts.task_url = publication.url || null;
-      task = { id: publication.page_id, state: null };
+      record.artifacts.task_identifier = publication.identifier || null;
+      task = { id: publication.page_id, identifier: publication.identifier, state: null };
       record.status = 'published';
       await this.runRecordStore.save(record);
       const publishedTask = await this.notionClient.readTask(this.config.notion_database_url, publication.page_id);
-      if (!publishedTask || publishedTask.identifier !== deriveIdentifier(workload.accepted_plan) || publishedTask.accepted_plan !== workload.accepted_plan) throw new Error('Publisher authoritative readback does not match the selected Accepted Plan');
+      const publicationPlanIdentifier = publication.plan_identifier || publication.identifier;
+      const taskPlanIdentifier = publishedTask?.plan_identifier || (publishedTask ? `PLAN-${sha256(publishedTask.accepted_plan).slice(0, 12).toUpperCase()}` : null);
+      if (!publishedTask || publicationPlanIdentifier !== workload.plan_identifier || taskPlanIdentifier !== workload.plan_identifier || publishedTask.identifier !== publication.identifier || publishedTask.accepted_plan !== workload.accepted_plan || sha256(publishedTask.accepted_plan) !== workload.accepted_plan_sha256) throw new Error('Publisher authoritative readback does not match the selected Accepted Plan, Plan provenance, and newly issued task identity');
       task = publishedTask;
       record.artifacts.task_identifier = task.identifier;
       this.doneVerifier.ensurePlanBinding(record, task);

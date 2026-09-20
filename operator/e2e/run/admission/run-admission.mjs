@@ -42,8 +42,7 @@ export class RunAdmission {
       const branch = previous.binding?.base_branch;
       if (branch && refs[`refs/heads/${branch}`]) throw new Error(`previous run-scoped base branch remains: ${branch}`);
     }
-    const unavailable = new Set(tasks.map(task => task.identifier).filter(Boolean));
-    return { workload: this.catalog.filter(candidate => !unavailable.has(candidate.identifier)), refs, tasks };
+    return { workload: this.catalog, refs, tasks };
   }
 
   async reconcileInterruptedRun(record) {
@@ -82,11 +81,29 @@ export class RunAdmission {
   }
 
   async readRecordedTask(record) {
-    const expectedIdentifier = record.artifacts?.task_identifier || record.workload?.identifier;
+    const expectedIdentifier = record.artifacts?.task_identifier || null;
     const lookup = record.artifacts?.task_id || expectedIdentifier;
-    if (!lookup) return null;
-    const task = await this.notionClient.readTask(this.config.notion_database_url, lookup);
-    if (!task || task.identifier !== expectedIdentifier || task.accepted_plan !== record.workload?.accepted_plan) throw new Error('reconciliation found a task that is not bound to the recorded E2E workload');
+    let task;
+    if (lookup) {
+      task = await this.notionClient.readTask(this.config.notion_database_url, lookup);
+    } else if (this.notionClient.listTasksForPlanIdentifier) {
+      const planIdentifier = record.workload?.plan_identifier || record.workload?.identifier;
+      const candidates = planIdentifier
+        ? await this.notionClient.listTasksForPlanIdentifier(this.config.notion_database_url, planIdentifier)
+        : [];
+      const startedAt = Date.parse(record.started_at || '');
+      const createdDuringRun = candidates.filter(candidate => {
+        const createdAt = Date.parse(candidate.created_at || '');
+        return Number.isFinite(startedAt) && Number.isFinite(createdAt) && createdAt >= startedAt;
+      });
+      if (createdDuringRun.length !== 1) throw new Error(`reconciliation could not uniquely identify the task instance for workload ${record.workload?.id || 'unknown'}`);
+      task = await this.notionClient.readTask(this.config.notion_database_url, createdDuringRun[0].id);
+    } else {
+      const legacyIdentifier = record.workload?.identifier;
+      if (!legacyIdentifier) return null;
+      task = await this.notionClient.readTask(this.config.notion_database_url, legacyIdentifier);
+    }
+    if (!task || (expectedIdentifier && task.identifier !== expectedIdentifier) || task.accepted_plan !== record.workload?.accepted_plan) throw new Error('reconciliation found a task that is not bound to the recorded E2E workload');
     if (!record.artifacts.task_id) {
       record.artifacts.task_id = task.id;
       record.artifacts.task_url = task.url || null;
