@@ -11,7 +11,7 @@ import { createRunPaths } from '../model/e2e-project-config.mjs';
 
 const plan = '# Representative task\n\nInspect the repository and write a concise note under docs/.\n';
 
-function fixture({ states, clock, includeTrackerInput = true }) {
+function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, reviewEvidence } = {}) {
   const root = '/repo';
   const config = {
     repository_url: 'git@github.com:owner/repo.git',
@@ -32,16 +32,18 @@ function fixture({ states, clock, includeTrackerInput = true }) {
   const deliveryHead = '0123456789012345678901234567890123456789';
   const mergeCommit = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd';
   const deliveryUrl = 'https://github.com/owner/repo/pull/4';
-  const reviewWorkpad = `review target: ${deliveryUrl}\nreview head: ${deliveryHead}\nJob ID: 123e4567-e89b-42d3-a456-426614174000\n# Verdict\nPASS\nHuman Review\ncycle: 1\nreason: review\ndelivered_pr: ${deliveryUrl}\ndelivered_head: ${deliveryHead}\n`;
+  const humanReviewWorkpad = reviewWorkpad ?? `review target: ${deliveryUrl}\nreview head: ${deliveryHead}\nJob ID: 123e4567-e89b-42d3-a456-426614174000\n# Verdict\nPASS\nHuman Review\ncycle: 1\nreason: review\ndelivered_pr: ${deliveryUrl}\ndelivered_head: ${deliveryHead}\n`;
+  const humanReviewEvidence = reviewEvidence ?? { job_id: '123e4567-e89b-42d3-a456-426614174000', terminal_state: 'completed', result: '# Verdict\nPASS' };
   const taskIdentifier = 'TASK-fixture-1';
   let publishedPlan = plan;
   const publishedPlans = [];
-  const task = state => ({ id: 'page-1', url: 'https://notion/page-1', identifier: taskIdentifier, state, accepted_plan: publishedPlan, workpad: state === 'Human Review' ? reviewWorkpad : '' });
+  const task = state => ({ id: 'page-1', url: 'https://notion/page-1', identifier: taskIdentifier, state, accepted_plan: publishedPlan, workpad: state === 'Human Review' ? humanReviewWorkpad : '' });
+  const transitions = [];
   const notion = {
     async listTasks() { return []; },
     async listTasksForPlanIdentifier() { return [{ id: 'page-1', created_at: new Date(Date.now() + 1_000).toISOString() }]; },
     async readTask() { return task(observedState); },
-    async updateTaskState() { observedState = 'Merging'; return task(observedState); },
+    async updateTaskState(_databaseUrl, _taskId, nextState) { transitions.push(nextState); observedState = nextState; return task(observedState); },
     async appendWorkpad() {}
   };
   const runtime = { async startConfiguredOperatorProject() { return { dashboard: 'http://127.0.0.1:4410' }; }, async stopConfiguredOperatorProject() { return { stopped: true }; } };
@@ -63,13 +65,13 @@ function fixture({ states, clock, includeTrackerInput = true }) {
   const evidence = {
     async collectSnapshot({ baseBranch }) {
       observedState = states[Math.min(snapshotIndex++, states.length - 1)];
-      return { observed_at: new Date(clock()).toISOString(), notion: { id: 'page-1', url: 'https://notion/page-1', identifier: taskIdentifier, state: observedState, accepted_plan: publishedPlan, workpad: observedState === 'Human Review' ? reviewWorkpad : '' }, symphony: { runtime: {}, state: {}, issue: null, tracker_input: includeTrackerInput ? { description: publishedPlan } : null }, github: { delivery_prs: await github.pullRequestsForBase(baseBranch) }, git: { remote_refs: {} }, chatgpt_shot: observedState === 'Human Review' ? { job_id: '123e4567-e89b-42d3-a456-426614174000', terminal_state: 'completed', result: '# Verdict\nPASS' } : null, errors: [] };
+      return { observed_at: new Date(clock()).toISOString(), notion: { id: 'page-1', url: 'https://notion/page-1', identifier: taskIdentifier, state: observedState, accepted_plan: publishedPlan, workpad: observedState === 'Human Review' ? humanReviewWorkpad : '' }, symphony: { runtime: {}, state: {}, issue: null, tracker_input: includeTrackerInput ? { description: publishedPlan } : null }, github: { delivery_prs: await github.pullRequestsForBase(baseBranch) }, git: { remote_refs: {} }, chatgpt_shot: observedState === 'Human Review' ? humanReviewEvidence : null, errors: [] };
     }
   };
   const store = new RunRecordStore(config);
   const finalized = [];
-  const finalizer = { async finalizeRun({ record, reason }) { finalized.push(reason); record.status = 'finished'; record.finalization.reason = reason; record.finalization.complete = true; record.ended_at = new Date(clock()).toISOString(); await store.save(record); return record; } };
-  return { config, catalog: validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 5, accepted_plan: plan }]), notionClient: notion, operatorClient: runtime, gitClient: git, notionPublisherClient: publisher, githubClient: github, runEvidenceCollector: evidence, runFinalizer: finalizer, runRecordStore: store, finalized, publishedPlans };
+  const finalizer = { async finalizeRun({ record, reason, task: currentTask }) { finalized.push(reason); if (reason === 'reentered_human_review') { const cancelled = await notion.updateTaskState(config.notion_database_url, currentTask.id, 'Cancelled'); assert.equal(cancelled.state, 'Cancelled'); record.cleanup.task_terminalized = true; } record.status = 'finished'; record.finalization.reason = reason; record.finalization.complete = true; record.ended_at = new Date(clock()).toISOString(); await store.save(record); return record; } };
+  return { config, catalog: validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 5, accepted_plan: plan }]), notionClient: notion, operatorClient: runtime, gitClient: git, notionPublisherClient: publisher, githubClient: github, runEvidenceCollector: evidence, runFinalizer: finalizer, runRecordStore: store, finalized, transitions, publishedPlans };
 }
 
 test('E2ERunner reaches terminal Done through injected production dependencies', async () => {
@@ -97,6 +99,39 @@ test('E2ERunner reaches terminal Done through injected production dependencies',
   assert.equal(record.artifacts.merged_head, '0123456789012345678901234567890123456789');
   assert.equal(record.artifacts.remote_base_commit, 'abcdefabcdefabcdefabcdefabcdefabcdefabcd');
   assert.match(await readFile(record.paths.record, 'utf8'), /production_done/);
+  assert.deepEqual(harness.transitions, ['Merging']);
+  assert.equal(record.lifecycle.mechanical_human_review_transition.performed, true);
+  assert.equal(Object.hasOwn(record.artifacts, 'mechanical_approval'), false);
+});
+
+test('first Human Review transition ignores workpad and independent review semantics', async () => {
+  let current = 0;
+  const harness = fixture({
+    states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done'],
+    clock: () => current++,
+    reviewWorkpad: 'Human Review\ncycle: unknown\nreason: blocker\ndelivered_pr: none\ndelivered_head: not-a-commit\n',
+    reviewEvidence: { job_id: null, terminal_state: 'failed', result: '# Verdict\nFINDINGS' }
+  });
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-mechanical-review-'));
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+  const record = await new E2ERunner({ ...harness, random: () => 0, clock: () => current++, waitForPoll: async () => {} }).runProductionE2E();
+  assert.deepEqual(harness.transitions, ['Merging']);
+  assert.equal(record.lifecycle.mechanical_human_review_transition.performed, true);
+  assert.equal(record.failures.length, 0);
+});
+
+test('re-entered Human Review is cancelled without a second Merging transition', async () => {
+  let current = 0;
+  const harness = fixture({ states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Human Review'], clock: () => current++ });
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-reentered-review-'));
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+  const record = await new E2ERunner({ ...harness, random: () => 0, clock: () => current++, waitForPoll: async () => {} }).runProductionE2E();
+  assert.deepEqual(harness.transitions, ['Merging', 'Cancelled']);
+  assert.deepEqual(harness.finalized, ['reentered_human_review']);
+  assert.equal(record.lifecycle.mechanical_human_review_transition.performed, true);
+  assert.equal(record.cleanup.task_terminalized, true);
 });
 
 test('hard cap converges through the same finalization boundary', async () => {
@@ -130,9 +165,11 @@ test('Done rejects an unrelated merge into the run-scoped base', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-unrelated-merge-'));
   harness.config.run_record_directory = directory + '/runs';
   harness.config.workspace_root = directory + '/workspaces';
+  const deliveryEvidence = { github: { delivery_prs: [{ number: 4, url: 'https://github.com/owner/repo/pull/4', baseRefName: 'e2e-base', headRefOid: '0123456789012345678901234567890123456789' }] } };
   const record = {
     started_at: new Date(0).toISOString(),
-    artifacts: { approved_delivery: { pr: 'https://github.com/owner/repo/pull/4', head: '0123456789012345678901234567890123456789' } }
+    artifacts: { delivery_prs: deliveryEvidence.github.delivery_prs, delivered_head: '0123456789012345678901234567890123456789' },
+    evidence: { snapshots: [deliveryEvidence] }
   };
   const original = harness.githubClient.pullRequestsForBase;
   harness.githubClient.pullRequestsForBase = async baseBranch => [
@@ -149,7 +186,8 @@ test('Done rejects a configured base advanced after the approved merge', async (
   let current = 0;
   const harness = fixture({ states: ['Done'], clock: () => current++ });
   harness.gitClient.readRemoteBranchCommit = async () => 'fedcbafedcbafedcbafedcbafedcbafedcbafedc';
-  const record = { started_at: new Date(0).toISOString(), artifacts: { approved_delivery: { pr: 'https://github.com/owner/repo/pull/4', head: '0123456789012345678901234567890123456789' } } };
+  const deliveryEvidence = { github: { delivery_prs: [{ number: 4, url: 'https://github.com/owner/repo/pull/4', baseRefName: 'e2e-base', headRefOid: '0123456789012345678901234567890123456789' }] } };
+  const record = { started_at: new Date(0).toISOString(), artifacts: { delivery_prs: deliveryEvidence.github.delivery_prs, delivered_head: '0123456789012345678901234567890123456789' }, evidence: { snapshots: [deliveryEvidence] } };
   const result = await new E2ERunner({ ...harness, random: () => 0, clock: () => current++ }).completionVerifier.verifyDoneDelivery(record, 'e2e-base');
   assert.equal(result.ok, false);
   assert.match(result.reason, /contains changes after/);
@@ -216,6 +254,7 @@ test('reconciliation rebinds a published task from its workload identity after a
 test('reconciliation does not accept Done without the normal delivery proof', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-done-crash-'));
   const harness = fixture({ states: ['Done'], clock: () => 0 });
+  harness.githubClient.pullRequestsForBase = async () => [];
   harness.config.run_record_directory = directory + '/runs';
   harness.config.workspace_root = directory + '/workspaces';
   const workload = harness.catalog[0];
@@ -235,8 +274,6 @@ test('reconciliation accepts Done with the same plan binding and delivery proof'
   const workload = harness.catalog[0];
   const record = createRunRecord({ config: harness.config, runId: 'run-done-recovery', workload, paths: createRunPaths(harness.config, 'run-done-recovery') });
   record.status = 'observing';
-  record.artifacts.approved_delivery = { pr: 'https://github.com/owner/repo/pull/4', head: '0123456789012345678901234567890123456789' };
-
   const runner = new E2ERunner({ ...harness, random: () => 0 });
   await runner.admission.reconcileInterruptedRun(record);
 
