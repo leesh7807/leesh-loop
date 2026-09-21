@@ -213,6 +213,7 @@ test('Done uses the latest observed head after a run-owned PR is revised', async
   const record = {
     started_at: '2026-09-21T00:00:00.000Z',
     binding: { base_branch: baseBranch },
+    artifacts: { delivered_head: revisedHead },
     evidence: { snapshots: [{ github: { delivery_prs: [original] } }, { github: { delivery_prs: [revised] } }] }
   };
   const verifier = new RunCompletionVerifier({
@@ -222,6 +223,29 @@ test('Done uses the latest observed head after a run-owned PR is revised', async
   const result = await verifier.verifyDoneDelivery(record, baseBranch);
   assert.equal(result.ok, true);
   assert.equal(result.delivered_head, revisedHead);
+});
+
+test('Done rejects a delivery head changed after Human Review', async () => {
+  const baseBranch = 'e2e-base';
+  const deliveryUrl = 'https://github.com/owner/repo/pull/4';
+  const originalHead = 'a'.repeat(40);
+  const revisedHead = 'b'.repeat(40);
+  const mergeCommit = 'c'.repeat(40);
+  const original = { number: 4, url: deliveryUrl, baseRefName: baseBranch, headRefName: 'feature', headRefOid: originalHead, mergedAt: null, mergeCommit: null };
+  const revised = { ...original, headRefOid: revisedHead, mergedAt: '2026-09-21T00:02:00.000Z', mergeCommit: { oid: mergeCommit } };
+  const record = {
+    started_at: '2026-09-21T00:00:00.000Z',
+    binding: { base_branch: baseBranch },
+    artifacts: { delivered_head: originalHead },
+    evidence: { snapshots: [{ github: { delivery_prs: [original] } }, { github: { delivery_prs: [revised] } }] }
+  };
+  const verifier = new RunCompletionVerifier({
+    githubClient: { async pullRequestsForBase() { return [revised]; }, findRunOwnedDeliveryBranches() { return ['feature']; } },
+    gitClient: { async readRemoteBranchCommit() { return mergeCommit; }, async verifyCommitOnRemoteBranch() { return true; } }
+  });
+  const result = await verifier.verifyDoneDelivery(record, baseBranch);
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /source HEAD changed/);
 });
 
 test('Done rejects a configured base advanced after the approved merge', async () => {

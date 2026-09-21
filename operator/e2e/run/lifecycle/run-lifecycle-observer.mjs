@@ -45,8 +45,11 @@ export class RunLifecycleObserver {
         const state = task.state;
         this.recordLifecycleObservation(record, state, snapshot.observed_at);
         record.artifacts.delivery_prs = snapshot.github.delivery_prs || [];
-        const observedDeliveryHead = record.artifacts.delivery_prs.find(pr => pr.headRefOid)?.headRefOid;
-        if (observedDeliveryHead) record.artifacts.delivered_head = observedDeliveryHead;
+        const mechanicalTransition = record.lifecycle.mechanical_human_review_transition;
+        if (state === 'Human Review' && !mechanicalTransition?.performed) {
+          const observedDeliveryHead = record.artifacts.delivery_prs.find(pr => pr.headRefOid)?.headRefOid;
+          if (observedDeliveryHead) record.artifacts.delivered_head = observedDeliveryHead;
+        }
         const planBinding = state === 'Done' ? null : this.doneVerifier.observeTrackerInput(record, task, snapshot);
         if (planBinding?.status === 'mismatch') {
           addFailure(record, new Error(planBinding.reason), 'plan_binding');
