@@ -56,4 +56,9 @@ Worker가 실행 중 발견한 범위 밖 작업을 공식 Leesh Loop task로 �
 
 ## chatgpt-shot review log
 
-- 아직 리뷰하지 않음.
+- Round 1 — reviewed HEAD `5fb7558694abd20af6bc00237b1f66aff5bf4b51`; verdict `FINDINGS`.
+  Accepted the one independently reproduced medium finding: paginated Notion relation
+  property items were parsed by their property-item `id` before nested blocker page
+  `relation.id`, so existing blockers could be replaced with property-item IDs. Fixed in
+  commit `1c4062954f1aa4c7ada061cef449190e76075951`; targeted capability tests and the
+  full `mix test` suite passed.
