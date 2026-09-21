@@ -63,11 +63,20 @@ node operator/app/leesh-loop.mjs start operator/project.json
 The bundled development launcher uses `mise exec -- mix run`; install the pinned toolchain and
 run `mise exec -- mix deps.get` from `operator/symphony` before the first start.
 
-Before spawning Symphony, the bootstrap validates the GitHub HTTPS network and credential path, verifies the installed
-`chatgpt-shot` configuration and browser/session state, starts or recovers its Service, confirms
-the health endpoint is accepting requests, and performs one real `chatgpt-shot submit` smoke
-submission before launching Symphony. Missing or invalid readiness stops the command before any
-tracker task is dispatched; it never performs interactive login.
+Before spawning Symphony, the bootstrap always validates the workspace, GitHub HTTPS network and
+credential path, and the configured base branch bootstrap/readback. By default it then performs
+external readiness: it verifies the installed `chatgpt-shot` configuration and browser/session
+state, starts or recovers its Service, confirms the health endpoint is accepting requests, and
+performs one real `chatgpt-shot submit` smoke submission before launching Symphony. Missing or
+invalid readiness stops the command before any tracker task is dispatched; it never performs
+interactive login.
+
+An Operator Project may set `skip_external_readiness` to `true` when its execution environment
+cannot access the Operator-owned state outside `$SYMPHONY_WORKSPACE_ROOT`. In that case only the
+external readiness boundary is skipped: the bootstrap does not read or prepare `chatgpt-shot`
+configuration, browser/session state, Service state, smoke Jobs, worker interface, or external
+readiness evidence. Core startup and dispatch readiness still run through the same
+`leesh-loop.mjs start` path. Omitted or `false` keeps the default external readiness behavior.
 
 The ownership boundary is:
 
@@ -113,7 +122,12 @@ Symphony starts observable but dispatch-disabled. Only after the Operator publis
 
 `operator/project.json` may include `workspace_files`, an optional array of absolute host-local regular-file paths. Each configured file is copied by basename to the root of a newly created workspace after the repository clone and before dependency bootstrap; for example `/home/user/leesh-loop/.env` becomes `<workspace>/.env`. Empty or omitted arrays preserve the usual behavior. Relative, missing, non-regular, and duplicate-basename sources reject Operator startup. Existing workspace destinations are never overwritten. The setting is part of runtime compatibility, but it is only applied for new workspaces: continuations preserve their existing files and do not apply a later configuration change.
 
-Readiness records `github_repository_url`, `github_base_branch`, and the directly read-back `github_base_commit`. The same values are passed to Symphony as `SYMPHONY_GITHUB_REPOSITORY_URL` and `SYMPHONY_GITHUB_BASE_BRANCH`; a missing value is a configuration/readiness failure, not an invitation to infer `origin`, a default branch, or `main`.
+Configured base bootstrap/readback always runs, and the normal readiness evidence records the
+directly read-back `github_base_commit`. The same repository and branch values are passed to Symphony as
+`SYMPHONY_GITHUB_REPOSITORY_URL` and `SYMPHONY_GITHUB_BASE_BRANCH`; a missing value is a
+configuration/readiness failure, not an invitation to infer `origin`, a default branch, or `main`.
+When external readiness runs, its readiness record also includes the prepared `chatgpt-shot`
+discovery path and worker interface.
 
 After that readiness and dispatch-acknowledgement boundary, `start` opens the local Plan Publish surface, configured Notion database, and Symphony dashboard. On Linux the default path sends each URL to `xdg-open`, so the desktop uses its system default browser; Leesh Loop does not require `google-chrome`, `chromium`, or `chromium-browser` to exist. Browser, window, and tab placement are owned by the desktop environment. Set `LEESH_LOOP_BROWSER_COMMAND` to explicitly replace this default path; it receives the three project-surface URLs and does not fall back to `xdg-open` if it fails.
 
@@ -125,7 +139,9 @@ The production E2E harness lives under [`operator/e2e`](operator/e2e). Run it wi
 `node operator/e2e/cli.mjs run operator/e2e/project.json` after configuring the normal Operator,
 Notion, GitHub, Codex, and `chatgpt-shot` credentials. The checked-in E2E project keeps its
 dedicated Notion database binding and seed source ref; each run creates an opaque run-scoped base,
-uses the normal Publisher/Operator/Symphony path, and stores durable evidence under the ignored
+generates a run-local Operator Project with `skip_external_readiness: true`, and uses the existing
+Publisher → `leesh-loop.mjs start` → Operator → Symphony production path. It does not introduce a
+separate E2E runtime or Symphony launcher, and stores durable evidence under the ignored
 `operator/e2e/runs/<run-id>/run.json` record.
 
 The harness records observed lifecycle, worker/review timing, external artifacts, finalization and

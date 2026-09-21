@@ -3,10 +3,10 @@ set -eu
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: operator/app/operator-bootstrap [--] [command [argument ...]]
+Usage: operator/app/operator-bootstrap [--skip-external-readiness] [--] [command [argument ...]]
 
-Validate Operator readiness, prepare the chatgpt-shot Service, and optionally
-execute a command with the worker-facing chatgpt-shot interface enabled.
+Validate Operator core readiness, optionally prepare the chatgpt-shot Service,
+and execute a command with the worker-facing interface enabled.
 
 The command form is the supported Symphony entry point, for example:
   operator/app/operator-bootstrap -- operator/symphony/bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails
@@ -28,9 +28,14 @@ report() {
   printf '%s\n' "$1" >"$startup_status_temporary" && mv -f -- "$startup_status_temporary" "$startup_status_file"
 }
 
+skip_external_readiness=false
+if [ "${1:-}" = '--skip-external-readiness' ]; then
+  skip_external_readiness=true
+  shift
+fi
+
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 repository_root=$(CDPATH= cd -- "$script_dir/../.." && pwd -P)
-worker_client=$repository_root/operator/external/chatgpt-shot/chatgpt-shot
 
 case "${1:-}" in
   -h|--help) usage ;;
@@ -61,49 +66,53 @@ is_under "$workspace_root" "$repository_root" && fail "workspace root must be ou
 mkdir -p -- "$workspace_root" || fail "cannot create workspace root: $workspace_root"
 [ -w "$workspace_root" ] || fail "workspace root is not writable by the Operator: $workspace_root"
 
-command -v node >/dev/null 2>&1 || fail 'node is required for the prepared worker interface.'
-[ -x "$worker_client" ] || fail 'the worker-facing chatgpt-shot interface is missing or not executable.'
-command -v chatgpt-shot >/dev/null 2>&1 || fail 'chatgpt-shot is not installed or is not on the Operator PATH.'
+command -v node >/dev/null 2>&1 || fail 'node is required for Operator core readiness.'
 command -v git >/dev/null 2>&1 || fail 'git is required for GitHub readiness.'
 command -v gh >/dev/null 2>&1 || fail 'gh is required for GitHub authentication readiness.'
 command -v curl >/dev/null 2>&1 || fail 'curl is required for GitHub network readiness.'
 
-xdg_config_home=${XDG_CONFIG_HOME:-$HOME/.config}
-xdg_data_home=${XDG_DATA_HOME:-$HOME/.local/share}
-xdg_cache_home=${XDG_CACHE_HOME:-$HOME/.cache}
-chatgpt_config_root=$(realpath -m -- "$xdg_config_home/chatgpt-shot")
-chatgpt_data_root=$(realpath -m -- "$xdg_data_home/chatgpt-shot")
-chatgpt_cache_root=$(realpath -m -- "$xdg_cache_home/chatgpt-shot")
+if [ "$skip_external_readiness" = false ]; then
+  worker_client=$repository_root/operator/external/chatgpt-shot/chatgpt-shot
+  [ -x "$worker_client" ] || fail 'the worker-facing chatgpt-shot interface is missing or not executable.'
+  command -v chatgpt-shot >/dev/null 2>&1 || fail 'chatgpt-shot is not installed or is not on the Operator PATH.'
 
-for state_path in "$chatgpt_config_root" "$chatgpt_data_root" "$chatgpt_cache_root"; do
-  is_under "$state_path" "$workspace_root" && fail "chatgpt-shot persistent state must be outside the worker workspace: $state_path"
-done
+  xdg_config_home=${XDG_CONFIG_HOME:-$HOME/.config}
+  xdg_data_home=${XDG_DATA_HOME:-$HOME/.local/share}
+  xdg_cache_home=${XDG_CACHE_HOME:-$HOME/.cache}
+  chatgpt_config_root=$(realpath -m -- "$xdg_config_home/chatgpt-shot")
+  chatgpt_data_root=$(realpath -m -- "$xdg_data_home/chatgpt-shot")
+  chatgpt_cache_root=$(realpath -m -- "$xdg_cache_home/chatgpt-shot")
 
-chatgpt_discovery_path=$chatgpt_cache_root/runtime.json
-worker_interface_root=${SYMPHONY_OPERATOR_INTERFACE_ROOT:-$chatgpt_cache_root/worker-interface}
-case "$worker_interface_root" in
-  /*) ;;
-  *) fail "SYMPHONY_OPERATOR_INTERFACE_ROOT must be an absolute path: $worker_interface_root" ;;
-esac
-worker_interface_root=$(realpath -m -- "$worker_interface_root")
-is_under "$worker_interface_root" "$workspace_root" && fail 'worker interface must be outside the worker workspace.'
-configured_chatgpt_config_path=$(chatgpt-shot config path 2>/dev/null) || fail 'chatgpt-shot could not resolve its Operator configuration path.'
-chatgpt_config_path=$(realpath -m -- "$configured_chatgpt_config_path")
-[ "$chatgpt_config_path" = "$(realpath -m -- "$chatgpt_config_root/.env")" ] || fail "chatgpt-shot configuration is outside the expected Operator path: $configured_chatgpt_config_path"
-is_under "$chatgpt_config_path" "$workspace_root" && fail 'chatgpt-shot credentials must be outside the worker workspace.'
-chatgpt_browser_profile=$(realpath -m -- "$chatgpt_data_root/chrome-profile")
-chatgpt_lock_path=$(realpath -m -- "$chatgpt_cache_root/service.lock")
-for operator_path in "$chatgpt_browser_profile" "$chatgpt_discovery_path" "$chatgpt_lock_path"; do
-  is_under "$operator_path" "$workspace_root" && fail "chatgpt-shot runtime state must be outside the worker workspace: $operator_path"
-done
+  for state_path in "$chatgpt_config_root" "$chatgpt_data_root" "$chatgpt_cache_root"; do
+    is_under "$state_path" "$workspace_root" && fail "chatgpt-shot persistent state must be outside the worker workspace: $state_path"
+  done
 
-chatgpt_config_output=$(chatgpt-shot config show 2>&1) || fail 'chatgpt-shot user configuration is not readable.'
-printf '%s\n' "$chatgpt_config_output" | grep -q '^NOTION_TOKEN: set$' || fail 'chatgpt-shot NOTION_TOKEN is missing.'
-printf '%s\n' "$chatgpt_config_output" | grep -q '^CHATGPT_SHOT_NOTION_DATABASE_URL: set$' || fail 'chatgpt-shot Invocation database URL is missing.'
+  chatgpt_discovery_path=$chatgpt_cache_root/runtime.json
+  worker_interface_root=${SYMPHONY_OPERATOR_INTERFACE_ROOT:-$chatgpt_cache_root/worker-interface}
+  case "$worker_interface_root" in
+    /*) ;;
+    *) fail "SYMPHONY_OPERATOR_INTERFACE_ROOT must be an absolute path: $worker_interface_root" ;;
+  esac
+  worker_interface_root=$(realpath -m -- "$worker_interface_root")
+  is_under "$worker_interface_root" "$workspace_root" && fail 'worker interface must be outside the worker workspace.'
+  configured_chatgpt_config_path=$(chatgpt-shot config path 2>/dev/null) || fail 'chatgpt-shot could not resolve its Operator configuration path.'
+  chatgpt_config_path=$(realpath -m -- "$configured_chatgpt_config_path")
+  [ "$chatgpt_config_path" = "$(realpath -m -- "$chatgpt_config_root/.env")" ] || fail "chatgpt-shot configuration is outside the expected Operator path: $configured_chatgpt_config_path"
+  is_under "$chatgpt_config_path" "$workspace_root" && fail 'chatgpt-shot credentials must be outside the worker workspace.'
+  chatgpt_browser_profile=$(realpath -m -- "$chatgpt_data_root/chrome-profile")
+  chatgpt_lock_path=$(realpath -m -- "$chatgpt_cache_root/service.lock")
+  for operator_path in "$chatgpt_browser_profile" "$chatgpt_discovery_path" "$chatgpt_lock_path"; do
+    is_under "$operator_path" "$workspace_root" && fail "chatgpt-shot runtime state must be outside the worker workspace: $operator_path"
+  done
 
-for state_path in "$chatgpt_config_root" "$chatgpt_data_root" "$chatgpt_cache_root"; do
-  [ -r "$state_path" ] && [ -w "$state_path" ] || fail "Operator-owned chatgpt-shot state is not usable: $state_path"
-done
+  chatgpt_config_output=$(chatgpt-shot config show 2>&1) || fail 'chatgpt-shot user configuration is not readable.'
+  printf '%s\n' "$chatgpt_config_output" | grep -q '^NOTION_TOKEN: set$' || fail 'chatgpt-shot NOTION_TOKEN is missing.'
+  printf '%s\n' "$chatgpt_config_output" | grep -q '^CHATGPT_SHOT_NOTION_DATABASE_URL: set$' || fail 'chatgpt-shot Invocation database URL is missing.'
+
+  for state_path in "$chatgpt_config_root" "$chatgpt_data_root" "$chatgpt_cache_root"; do
+    [ -r "$state_path" ] && [ -w "$state_path" ] || fail "Operator-owned chatgpt-shot state is not usable: $state_path"
+  done
+fi
 
 report 'checking GitHub network and credential readiness'
 github_repository_url=${SYMPHONY_GITHUB_REPOSITORY_URL:-}
@@ -148,10 +157,11 @@ report 'ensuring configured base branch exists'
 github_base_commit=$(node "$repository_root/operator/app/git-target.mjs" "$github_repository_url" "$github_base_branch") ||
   fail 'configured Git target branch bootstrap failed; dispatch is not allowed.'
 
-report 'checking chatgpt-shot configuration and browser session'
-if ! chatgpt-shot doctor >/dev/null 2>&1; then
-  fail 'chatgpt-shot doctor failed; repair authentication, browser/session state, or Invocation configuration as Operator.'
-fi
+if [ "$skip_external_readiness" = false ]; then
+  report 'checking chatgpt-shot configuration and browser session'
+  if ! chatgpt-shot doctor >/dev/null 2>&1; then
+    fail 'chatgpt-shot doctor failed; repair authentication, browser/session state, or Invocation configuration as Operator.'
+  fi
 
 service_accepting() {
   node - "$chatgpt_discovery_path" <<'NODE'
@@ -257,30 +267,32 @@ NODE
       ;;
   esac
 done
-service_accepting || fail 'chatgpt-shot Service stopped accepting requests after the smoke invocation.'
+  service_accepting || fail 'chatgpt-shot Service stopped accepting requests after the smoke invocation.'
+fi
 
-report 'preparing worker interface and readiness record'
 github_base_commit=$(node "$repository_root/operator/app/git-target.mjs" read "$github_repository_url" "$github_base_branch") ||
   fail 'configured base branch readback failed before readiness evidence was recorded.'
-mkdir -p -- "$worker_interface_root" || fail "cannot create worker interface directory: $worker_interface_root"
-cp -- "$worker_client" "$worker_interface_root/chatgpt-shot" || fail 'cannot prepare the worker-facing chatgpt-shot interface.'
-chmod 755 -- "$worker_interface_root/chatgpt-shot" || fail 'cannot make the worker-facing chatgpt-shot interface executable.'
+if [ "$skip_external_readiness" = false ]; then
+  report 'preparing worker interface and readiness record'
+  mkdir -p -- "$worker_interface_root" || fail "cannot create worker interface directory: $worker_interface_root"
+  cp -- "$worker_client" "$worker_interface_root/chatgpt-shot" || fail 'cannot prepare the worker-facing chatgpt-shot interface.'
+  chmod 755 -- "$worker_interface_root/chatgpt-shot" || fail 'cannot make the worker-facing chatgpt-shot interface executable.'
 
-readiness_file=${SYMPHONY_OPERATOR_READINESS_FILE:-$chatgpt_cache_root/operator-readiness.json}
-case "$readiness_file" in
-  /*) ;;
-  *) fail "SYMPHONY_OPERATOR_READINESS_FILE must be an absolute path: $readiness_file" ;;
-esac
-readiness_file=$(realpath -m -- "$readiness_file")
-is_under "$readiness_file" "$workspace_root" && fail 'Operator readiness state must be outside the worker workspace.'
-readiness_directory=$(dirname -- "$readiness_file")
-mkdir -p -- "$readiness_directory" || fail "cannot create readiness state directory: $readiness_directory"
-chmod 700 -- "$readiness_directory" 2>/dev/null || true
+  readiness_file=${SYMPHONY_OPERATOR_READINESS_FILE:-$chatgpt_cache_root/operator-readiness.json}
+  case "$readiness_file" in
+    /*) ;;
+    *) fail "SYMPHONY_OPERATOR_READINESS_FILE must be an absolute path: $readiness_file" ;;
+  esac
+  readiness_file=$(realpath -m -- "$readiness_file")
+  is_under "$readiness_file" "$workspace_root" && fail 'Operator readiness state must be outside the worker workspace.'
+  readiness_directory=$(dirname -- "$readiness_file")
+  mkdir -p -- "$readiness_directory" || fail "cannot create readiness state directory: $readiness_directory"
+  chmod 700 -- "$readiness_directory" 2>/dev/null || true
 
-readiness_tmp=$(mktemp "${readiness_file}.XXXXXX") || fail "cannot create readiness state: $readiness_file"
-trap 'rm -f -- "$smoke_job_id_file" "$smoke_snapshot" "$readiness_tmp"' EXIT HUP INT TERM
-umask 077
-node - "$readiness_tmp" "$workspace_root" "$repository_root" "$github_repository_url" "$github_base_branch" "$github_base_commit" "$chatgpt_discovery_path" "$worker_interface_root" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" <<'NODE' || fail "cannot write readiness state: $readiness_file"
+  readiness_tmp=$(mktemp "${readiness_file}.XXXXXX") || fail "cannot create readiness state: $readiness_file"
+  trap 'rm -f -- "$smoke_job_id_file" "$smoke_snapshot" "$readiness_tmp"' EXIT HUP INT TERM
+  umask 077
+  node - "$readiness_tmp" "$workspace_root" "$repository_root" "$github_repository_url" "$github_base_branch" "$github_base_commit" "$chatgpt_discovery_path" "$worker_interface_root" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" <<'NODE' || fail "cannot write readiness state: $readiness_file"
 const fs = require('node:fs');
 
 const [, , outputPath, workspaceRoot, repositoryRoot, githubRepositoryUrl, githubBaseBranch, githubBaseCommit, discoveryPath, interfaceRoot, preparedAt] = process.argv;
@@ -295,10 +307,13 @@ fs.writeFileSync(outputPath, JSON.stringify({
   prepared_at: preparedAt
 }) + '\n');
 NODE
-mv -f -- "$readiness_tmp" "$readiness_file" || fail "cannot publish readiness state: $readiness_file"
-chmod 600 -- "$readiness_file" 2>/dev/null || true
-
-printf 'Operator readiness passed: workspace=%s chatgpt-shot=%s\n' "$workspace_root" "$chatgpt_discovery_path"
+  mv -f -- "$readiness_tmp" "$readiness_file" || fail "cannot publish readiness state: $readiness_file"
+  chmod 600 -- "$readiness_file" 2>/dev/null || true
+  printf 'Operator readiness passed: workspace=%s chatgpt-shot=%s\n' "$workspace_root" "$chatgpt_discovery_path"
+else
+  report 'skipping external readiness'
+  printf 'Operator core readiness passed: workspace=%s external-readiness=skipped\n' "$workspace_root"
+fi
 
 if [ "$#" -eq 0 ]; then
   exit 0
@@ -309,8 +324,10 @@ if [ "$1" = "--" ]; then
 fi
 [ "$#" -gt 0 ] || usage
 
-export CHATGPT_SHOT_WORKER_DISCOVERY_PATH=$chatgpt_discovery_path
-export SYMPHONY_OPERATOR_READINESS_FILE=$readiness_file
-export CHATGPT_SHOT_WORKER_INTERFACE_ROOT=$worker_interface_root
+if [ "$skip_external_readiness" = false ]; then
+  export CHATGPT_SHOT_WORKER_DISCOVERY_PATH=$chatgpt_discovery_path
+  export SYMPHONY_OPERATOR_READINESS_FILE=$readiness_file
+  export CHATGPT_SHOT_WORKER_INTERFACE_ROOT=$worker_interface_root
+fi
 report 'starting Symphony process'
 exec "$@"

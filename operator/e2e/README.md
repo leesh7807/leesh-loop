@@ -2,7 +2,10 @@
 
 `project.json` is the fixed E2E Project binding. It intentionally keeps the dedicated Notion
 database URL and seed source ref in source control; secrets are read from `NOTION_TOKEN`, the
-normal GitHub CLI authentication, and the normal Operator/chatgpt-shot environment.
+normal GitHub CLI authentication, and the normal Operator/chatgpt-shot environment. Each run
+creates a run-local Operator Project with `skip_external_readiness: true` so production E2E can
+run inside a Symphony worker sandbox without accessing Operator-owned `chatgpt-shot` state outside
+that workspace.
 
 Run the admission check first:
 
@@ -10,7 +13,9 @@ Run the admission check first:
 node operator/e2e/cli.mjs admit operator/e2e/project.json
 ```
 
-Run one workload through the production Publisher/Operator/Symphony path:
+Run one workload through the existing production Publisher → `leesh-loop.mjs start` → Operator →
+Symphony path. The skip option only omits external readiness; it is not an E2E-specific runtime or
+alternate Symphony startup:
 
 ```bash
 node operator/e2e/cli.mjs run operator/e2e/project.json

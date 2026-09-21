@@ -5,7 +5,7 @@ import { basename, join } from 'node:path';
 import { execFile as execute } from 'node:child_process';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { effective, loadConfig } from '../leesh-loop.mjs';
+import { compatible, effective, loadConfig, operatorBootstrapArgs } from '../leesh-loop.mjs';
 import { materializeWorkspaceFiles, validateWorkspaceFiles } from '../workspace-files.mjs';
 
 const execFile = promisify(execute);
@@ -22,7 +22,7 @@ async function fixture(t) {
   return { directory, workspaceRoot, workspace };
 }
 
-async function projectConfig(directory, workspaceRoot, workspaceFiles) {
+async function projectConfig(directory, workspaceRoot, workspaceFiles, skipExternalReadiness) {
   const path = join(directory, 'project.json');
   const config = {
     workflow_path: join(root, 'WORKFLOW.md'),
@@ -32,6 +32,7 @@ async function projectConfig(directory, workspaceRoot, workspaceFiles) {
     github_base_branch: 'main'
   };
   if (workspaceFiles !== undefined) config.workspace_files = workspaceFiles;
+  if (skipExternalReadiness !== undefined) config.skip_external_readiness = skipExternalReadiness;
   await writeFile(path, JSON.stringify(config));
   return path;
 }
@@ -62,6 +63,52 @@ test('workspace-file configuration rejects invalid paths and destination collisi
   await assert.rejects(loadConfig(await projectConfig(directory, workspaceRoot, [join(directory, 'missing')])), /does not exist/);
   await assert.rejects(loadConfig(await projectConfig(directory, workspaceRoot, [otherDirectory])), /not a regular file/);
   await assert.rejects(loadConfig(await projectConfig(directory, workspaceRoot, [first, second])), /conflicting destination basename/);
+});
+
+test('external readiness skip configuration is boolean and defaults to performing readiness', async t => {
+  const { directory, workspaceRoot } = await fixture(t);
+  const configPath = await projectConfig(directory, workspaceRoot);
+  const omitted = await loadConfig(configPath);
+  assert.equal(omitted.skip_external_readiness, false);
+
+  await writeFile(configPath, JSON.stringify({
+    workflow_path: workflow,
+    notion_database_url: 'https://notion.example/database',
+    symphony_workspace_root: workspaceRoot,
+    github_repository_url: 'https://github.com/example/repository.git',
+    github_base_branch: 'main',
+    skip_external_readiness: false
+  }));
+  const explicitFalse = await loadConfig(configPath);
+  assert.equal(explicitFalse.skip_external_readiness, false);
+
+  await writeFile(configPath, JSON.stringify({
+    workflow_path: workflow,
+    notion_database_url: 'https://notion.example/database',
+    symphony_workspace_root: workspaceRoot,
+    github_repository_url: 'https://github.com/example/repository.git',
+    github_base_branch: 'main',
+    skip_external_readiness: true
+  }));
+  const skipped = await loadConfig(configPath);
+  assert.equal(skipped.skip_external_readiness, true);
+  assert.notDeepEqual(effective(explicitFalse, 'same-runtime', 4100), effective(skipped, 'same-runtime', 4100));
+  assert.equal(compatible(effective(explicitFalse, 'old-runtime', 4100), effective(skipped, 'new-runtime', 4100)), false);
+  const legacyFalse = { ...effective(explicitFalse, 'legacy-runtime', 4100) };
+  delete legacyFalse.skip_external_readiness;
+  assert.equal(compatible(legacyFalse, effective(explicitFalse, 'new-runtime', 4100)), true);
+  assert.deepEqual(operatorBootstrapArgs(skipped, '/tmp/symphony', 4100).slice(1, 3), ['--skip-external-readiness', '--']);
+  assert.deepEqual(operatorBootstrapArgs(explicitFalse, '/tmp/symphony', 4100).slice(1, 2), ['--']);
+
+  await writeFile(configPath, JSON.stringify({
+    workflow_path: workflow,
+    notion_database_url: 'https://notion.example/database',
+    symphony_workspace_root: workspaceRoot,
+    github_repository_url: 'https://github.com/example/repository.git',
+    github_base_branch: 'main',
+    skip_external_readiness: 'true'
+  }));
+  await assert.rejects(loadConfig(configPath), /skip_external_readiness must be a boolean/);
 });
 
 test('stop accepts an invalidated workspace-file source so a live runtime remains recoverable', async t => {
