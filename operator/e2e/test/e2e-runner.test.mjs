@@ -203,6 +203,27 @@ test('Done rejects an observed but non-owned merged PR when no run delivery merg
   assert.match(result.reason, /no run-owned delivery PR is merged/);
 });
 
+test('Done uses the latest observed head after a run-owned PR is revised', async () => {
+  const baseBranch = 'e2e-base';
+  const deliveryUrl = 'https://github.com/owner/repo/pull/4';
+  const revisedHead = 'b'.repeat(40);
+  const mergeCommit = 'c'.repeat(40);
+  const original = { number: 4, url: deliveryUrl, baseRefName: baseBranch, headRefName: 'feature', headRefOid: 'a'.repeat(40), mergedAt: null, mergeCommit: null };
+  const revised = { ...original, headRefOid: revisedHead, mergedAt: '2026-09-21T00:02:00.000Z', mergeCommit: { oid: mergeCommit } };
+  const record = {
+    started_at: '2026-09-21T00:00:00.000Z',
+    binding: { base_branch: baseBranch },
+    evidence: { snapshots: [{ github: { delivery_prs: [original] } }, { github: { delivery_prs: [revised] } }] }
+  };
+  const verifier = new RunCompletionVerifier({
+    githubClient: { async pullRequestsForBase() { return [revised]; }, findRunOwnedDeliveryBranches() { return ['feature']; } },
+    gitClient: { async readRemoteBranchCommit() { return mergeCommit; }, async verifyCommitOnRemoteBranch() { return true; } }
+  });
+  const result = await verifier.verifyDoneDelivery(record, baseBranch);
+  assert.equal(result.ok, true);
+  assert.equal(result.delivered_head, revisedHead);
+});
+
 test('Done rejects a configured base advanced after the approved merge', async () => {
   let current = 0;
   const harness = fixture({ states: ['Done'], clock: () => current++ });
