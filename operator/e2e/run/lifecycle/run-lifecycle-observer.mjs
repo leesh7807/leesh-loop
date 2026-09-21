@@ -48,7 +48,8 @@ export class RunLifecycleObserver {
         const mechanicalTransition = record.lifecycle.mechanical_human_review_transition;
         if (state === 'Human Review' && !mechanicalTransition?.performed) {
           const observedDeliveryHead = record.artifacts.delivery_prs.find(pr => pr.headRefOid)?.headRefOid;
-          if (observedDeliveryHead) record.artifacts.delivered_head = observedDeliveryHead;
+          record.artifacts.delivered_head = observedDeliveryHead || null;
+          record.artifacts.delivered_head_locked = true;
         }
         const planBinding = state === 'Done' ? null : this.doneVerifier.observeTrackerInput(record, task, snapshot);
         if (planBinding?.status === 'mismatch') {

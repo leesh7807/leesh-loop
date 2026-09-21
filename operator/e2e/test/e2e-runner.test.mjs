@@ -213,7 +213,7 @@ test('Done uses the latest observed head after a run-owned PR is revised', async
   const record = {
     started_at: '2026-09-21T00:00:00.000Z',
     binding: { base_branch: baseBranch },
-    artifacts: { delivered_head: revisedHead },
+    artifacts: { delivered_head: revisedHead, delivered_head_locked: true },
     evidence: { snapshots: [{ github: { delivery_prs: [original] } }, { github: { delivery_prs: [revised] } }] }
   };
   const verifier = new RunCompletionVerifier({
@@ -236,7 +236,7 @@ test('Done rejects a delivery head changed after Human Review', async () => {
   const record = {
     started_at: '2026-09-21T00:00:00.000Z',
     binding: { base_branch: baseBranch },
-    artifacts: { delivered_head: originalHead },
+    artifacts: { delivered_head: originalHead, delivered_head_locked: true },
     evidence: { snapshots: [{ github: { delivery_prs: [original] } }, { github: { delivery_prs: [revised] } }] }
   };
   const verifier = new RunCompletionVerifier({
@@ -246,6 +246,26 @@ test('Done rejects a delivery head changed after Human Review', async () => {
   const result = await verifier.verifyDoneDelivery(record, baseBranch);
   assert.equal(result.ok, false);
   assert.match(result.reason, /source HEAD changed/);
+});
+
+test('Done rejects missing Human Review delivery-head evidence', async () => {
+  const baseBranch = 'e2e-base';
+  const revisedHead = 'b'.repeat(40);
+  const mergeCommit = 'c'.repeat(40);
+  const revised = { number: 4, url: 'https://github.com/owner/repo/pull/4', baseRefName: baseBranch, headRefName: 'feature', headRefOid: revisedHead, mergedAt: '2026-09-21T00:02:00.000Z', mergeCommit: { oid: mergeCommit } };
+  const record = {
+    started_at: '2026-09-21T00:00:00.000Z',
+    binding: { base_branch: baseBranch },
+    artifacts: { delivered_head: null, delivered_head_locked: true },
+    evidence: { snapshots: [{ notion: { state: 'Human Review' }, github: { delivery_prs: [] } }, { notion: { state: 'Done' }, github: { delivery_prs: [revised] } }] }
+  };
+  const verifier = new RunCompletionVerifier({
+    githubClient: { async pullRequestsForBase() { return [revised]; }, findRunOwnedDeliveryBranches() { return ['feature']; } },
+    gitClient: { async readRemoteBranchCommit() { return mergeCommit; }, async verifyCommitOnRemoteBranch() { return true; } }
+  });
+  const result = await verifier.verifyDoneDelivery(record, baseBranch);
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /no observed immutable source HEAD/);
 });
 
 test('Done rejects a configured base advanced after the approved merge', async () => {

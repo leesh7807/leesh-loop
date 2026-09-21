@@ -19,7 +19,9 @@ export class RunCompletionVerifier {
     if (mergedDeliveries.length > 1) return { ok: false, reason: 'multiple run-owned delivery PRs are merged into the configured base' };
     const pr = mergedDeliveries[0];
     const latestObserved = [...observedPrs].reverse().find(candidate => (candidate.url && candidate.url === pr.url) || (candidate.number && String(candidate.number) === String(pr.number)));
-    const deliveredHead = record.artifacts?.delivered_head || latestObserved?.headRefOid || null;
+    const deliveredHead = record.artifacts?.delivered_head_locked
+      ? record.artifacts.delivered_head
+      : record.artifacts?.delivered_head || latestObserved?.headRefOid || null;
     if (!/^[0-9a-f]{40}$/i.test(deliveredHead || '')) return { ok: false, reason: 'run-owned delivery PR has no observed immutable source HEAD' };
     if (pr.headRefOid?.toLowerCase() !== deliveredHead.toLowerCase()) return { ok: false, reason: 'run-owned delivery PR source HEAD changed after its delivery observation' };
     const runStartedAt = Date.parse(record.started_at || '');
