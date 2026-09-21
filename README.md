@@ -117,7 +117,7 @@ Readiness records `github_repository_url`, `github_base_branch`, and the directl
 
 After that readiness and dispatch-acknowledgement boundary, `start` opens the local Plan Publish surface, configured Notion database, and Symphony dashboard. On Linux the default path sends each URL to `xdg-open`, so the desktop uses its system default browser; Leesh Loop does not require `google-chrome`, `chromium`, or `chromium-browser` to exist. Browser, window, and tab placement are owned by the desktop environment. Set `LEESH_LOOP_BROWSER_COMMAND` to explicitly replace this default path; it receives the three project-surface URLs and does not fall back to `xdg-open` if it fails.
 
-Agents work against the target repository according to its `WORKFLOW.md`, then write results and state back to Notion.
+Agents work against the target repository according to its `WORKFLOW.md`, then write results and state back to Notion. For the concrete Leesh Loop workflow, a bound Symphony worker may also publish a supplied Plan as a canonical `Backlog` task through the existing Publisher and add that task to the current task's `Blocked By` relation. These are separate limited capabilities: the relation operation is bound to the dispatched task and is not arbitrary Notion management.
 
 ## Production E2E harness
 

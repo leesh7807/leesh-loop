@@ -146,6 +146,14 @@ test("normal publisher entry point creates the two-source canonical representati
   assert.ok(client.calls.findIndex((call) => call.path === `/pages/${task.id}` && call.body?.properties?.State) > client.calls.findIndex((call) => call.path === `/pages/${task.id}` && call.body?.properties?.[PLAN_PROPERTY]));
 });
 
+test("publisher can select Backlog without changing canonical publication", async () => {
+  const { plan, config } = await inputs("# Queue me\naccepted plan");
+  const client = new PublicationFake();
+  await publishPlanFile(plan, config, DATABASE_URL, client, "Backlog");
+  assert.equal(client.taskPage().properties.State.select.name, "Backlog");
+  assert.equal(client.planPages()[0].children.map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "# Queue me\naccepted plan");
+});
+
 test("pending recovery reuses the task and matching Plan page and completes a missing snapshot", async () => {
   const { plan, config } = await inputs("# Recover\naccepted");
   const client = new PublicationFake();

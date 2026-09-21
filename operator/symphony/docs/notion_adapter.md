@@ -48,12 +48,21 @@ also proves the page parent is that data source, so accessible pages elsewhere
 are outside scope. Observed duplicate Identifiers fail the read rather than
 being repaired.
 
-Bound Notion sessions advertise only `notion_task_read`, `notion_task_read_workpad`,
+Bound Notion sessions advertise `notion_task_read`, `notion_task_read_workpad`,
 `notion_task_comments`, `notion_task_set_state` (`state` string), and
-`notion_task_append_workpad` (`text` string). The host checks the bound page and
-task data-source identity before each call. Workpad append sends a paragraph
-directly to `/blocks/<task-page-id>/children`; it does not look up or create a
-child page. Workpad read paginates that same canonical child-block collection and
-returns all blocks in provider order. Comments remain reads against the task page's comments endpoint and
-retain their own pagination. No schema, identity, Plan, or generic page
-mutation capability is exposed.
+`notion_task_append_workpad` (`text` string), plus two independent follow-up
+capabilities. `notion_task_publish_plan` accepts Plan text and invokes the
+canonical Leesh Loop Publisher with final State `Backlog`, returning its
+canonical task `identifier` and `page_id`. `notion_task_add_blocked_by`
+accepts only a canonical blocker page identity and additively updates the
+runtime-bound task's `Blocked By` relation while preserving existing values.
+
+The host checks the bound page and task data-source identity before each call.
+Publication does not mutate the current task relation, and relation mutation
+does not publish or edit Plan content. The current task is taken from the
+runtime binding; no target-task argument or arbitrary Notion management API is
+exposed. Worker-side retry and fallback are not added. Workpad append sends a
+paragraph directly to `/blocks/<task-page-id>/children`; it does not look up or
+create a child page. Workpad read paginates that same canonical child-block
+collection and returns all blocks in provider order. Comments remain reads
+against the task page's comments endpoint and retain their own pagination.
