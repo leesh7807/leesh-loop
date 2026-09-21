@@ -131,7 +131,11 @@ defmodule SymphonyElixir.NotionWorkerCapabilityTest do
         {:ok, task_page("page-b", "source", [])}
 
       "GET", "/pages/task-a/properties/blocked-prop", _params, nil, _settings ->
-        {:ok, %{"results" => [%{"type" => "relation", "relation" => %{"id" => "page-c"}}, %{"type" => "relation", "relation" => %{"id" => "page-d"}}], "has_more" => false}}
+        {:ok,
+         %{
+           "results" => [%{"id" => "property-item-c", "type" => "relation", "relation" => %{"id" => "page-c"}}, %{"id" => "property-item-d", "type" => "relation", "relation" => %{"id" => "page-d"}}],
+           "has_more" => false
+         }}
 
       "PATCH", "/pages/task-a", _params, body, _settings ->
         send(test_pid, {:blocked_by_patch, body})

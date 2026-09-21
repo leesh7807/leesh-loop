@@ -131,8 +131,8 @@ defmodule SymphonyElixir.Notion.CurrentTaskBlockedBy do
     end
   end
 
-  defp relation_page_id(%{"id" => id}) when is_binary(id), do: id
   defp relation_page_id(%{"relation" => %{"id" => id}}) when is_binary(id), do: id
+  defp relation_page_id(%{"id" => id}) when is_binary(id), do: id
   defp relation_page_id(_), do: nil
   defp reverse_ok({:ok, values}), do: {:ok, Enum.reverse(values)}
   defp reverse_ok(error), do: error
