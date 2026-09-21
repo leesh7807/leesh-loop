@@ -1,5 +1,5 @@
 import { addFailure } from '../../model/run-record-store.mjs';
-import { E2ELifecycleInterpreter, verifyMechanicalReviewApproval } from './lifecycle-interpreter.mjs';
+import { E2ELifecycleInterpreter } from './lifecycle-interpreter.mjs';
 import { RunTimingRecorder, runWithTimeout, currentTimeIso, waitForNextPoll } from '../run-timing.mjs';
 import { RunCompletionVerifier } from './run-completion-verifier.mjs';
 import { RunDoneVerifier } from './run-done-verifier.mjs';
@@ -45,7 +45,12 @@ export class RunLifecycleObserver {
         const state = task.state;
         this.recordLifecycleObservation(record, state, snapshot.observed_at);
         record.artifacts.delivery_prs = snapshot.github.delivery_prs || [];
-        record.artifacts.delivered_head = record.artifacts.delivery_prs.find(pr => pr.headRefOid)?.headRefOid || record.artifacts.delivered_head;
+        const mechanicalTransition = record.lifecycle.mechanical_human_review_transition;
+        if (state === 'Human Review' && !mechanicalTransition?.performed) {
+          const observedDeliveryHead = record.artifacts.delivery_prs.find(pr => pr.headRefOid)?.headRefOid;
+          record.artifacts.delivered_head = observedDeliveryHead || null;
+          record.artifacts.delivered_head_locked = true;
+        }
         const planBinding = state === 'Done' ? null : this.doneVerifier.observeTrackerInput(record, task, snapshot);
         if (planBinding?.status === 'mismatch') {
           addFailure(record, new Error(planBinding.reason), 'plan_binding');
@@ -68,37 +73,15 @@ export class RunLifecycleObserver {
           return this.runFinalizer.finalizeRun({ record, reason: 'production_done', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: true });
         }
         if (state === 'Cancelled') return this.runFinalizer.finalizeRun({ record, reason: 'production_cancelled', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
-        if (interpretation.handling === 'approve_mechanical_review') {
-          if (record.artifacts.plan_binding?.status !== 'verified_by_production_tracker_input') {
-            addFailure(record, new Error('Human Review was reached before dispatch-bound production tracker input could be verified'), 'plan_binding');
+        if (interpretation.handling === 'mechanical_human_review_transition') {
+          const transition = record.lifecycle.mechanical_human_review_transition || { performed: false, observed_at: null };
+          if (transition.performed) {
             await this.runRecordStore.save(record);
-            return this.runFinalizer.finalizeRun({ record, reason: 'plan_binding_unverified', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
-          }
-          const approval = verifyMechanicalReviewApproval(task, snapshot.chatgpt_shot);
-          if (!approval.allowed) {
-            if (approval.pending) {
-              await this.runRecordStore.save(record);
-              if (this.clock() >= Date.parse(record.deadline_at)) {
-                record.status = 'finalizing';
-                await this.runRecordStore.save(record);
-                return this.runFinalizer.finalizeRun({ record, reason: 'hard_cap_reached', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
-              }
-              await this.waitForPoll(this.config.poll_interval_ms);
-              continue;
-            }
-            addFailure(record, new Error(approval.reason), 'human_review');
-            await this.runRecordStore.save(record);
-            return this.runFinalizer.finalizeRun({ record, reason: 'human_review_cannot_be_approved', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
-          }
-          const delivery = this.githubClient.findDeliveryPullRequest(record.artifacts.delivery_prs, approval.delivered_pr);
-          if (!delivery || delivery.baseRefName !== baseBranch || delivery.headRefOid?.toLowerCase() !== approval.delivered_head.toLowerCase()) {
-            addFailure(record, new Error('Human Review delivery identity does not match the configured run-scoped base or delivered HEAD'), 'human_review');
-            await this.runRecordStore.save(record);
-            return this.runFinalizer.finalizeRun({ record, reason: 'human_review_delivery_mismatch', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
+            return this.runFinalizer.finalizeRun({ record, reason: 'reentered_human_review', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
           }
           const merging = await this.notionClient.updateTaskState(this.config.notion_database_url, task.id, 'Merging');
-          if (merging.state !== 'Merging') throw new Error(`Human Review mechanical approval readback was ${merging.state}`);
-          record.artifacts.approved_delivery = { pr: approval.delivered_pr, head: approval.delivered_head, cycle: approval.cycle };
+          if (merging.state !== 'Merging') throw new Error(`Human Review mechanical transition readback was ${merging.state}`);
+          record.lifecycle.mechanical_human_review_transition = { performed: true, observed_at: currentTimeIso() };
           this.recordLifecycleObservation(record, 'Merging', currentTimeIso());
           await this.runRecordStore.save(record);
           continue;
