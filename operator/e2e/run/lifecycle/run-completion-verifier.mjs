@@ -12,9 +12,8 @@ export class RunCompletionVerifier {
       ...(record.evidence?.snapshots || []).flatMap(snapshot => snapshot.github?.delivery_prs || []),
       ...(record.artifacts?.delivery_prs || [])
     ];
-    const observedKeys = new Set(observedPrs.filter(pr => pr.baseRefName === baseBranch).map(pr => `${pr.url || ''}#${pr.number || ''}`));
     const runOwnedBranches = new Set(this.githubClient.findRunOwnedDeliveryBranches?.(prs, record) || []);
-    const runDeliveries = prs.filter(pr => pr.baseRefName === baseBranch && (runOwnedBranches.has(pr.headRefName) || observedKeys.has(`${pr.url || ''}#${pr.number || ''}`)));
+    const runDeliveries = prs.filter(pr => pr.baseRefName === baseBranch && runOwnedBranches.has(pr.headRefName));
     const mergedDeliveries = runDeliveries.filter(pr => pr.mergedAt);
     if (mergedDeliveries.length === 0) return { ok: false, reason: 'no run-owned delivery PR is merged into the configured base' };
     if (mergedDeliveries.length > 1) return { ok: false, reason: 'multiple run-owned delivery PRs are merged into the configured base' };

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { validateWorkloadCatalog } from '../model/workload-catalog.mjs';
 import { derivePlanIdentifier } from '../model/plan-identity.mjs';
 import { E2ERunner } from '../run/e2e-runner.mjs';
+import { RunCompletionVerifier } from '../run/lifecycle/run-completion-verifier.mjs';
 import { createRunRecord, RunRecordStore } from '../model/run-record-store.mjs';
 import { createRunPaths } from '../model/e2e-project-config.mjs';
 
@@ -60,6 +61,7 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
     async pullRequestsForBase(baseBranch) {
       return [{ number: 4, url: deliveryUrl, baseRefName: baseBranch, headRefName: 'feature', headRefOid: deliveryHead, mergedAt: observedState === 'Done' ? new Date(clock()).toISOString() : null, mergeCommit: observedState === 'Done' ? { oid: mergeCommit } : null }];
     },
+    findRunOwnedDeliveryBranches() { return ['feature']; },
     findDeliveryPullRequest(prs, deliveredPr) { return prs.find(pr => pr.url === deliveredPr || String(pr.number) === String(deliveredPr).split('/').at(-1)); }
   };
   const evidence = {
@@ -181,6 +183,24 @@ test('Done rejects an unrelated merge into the run-scoped base', async () => {
   const result = await runner.completionVerifier.verifyDoneDelivery(record, 'e2e-base');
   assert.equal(result.ok, false);
   assert.match(result.reason, /unrelated PR/);
+});
+
+test('Done rejects an observed but non-owned merged PR when no run delivery merged', async () => {
+  const baseBranch = 'e2e-base';
+  const mergeCommit = 'c'.repeat(40);
+  const unrelated = { number: 5, url: 'https://github.com/owner/repo/pull/5', baseRefName: baseBranch, headRefName: 'preexisting', headRefOid: 'b'.repeat(40), mergedAt: '2026-09-21T00:02:00.000Z', mergeCommit: { oid: mergeCommit } };
+  const record = {
+    started_at: '2026-09-21T00:00:00.000Z',
+    binding: { base_branch: baseBranch },
+    evidence: { snapshots: [{ github: { delivery_prs: [unrelated] } }] }
+  };
+  const verifier = new RunCompletionVerifier({
+    githubClient: { async pullRequestsForBase() { return [unrelated]; }, findRunOwnedDeliveryBranches() { return []; } },
+    gitClient: { async readRemoteBranchCommit() { return mergeCommit; }, async verifyCommitOnRemoteBranch() { return true; } }
+  });
+  const result = await verifier.verifyDoneDelivery(record, baseBranch);
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /no run-owned delivery PR is merged/);
 });
 
 test('Done rejects a configured base advanced after the approved merge', async () => {
