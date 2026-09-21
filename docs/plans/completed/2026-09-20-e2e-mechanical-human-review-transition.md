@@ -86,3 +86,11 @@ Focused tests and repository tests support the boundary but do not substitute fo
 - Verdict: `PASS`; findings: `None.`
 - Applied commit: none.
 - Verification: the post-fix E2E suite had passed (35/35) and `git diff --check` passed.
+
+### Structural review
+
+- Reviewed HEAD: `a37b3914dc61974742e4966ac4813993670b0fc4` on [PR #45](https://github.com/leesh7807/leesh-loop/pull/45); Job `148a6a24-9449-42a9-ba39-9934619608f3`.
+- Verdict: `FINDINGS` (advisory only).
+- Findings: lifecycle observations combine external snapshots with harness state-change readback; delivered-head capture and run-owned delivery selection are separate authority paths without persisted PR/branch provenance. No automatic fixes were applied because the repository workflow makes structural findings advisory and explicitly forbids automatic edits after structural review.
+- Applied commit: none for structural findings.
+- Verification: code review was already `PASS`; E2E tests passed (35/35) and `git diff --check` passed before the structural submission.
