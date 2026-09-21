@@ -107,8 +107,9 @@ test('E2ERunner reaches terminal Done through injected production dependencies',
 test('first Human Review transition ignores workpad and independent review semantics', async () => {
   let current = 0;
   const harness = fixture({
-    states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done'],
+    states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Cancelled'],
     clock: () => current++,
+    includeTrackerInput: false,
     reviewWorkpad: 'Human Review\ncycle: unknown\nreason: blocker\ndelivered_pr: none\ndelivered_head: not-a-commit\n',
     reviewEvidence: { job_id: null, terminal_state: 'failed', result: '# Verdict\nFINDINGS' }
   });

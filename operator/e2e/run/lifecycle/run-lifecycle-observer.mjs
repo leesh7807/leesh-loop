@@ -69,11 +69,6 @@ export class RunLifecycleObserver {
         }
         if (state === 'Cancelled') return this.runFinalizer.finalizeRun({ record, reason: 'production_cancelled', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
         if (interpretation.handling === 'mechanical_human_review_transition') {
-          if (record.artifacts.plan_binding?.status !== 'verified_by_production_tracker_input') {
-            addFailure(record, new Error('Human Review was reached before dispatch-bound production tracker input could be verified'), 'plan_binding');
-            await this.runRecordStore.save(record);
-            return this.runFinalizer.finalizeRun({ record, reason: 'plan_binding_unverified', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
-          }
           const transition = record.lifecycle.mechanical_human_review_transition || { performed: false, observed_at: null };
           if (transition.performed) {
             await this.runRecordStore.save(record);
