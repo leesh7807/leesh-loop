@@ -4,8 +4,6 @@ Create and maintain a plan that keeps the work aligned with the objective and ma
 
 - Name each plan document using the format `date-summary`.
 
-- Treat `Objective`, `Intent`, and `Verification Requirements` as user-owned plan inputs. Do not modify them unless the user explicitly changes or asks to revise them. All subsequent planning must remain consistent with them.
-
 - Use the confirmed objective, intent, verification requirements, repository conventions, and available evidence to settle decisions that could change the outcome, externally observable behavior, contracts, responsibilities, boundaries, or verification. Include implementation details only when they are necessary to preserve one of those decisions or to make the intended work unambiguous.
 
 - Do not invent reasons, tradeoffs, or justifications for the user.
@@ -49,8 +47,6 @@ KISS, YANGI, DRY is core principle.
 
 ## Objective
 
-User-owned.
-
 Record the confirmed outcome the work must achieve and what the plan must stay aligned with.
 
 Keep it focused on the intended result. Do not include implementation decisions, recovery mechanisms, or verification procedures here.
@@ -59,7 +55,6 @@ Do not modify this section unless the user explicitly changes or asks to revise 
 
 ## Intent
 
-User-owned.
 
 Record the confirmed problem, motivation, or desired direction that explains why the objective exists and how the user intends the objective to be interpreted.
 
@@ -70,8 +65,6 @@ Do not repeat implementation decisions, mechanisms, detailed contracts, or verif
 Do not modify this section unless the user explicitly changes or asks to revise it.
 
 ## Verification Requirements
-
-User-owned.
 
 Record the confirmed facts, guarantees, or externally observable outcomes that must be demonstrated for the objective to count as achieved.
 
@@ -91,7 +84,7 @@ Define terms that are specific to the domain or repository, or that could reason
 
 Record only the decisions, assumptions, and defaults that materially determine the intended behavior, contracts, responsibilities, boundaries, or verification.
 
-Include a naming decision that requires file names, module names, type names, and major function names to make their current responsibility and role identifiable from the name alone. Do not name around abstractions that do not yet exist.
+Under Decisions only, define protected scope and naming: identify existing behavior, responsibilities, or system areas that must remain unchanged, with any crossing change deferred to a separate plan; and require file, module, type, and major function names to expose their current responsibility and role without naming around abstractions that do not yet exist. Do not carry these decisions into Objective, Intent, or Verification Requirements.
 
 Prefer stating what must remain true. Include implementation details only when the mechanism itself is a necessary part of the decision; otherwise leave it to implementation.
 
