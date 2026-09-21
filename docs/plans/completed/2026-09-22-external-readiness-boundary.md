@@ -55,3 +55,11 @@ Production E2E가 Symphony worker sandbox 안에서 실행될 때 `chatgpt-shot`
 - Verdict: `PASS`; findings: `None.`
 - Applied commit: none; no finding was accepted.
 - Verification: Operator tests passed (23/23), E2E tests passed (35/35), `sh -n operator/app/operator-bootstrap`, `git diff --check`, and live Production E2E run `8c064309-e691-4e04-b2d3-31383ca92fca` reached `dispatch_capable: true` and terminal `Done` with finalization/cleanup complete.
+
+### Structural review
+
+- Reviewed HEAD: `e835a82bd69b3f817aaebfea1e4057ceef8ed185` on [PR #47](https://github.com/leesh7807/leesh-loop/pull/47); Job `57aab61d-d36b-42a8-a457-2dba9c4d3d66`.
+- Verdict: `FINDINGS` (advisory only).
+- Finding disposition: the reviewer identified that the shell bootstrap's external readiness guard is split across three conditional regions. No code change was applied because `WORKFLOW.md` defines structural findings as advisory and forbids automatic edits; the finding does not establish an Accepted Plan or existing operating-contract violation.
+- Applied commit: none for the structural finding.
+- Verification: the independent review was `PASS`; Operator/E2E tests and live Production E2E verification remained passed before the structural review.
