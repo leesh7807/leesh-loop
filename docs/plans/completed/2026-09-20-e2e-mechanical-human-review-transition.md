@@ -47,3 +47,42 @@ Focused tests and repository tests support the boundary but do not substitute fo
 - Findings: no review Result was returned; no further finding acceptance/rejection was possible.
 - Applied commit: none for the blocker.
 - Verification: the post-fix focused suite and `git diff --check` had passed before submission. The review loop stopped without Service management or automatic retry, as required by the authentication-failure contract.
+
+### Round 3
+
+- Reviewed HEAD: `4552bd8f7bfd518c8f47a597e122386940dccb85` on [PR #45](https://github.com/leesh7807/leesh-loop/pull/45); Job `75c0eafc-2efa-43ff-b491-40952d29c3bf`.
+- Verdict: `FINDINGS`.
+- Accepted: an observed-but-non-owned merged PR could be promoted to a run-owned delivery and satisfy `Done` when no run delivery merged.
+- Applied commit: `a11de94f1fd8e16dd9c73371550911634147f5c3`.
+- Verification: E2E tests passed (32/32); `git diff --check` passed.
+
+### Round 4
+
+- Reviewed HEAD: `a11de94f1fd8e16dd9c73371550911634147f5c3`; Job `2001ad5d-8452-41c1-b76b-e7255ba97277`.
+- Verdict: `FINDINGS`.
+- Accepted: using the first observed PR HEAD rejected the normal same-PR review-fix path after H1→H2.
+- Applied commit: `a97cbfa375c9c19c034cc074d9cffaef44483268`.
+- Verification: E2E tests passed (33/33); `git diff --check` passed.
+
+### Round 5
+
+- Reviewed HEAD: `a97cbfa375c9c19c034cc074d9cffaef44483268`; Job `f462742b-0d12-4efc-bb86-795a395f2303`.
+- Verdict: `FINDINGS`.
+- Accepted: using the latest observed HEAD allowed a post-`Human Review` delivery-head change to become a false success.
+- Applied commit: `26a6cd7692a8da2f20e7127b728a11f546619f52`.
+- Verification: E2E tests passed (34/34); `git diff --check` passed.
+
+### Round 6
+
+- Reviewed HEAD: `26a6cd7692a8da2f20e7127b728a11f546619f52`; Job `3ff5fa9b-9bb3-4bdf-94fb-63d012a491f5`.
+- Verdict: `FINDINGS`.
+- Accepted: missing GitHub evidence at the first `Human Review` could be replaced by a later HEAD and hide a delivery change.
+- Applied commit: `b96864a776d5bc97b71e2eb9bfb077822d00a1bd`.
+- Verification: E2E tests passed (35/35); `git diff --check` passed.
+
+### Round 7
+
+- Reviewed HEAD: `b96864a776d5bc97b71e2eb9bfb077822d00a1bd`; Job `91633168-3bd3-483c-b159-194327a130ed`.
+- Verdict: `PASS`; findings: `None.`
+- Applied commit: none.
+- Verification: the post-fix E2E suite had passed (35/35) and `git diff --check` passed.
