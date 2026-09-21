@@ -28,3 +28,22 @@ E2E의 `Human Review` 처리를 production semantics의 판정자가 아니라 �
 ## Verification limits
 
 Focused tests and repository tests support the boundary but do not substitute for live verification. Live success/blocker execution requires the configured external Operator, Notion, Symphony, production worker, GitHub, credentials, and a representative workload; unavailable access or a two-attempt timing miss must be recorded as an explicit verification gap.
+
+## chatgpt-shot review log
+
+### Round 1
+
+- Reviewed HEAD: `a96b312bee1497ab50689036df8d08cb821e0ba6` on [PR #45](https://github.com/leesh7807/leesh-loop/pull/45).
+- Verdict: `FINDINGS`.
+- Rejected the supplied `symphony-state.json` authority finding: the designated HEAD contains no such file, policy, or changed State contract, so the finding is not reproducible against this PR.
+- Accepted the independent finding that the first mechanical `Human Review → Merging` transition was blocked when production tracker-input evidence was absent, despite the plan limiting that transition to authoritative State plus the run-local transition flag.
+- Applied commit: `bd2926c0d8a4af4002c64e017dbf34b6b242b621`.
+- Verification: `npm test --prefix operator/e2e` passed (31/31); `git diff --check` passed. Notion admission passed using the copied local `.env` token. The representative live run authenticated to Notion and completed cleanup/readback, but stopped before dispatch because the new workspace lacked Symphony Elixir dependencies.
+
+### Round 2
+
+- Reviewed HEAD: `bd2926c0d8a4af4002c64e017dbf34b6b242b621` on [PR #45](https://github.com/leesh7807/leesh-loop/pull/45).
+- Verdict: `BLOCKED` — `chatgpt-shot submit` failed before returning a Job ID with `CHATGPT_AUTH_REQUIRED: ChatGPT authentication is required. Run \`chatgpt-shot login\`.`
+- Findings: no review Result was returned; no further finding acceptance/rejection was possible.
+- Applied commit: none for the blocker.
+- Verification: the post-fix focused suite and `git diff --check` had passed before submission. The review loop stopped without Service management or automatic retry, as required by the authentication-failure contract.
