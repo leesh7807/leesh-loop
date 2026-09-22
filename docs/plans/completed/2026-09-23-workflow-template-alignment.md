@@ -48,7 +48,10 @@ Template은 2026-09-14 이후 갱신되지 않았고, 현재 workflow에는 conf
 
 ## chatgpt-shot review log
 
-- **Round 1 — reviewed HEAD:** `e524757ffa748ebfca0712db900a90503f030b83` — `FINDINGS`.
+- **Round 1 — reviewed HEAD:** `e524757ffa748ebfca0712db900a90503f030b83` — Job `d6d5174b-9564-4098-8c35-34c15dd59563` — `FINDINGS`.
 - **Accepted:** `docs/WORKFLOW_TEMPLATE.md:35` generalized Review Input creation to every active state, conflicting with the concrete lifecycle where `Merging` consumes no Review Input. Scoped creation to the `In Progress` and `Rework` paths, matching the reachable Human Review returns and current `WORKFLOW.md` contract.
 - **Fix commit:** `194afebf0c9b1cf1796a899856172c545f512814`.
 - **Verification:** confirmed PR and local HEAD matched the reviewed SHA; compared the template return path against `WORKFLOW.md:148`; `git diff --check` passed after the fix.
+- **Round 2 — reviewed HEAD:** `372bdf8c7f0f4f5f9120027ef6da87cb0ccc8493` — Job `0d83d991-c419-4644-9e87-b69bff815976` — `PASS`, `# Findings: None.`
+- **Disposition:** no remaining finding to accept or reject. The Round 1 correction is present at the reviewed HEAD.
+- **Verification:** PR and local HEAD matched at review; final template read, stale/config/tool search, and `git diff origin/main..HEAD --check` passed.
