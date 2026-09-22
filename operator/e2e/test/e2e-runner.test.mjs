@@ -146,6 +146,34 @@ test('E2ERunner publishes a provided H1-less Plan unchanged through the producti
   assert.equal(persisted.run_input.workflow.resolved_workflow_sha256, sha256('default workflow'));
 });
 
+test('E2ERunner records a provided workflow sandbox policy instead of default policy evidence', async () => {
+  let current = 0;
+  const workflow = '---\ncodex:\n  turn_sandbox_policy:\n    type: workspaceWrite\n    writableRoots: [/workspace]\n---\nprovided workflow\n';
+  const harness = fixture({
+    states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done'],
+    clock: () => current++,
+    runInput: {
+      workload: {
+        source: 'provided',
+        source_path: '/input/provided.md',
+        accepted_plan: 'Provided task.\n',
+        accepted_plan_sha256: sha256('Provided task.\n'),
+        plan_identifier: derivePlanIdentifier('Provided task.\n'),
+        hard_cap_ms: 1_800_000,
+        hard_cap_provenance: 'provided_default'
+      },
+      workflow: { source: 'provided', source_path: '/input/workflow.md', resolved_workflow: workflow, resolved_workflow_sha256: sha256(workflow) }
+    }
+  });
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-provided-workflow-'));
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+  const record = await new E2ERunner({ ...harness, clock: () => current++, waitForPoll: async () => {} }).runProductionE2E();
+  assert.equal(record.runtime.resolved_environment.codex_runtime.policy_source, 'provided workflow codex.turn_sandbox_policy');
+  assert.equal(record.runtime.resolved_environment.codex_runtime.system_temporary_directory, 'determined by the provided workflow sandbox policy');
+  assert.equal(record.runtime.resolved_environment.codex_runtime.e2e_specific_sandbox_policy, false);
+});
+
 test('provided duplicate publication remains a production failure without Plan mutation or fallback', async () => {
   const providedPlan = 'Duplicate publication input without H1.\n';
   const harness = fixture({
