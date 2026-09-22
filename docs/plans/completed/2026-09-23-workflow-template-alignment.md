@@ -48,4 +48,7 @@ Template은 2026-09-14 이후 갱신되지 않았고, 현재 workflow에는 conf
 
 ## chatgpt-shot review log
 
-- 아직 리뷰 라운드가 없다.
+- **Round 1 — reviewed HEAD:** `e524757ffa748ebfca0712db900a90503f030b83` — `FINDINGS`.
+- **Accepted:** `docs/WORKFLOW_TEMPLATE.md:35` generalized Review Input creation to every active state, conflicting with the concrete lifecycle where `Merging` consumes no Review Input. Scoped creation to the `In Progress` and `Rework` paths, matching the reachable Human Review returns and current `WORKFLOW.md` contract.
+- **Fix commit:** `194afebf0c9b1cf1796a899856172c545f512814`.
+- **Verification:** confirmed PR and local HEAD matched the reviewed SHA; compared the template return path against `WORKFLOW.md:148`; `git diff --check` passed after the fix.
