@@ -21,6 +21,11 @@ export function resolvePublishDatabase(databaseUrl:string|undefined):{databaseId
  return {databaseId:notionId(databaseUrl),databaseUrl};
 }
 export const deriveIdentifier=(plan:string)=>`PLAN-${createHash("sha256").update(plan,"utf8").digest("hex").slice(0,12).toUpperCase()}`;
+export function selectPublicationState(state?:string):string {
+ if(state===undefined)return PUBLISHER_READY_STATE;
+ if(typeof state!=="string"||!state.trim())throw new PublicationError("publication State must be a non-empty string");
+ return state.trim();
+}
 export function chunkText(text:string,limit=NOTION_RICH_TEXT_SAFE_LIMIT):string[] { if(limit<2) throw new PublicationError("rich-text chunk limit must be at least 2 UTF-16 code units"); const chunks:string[]=[];let chunk="";for(const point of text){if(chunk&&chunk.length+point.length>limit){chunks.push(chunk);chunk="";}chunk+=point;}if(chunk||!chunks.length)chunks.push(chunk);return chunks; }
 export function normalizePlanText(plan:string):string { return plan.replace(/\r\n?|\n/g,"\n"); }
 export function extractPlanTitle(plan:string,fallbackTitle?:string):string { const heading=plan.split(/\r?\n/).find((line)=>line.startsWith("# "))?.slice(2).trim(); if(heading)return heading; if(fallbackTitle?.trim())return fallbackTitle.trim(); throw new PublicationError("Plan title requires a Markdown H1 or caller-supplied fallback title"); }

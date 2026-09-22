@@ -1,8 +1,8 @@
-import { buildTaskProperties, deriveIdentifier, extractPlanTitle, type Policy, PublicationError, resolvePublishDatabase, validatePlanTitle } from "./core.js";
+import { buildTaskProperties, deriveIdentifier, extractPlanTitle, type Policy, PublicationError, resolvePublishDatabase, selectPublicationState, validatePlanTitle } from "./core.js";
 import { type DatabaseBinding, type NotionClient } from "./notion.js";
 
 export type PublisherConfig = { policy: Policy };
-export type PublishInput = { plan: string; databaseUrl: string; fallbackTitle?: string; client: NotionClient; config: PublisherConfig };
+export type PublishInput = { plan: string; databaseUrl: string; fallbackTitle?: string; client: NotionClient; config: PublisherConfig; finalState?: string };
 export type PublishResult = { identifier: string; page_id: string; url?: string };
 const publicationLocks = new Map<string, Promise<void>>();
 
@@ -16,11 +16,12 @@ async function withPublicationLock<T>(key: string, operation: () => Promise<T>):
   finally { release(); if (publicationLocks.get(key) === current) publicationLocks.delete(key); }
 }
 
-export async function publish({ plan, databaseUrl, fallbackTitle, client, config }: PublishInput): Promise<PublishResult> {
+export async function publish({ plan, databaseUrl, fallbackTitle, client, config, finalState }: PublishInput): Promise<PublishResult> {
   const database = resolvePublishDatabase(databaseUrl);
   if (!plan.trim()) throw new PublicationError("Plan content must be non-empty");
   const title = extractPlanTitle(plan, fallbackTitle);
   validatePlanTitle(title);
+  const selectedState = selectPublicationState(finalState);
   const identifier = deriveIdentifier(plan);
   return withPublicationLock(`${database.databaseId}:${identifier}`, async () => {
     const binding: DatabaseBinding = await client.ensureDatabase(database.databaseId, config.policy);
@@ -28,7 +29,7 @@ export async function publish({ plan, databaseUrl, fallbackTitle, client, config
 
     if (existing) {
       if (existing.complete) throw new PublicationError(`duplicate publication: ${identifier} already exists`);
-      try { await client.repairIncomplete(existing.pageId, plan, binding, identifier, title, config.policy.identifier); await client.finalizePublication(existing.pageId, config.policy); }
+      try { await client.repairIncomplete(existing.pageId, plan, binding, identifier, title, config.policy.identifier); await client.finalizePublication(existing.pageId, config.policy, selectedState); }
       catch (error) { if (error instanceof PublicationError) throw error; throw new PublicationError(`provider/API failure while repairing incomplete Plan publication; retry is safe: ${error instanceof Error ? error.message : "unknown error"}`); }
       return { identifier, page_id: existing.pageId, url: existing.url };
     }
@@ -36,7 +37,7 @@ export async function publish({ plan, databaseUrl, fallbackTitle, client, config
     const properties = buildTaskProperties(config.policy, identifier, title);
     const page = await client.createTask(binding.taskDataSourceId, properties);
     if (typeof page?.id !== "string") throw new PublicationError("provider/API failure: creating the task returned no page id");
-    try { await client.ensureCanonicalRepresentation(page.id, plan, binding, identifier, title, config.policy.identifier); await client.finalizePublication(page.id, config.policy); }
+    try { await client.ensureCanonicalRepresentation(page.id, plan, binding, identifier, title, config.policy.identifier); await client.finalizePublication(page.id, config.policy, selectedState); }
     catch (error) { if (error instanceof PublicationError) throw error; throw new PublicationError(`provider/API failure while publishing Plan; pending task remains retryable: ${error instanceof Error ? error.message : "unknown error"}`); }
     return { identifier, page_id: page.id, url: page.url };
   });

@@ -1,6 +1,6 @@
 defmodule SymphonyElixir.Notion.AgentTool do
   @moduledoc "Task-local, capability-limited Notion worker tools."
-  alias SymphonyElixir.Notion.Client
+  alias SymphonyElixir.Notion.{Client, CurrentTaskBlockedBy, PlanPublication}
 
   @max_text_chunk_length 2_000
   @max_rich_text_items 100
@@ -14,7 +14,16 @@ defmodule SymphonyElixir.Notion.AgentTool do
       spec("notion_task_read_workpad", "Read the complete canonical Workpad of the currently bound Notion task in provider order.", %{}),
       spec("notion_task_comments", "Read all comments on the currently bound Notion task.", %{}),
       spec("notion_task_set_state", "Set State on the currently bound Notion task.", %{"state" => %{"type" => "string"}}, ["state"]),
-      spec("notion_task_append_workpad", "Append text to the canonical Workpad of the currently bound task.", %{"text" => %{"type" => "string"}}, ["text"])
+      spec("notion_task_append_workpad", "Append text to the canonical Workpad of the currently bound task.", %{"text" => %{"type" => "string"}}, ["text"]),
+      spec("notion_task_publish_plan", "Publish the supplied Plan through the canonical Publisher as a new Backlog task. This does not mutate the current task.", %{"plan" => %{"type" => "string"}}, [
+        "plan"
+      ]),
+      spec(
+        "notion_task_add_blocked_by",
+        "Add a canonical task page to the Blocked By relation of the currently bound task. Only the runtime-bound task can be mutated; this is not arbitrary Notion management.",
+        %{"blocker_page_id" => %{"type" => "string"}},
+        ["blocker_page_id"]
+      )
     ]
   end
 
@@ -30,23 +39,43 @@ defmodule SymphonyElixir.Notion.AgentTool do
     issue = if binding[:notion_issue_id], do: %{id: binding.notion_issue_id}, else: Keyword.get(opts, :issue)
     client = Keyword.get(opts, :notion_request, &Client.request/5)
 
-    case {tool, issue_id(issue)} do
-      {_, nil} ->
+    case issue_id(issue) do
+      nil ->
         failure(:notion_unbound_task)
 
-      {"notion_task_read", id} ->
+      id ->
+        dispatch_tool(tool, id, arguments, binding, settings, client, opts)
+    end
+  end
+
+  defp dispatch_tool(tool, id, arguments, binding, settings, client, opts) do
+    case tool do
+      "notion_task_publish_plan" ->
+        publish_plan_tool(id, arguments, binding, settings, client, opts)
+
+      "notion_task_add_blocked_by" ->
+        add_blocked_by_tool(id, arguments, binding, settings, client)
+
+      _ ->
+        dispatch_existing_tool(tool, id, arguments, binding, settings, client)
+    end
+  end
+
+  defp dispatch_existing_tool(tool, id, arguments, binding, settings, client) do
+    case tool do
+      "notion_task_read" ->
         read_task(id, binding, settings, client)
 
-      {"notion_task_read_workpad", id} ->
+      "notion_task_read_workpad" ->
         read_workpad(id, binding, settings, client)
 
-      {"notion_task_comments", id} ->
+      "notion_task_comments" ->
         scoped(id, binding, settings, client, fn -> comments(id, settings, client, nil, []) end) |> respond()
 
-      {"notion_task_set_state", id} ->
+      "notion_task_set_state" ->
         set_state(id, arguments, binding, settings, client)
 
-      {"notion_task_append_workpad", id} ->
+      "notion_task_append_workpad" ->
         append_workpad_tool(id, arguments, binding, settings, client)
 
       _ ->
@@ -76,7 +105,7 @@ defmodule SymphonyElixir.Notion.AgentTool do
                %{},
                %{
                  "properties" => %{
-                  "State" => %{"select" => %{"name" => state}}
+                   "State" => %{"select" => %{"name" => state}}
                  }
                },
                settings
@@ -275,6 +304,31 @@ defmodule SymphonyElixir.Notion.AgentTool do
     end
   end
 
+  defp publish_plan_tool(id, arguments, binding, settings, client, opts) do
+    with {:ok, plan} <- string_arg(arguments, "plan"),
+         {:ok, result} <-
+           scoped(id, binding, settings, client, fn ->
+             PlanPublication.publish(plan, settings, opts)
+           end) do
+      respond({:ok, result})
+    else
+      error -> failure(error)
+    end
+  end
+
+  defp add_blocked_by_tool(id, arguments, binding, settings, client) do
+    case exact_string_arg(arguments, "blocker_page_id") do
+      {:ok, blocker_page_id} ->
+        case CurrentTaskBlockedBy.add(id, blocker_page_id, binding, settings, client) do
+          {:ok, _result} = success -> respond(success)
+          {:error, _reason} = error -> failure(error)
+        end
+
+      {:error, _reason} = error ->
+        failure(error)
+    end
+  end
+
   defp comments(id, settings, client, cursor, acc) do
     case client.("GET", "/comments", comment_query(id, cursor), nil, settings) do
       {:ok, %{"results" => results, "has_more" => more} = payload}
@@ -342,6 +396,12 @@ defmodule SymphonyElixir.Notion.AgentTool do
   end
 
   defp string_arg(_, _), do: {:error, :invalid_notion_tool_arguments}
+
+  defp exact_string_arg(%{} = args, key) do
+    if Enum.sort(Map.keys(args)) == [key], do: string_arg(args, key), else: {:error, :invalid_notion_tool_arguments}
+  end
+
+  defp exact_string_arg(_, _), do: {:error, :invalid_notion_tool_arguments}
   defp comment_query(id, nil), do: %{"block_id" => id, "page_size" => 100}
   defp comment_query(id, cursor), do: Map.put(comment_query(id, nil), "start_cursor", cursor)
   defp block_query(nil), do: %{"page_size" => 100}

@@ -22,6 +22,12 @@ Linear serves `linear_graphql`, GitHub Issues serves `github_api`, Jira Cloud se
 tools with configured host-side auth and removes declared tracker-token environment variables from
 the Codex child, so the agent does not need a second tracker login.
 
+The concrete Leesh Loop Notion adapter additionally exposes two separate worker capabilities:
+`notion_task_publish_plan` invokes the canonical Publisher with final State `Backlog`, while
+`notion_task_add_blocked_by` additively updates only the runtime-bound task's `Blocked By`
+relation. Neither capability exposes arbitrary Notion page management, and failures are returned
+to the worker without worker-side retry or fallback.
+
 If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or `Duplicate`),
 Symphony stops the active agent for that issue and cleans up matching workspaces.
 

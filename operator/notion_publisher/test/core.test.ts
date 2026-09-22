@@ -4,7 +4,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config.js";
-import { buildPlanBlocks, buildPlanProperties, buildTaskProperties, chunkText, DEFAULT_POLICY, extractPlanTitle, notionId, normalizePlanText, PLAN_PROPERTY, PublicationError, PUBLISHER_PENDING_STATE, resolvePublishDatabase, validatePlanTitle } from "../src/core.js";
+import { buildPlanBlocks, buildPlanProperties, buildTaskProperties, chunkText, DEFAULT_POLICY, extractPlanTitle, notionId, normalizePlanText, PLAN_PROPERTY, PublicationError, PUBLISHER_PENDING_STATE, PUBLISHER_READY_STATE, resolvePublishDatabase, selectPublicationState, validatePlanTitle } from "../src/core.js";
 
 test("six-property task metadata and chunked Plan content are canonical", () => {
   const properties = buildTaskProperties(DEFAULT_POLICY, "PLAN-X", "Title");
@@ -52,4 +52,10 @@ test("title, destination, and rich text boundaries are validated", () => {
   assert.equal(notionId("https://www.notion.so/Avocado-d093f1d200464ce78b36e58a3f0d8043?x=1"), "d093f1d2-0046-4ce7-8b36-e58a3f0d8043");
   assert.throws(() => resolvePublishDatabase(undefined), /missing publication database URL/);
   const plan = "x".repeat(1899) + "😀tail"; const chunks = chunkText(plan); assert.equal(chunks.join(""), plan); assert.ok(chunks.every((chunk) => chunk.length <= 1900));
+});
+
+test("publication State selection preserves Ready as the default", () => {
+  assert.equal(selectPublicationState(), PUBLISHER_READY_STATE);
+  assert.equal(selectPublicationState(" Backlog "), "Backlog");
+  assert.throws(() => selectPublicationState(" "), /non-empty/);
 });

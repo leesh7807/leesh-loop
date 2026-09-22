@@ -79,6 +79,20 @@ defmodule SymphonyElixir.Notion.Client do
   @spec api_version() :: String.t()
   def api_version, do: @api
 
+  @spec canonical_task_page?(map(), String.t()) :: boolean()
+  def canonical_task_page?(%{"id" => id, "parent" => %{"type" => "data_source_id", "data_source_id" => source}, "properties" => properties}, source)
+      when is_binary(id) and is_map(properties) do
+    non_empty_page_text_property?(properties["Identifier"], "rich_text") and
+      non_empty_page_text_property?(properties["Title"], "title") and
+      page_property?(properties["State"], "select") and
+      page_property?(properties["Priority"], "number") and
+      page_property?(properties["Labels"], "multi_select") and
+      relation_page_property?(properties["Blocked By"]) and
+      single_relation_page_property?(properties["Plan"])
+  end
+
+  def canonical_task_page?(_, _), do: false
+
   defp fetch_issues_by_states([], _, _), do: {:ok, []}
 
   defp fetch_issues_by_states(states, tracker, fun) do
@@ -186,6 +200,35 @@ defmodule SymphonyElixir.Notion.Client do
   end
 
   defp task_schema?(_), do: false
+
+  defp page_property?(%{"type" => type}, type), do: true
+  defp page_property?(_, _), do: false
+
+  defp non_empty_page_text_property?(%{"type" => "rich_text", "rich_text" => values}, "rich_text") when is_list(values) do
+    non_empty_page_text_values?(values)
+  end
+
+  defp non_empty_page_text_property?(%{"type" => "title", "title" => values}, "title") when is_list(values) do
+    non_empty_page_text_values?(values)
+  end
+
+  defp non_empty_page_text_property?(_, _), do: false
+
+  defp non_empty_page_text_values?(values) do
+    Enum.any?(values, fn value ->
+      text = value["plain_text"] || get_in(value, ["text", "content"])
+      is_binary(text) and String.trim(text) != ""
+    end)
+  end
+
+  defp relation_page_property?(%{"type" => "relation", "relation" => values}) when is_list(values) do
+    Enum.all?(values, &(is_map(&1) and is_binary(&1["id"])))
+  end
+
+  defp relation_page_property?(_), do: false
+
+  defp single_relation_page_property?(%{"type" => "relation", "relation" => [%{"id" => id}]}) when is_binary(id), do: true
+  defp single_relation_page_property?(_), do: false
 
   defp plan_schema?(%{properties: properties}) when is_map(properties) do
     get_in(properties, ["Identifier", "type"]) == "rich_text" and get_in(properties, ["Title", "type"]) == "title" and

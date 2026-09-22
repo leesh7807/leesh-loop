@@ -6,10 +6,10 @@ import { PublicationError } from "./core.js";
 import { NotionClient } from "./notion.js";
 import { publish, type PublishResult } from "./publisher.js";
 
-export async function publishPlanFile(planPath: string, configPath: string, databaseUrl: string, client: NotionClient): Promise<PublishResult> {
+export async function publishPlanFile(planPath: string, configPath: string, databaseUrl: string, client: NotionClient, finalState?: string): Promise<PublishResult> {
   const plan = await readFile(planPath, "utf8");
   const { policy } = await loadConfig(configPath);
-  return publish({ plan, databaseUrl, fallbackTitle: basename(planPath), client, config: { policy } });
+  return publish({ plan, databaseUrl, fallbackTitle: basename(planPath), client, config: { policy }, finalState });
 }
 
 async function localEnvironment(): Promise<Record<string, string>> {
@@ -29,12 +29,12 @@ function environmentValue(name: string, local: Record<string, string>): string |
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const get = (name: string) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined; };
-  const planArg = get("--plan"), configArg = get("--config"), databaseUrl = get("--database-url");
+  const planArg = get("--plan"), configArg = get("--config"), databaseUrl = get("--database-url"), finalState = get("--state");
   if (!planArg || !configArg || !databaseUrl) throw new PublicationError("usage: notion-plan-publisher --plan PATH --config PATH --database-url URL");
   const local = await localEnvironment();
   const token = environmentValue("NOTION_TOKEN", local);
   if (!token) throw new PublicationError("missing NOTION_TOKEN");
-  console.log(JSON.stringify(await publishPlanFile(resolve(planArg), resolve(configArg), databaseUrl, new NotionClient(token))));
+  console.log(JSON.stringify(await publishPlanFile(resolve(planArg), resolve(configArg), databaseUrl, new NotionClient(token), finalState)));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

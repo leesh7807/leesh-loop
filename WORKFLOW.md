@@ -80,6 +80,15 @@ Use the Notion task surface for the Accepted Plan, Workpad, and state changes. W
 
 If the task surface itself or its authentication is unavailable, it cannot record a Workpad entry or transition its own state. Do not claim that a same-surface handoff occurred and do not invent a fallback mutation channel. End with the concrete external-access blocker in the worker result. This is an integration/access failure outside normal worker execution, not a repository-defined recovery lifecycle.
 
+## Worker task follow-up capabilities
+
+The bound Notion worker session exposes two independent, limited capabilities:
+
+* `notion_task_publish_plan` accepts complete Plan text and publishes a new canonical task through the existing Publisher path with final State `Backlog`. The Publisher remains responsible for database binding, canonical task/Plan representation, Identifier, Plan relation/content, locking, incomplete-publication handling, and publication validation. The result returns the new task's canonical `identifier` and `page_id`.
+* `notion_task_add_blocked_by` accepts a canonical blocker page identity and adds it to the `Blocked By` relation of the task bound to the current runtime. The operation reads and preserves existing blockers before its additive update.
+
+These capabilities are separate operations. Publication does not modify the current task relation, and the `Blocked By` capability does not publish or edit Plan content. The current task is determined by the runtime binding, not by worker input; no target-task argument or arbitrary Notion management API is exposed. A request that cannot be completed by the corresponding Publisher or relation operation is returned as a failure without worker-side retry or fallback.
+
 ## Repository state and delivery
 
 The repository state vocabulary is:

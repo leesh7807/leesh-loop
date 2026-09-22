@@ -43,7 +43,8 @@ Publication is recoverable through `Publisher Pending`:
 4. lock and validate the Plan page;
 5. set the task `Plan` relation to exactly that page;
 6. validate task/Plan source ownership, equal Identifiers, and complete content;
-7. finalize the task to `Ready`.
+7. finalize the task to the selected publication State (the normal Publisher
+   default is `Ready`; the worker publication capability selects `Backlog`).
 
 Retries reuse a matching Plan page. Multiple task or Plan identities, an
 existing pending relation to another publication, incomplete or conflicting

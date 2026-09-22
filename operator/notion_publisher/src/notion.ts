@@ -341,7 +341,7 @@ export class NotionClient {
     await this.ensureCanonicalRepresentation(pageId, plan, binding, identifier, title, identifierProperty);
   }
 
-  async finalizePublication(pageId: string, policy: Policy): Promise<void> {
-    await this.request("PATCH", `/pages/${pageId}`, { properties: { [policy.state]: { select: { name: PUBLISHER_READY_STATE } } } });
+  async finalizePublication(pageId: string, policy: Policy, state = PUBLISHER_READY_STATE): Promise<void> {
+    await this.request("PATCH", `/pages/${pageId}`, { properties: { [policy.state]: { select: { name: state } } } });
   }
 }
