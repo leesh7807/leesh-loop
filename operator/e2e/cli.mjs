@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadWorkloadCatalog } from './model/workload-catalog.mjs';
 import { loadE2EProjectConfig } from './model/e2e-project-config.mjs';
+import { resolveE2ERunInput } from './model/run-input.mjs';
 import { GitClient } from './systems/git/git-client.mjs';
 import { GitHubClient } from './systems/github/github-client.mjs';
 import { E2ELifecycleInterpreter } from './run/lifecycle/lifecycle-interpreter.mjs';
@@ -53,13 +54,38 @@ async function createProductionRunDependencies(config, catalog) {
   return { notionClient, notionPublisherClient, gitClient, githubClient, operatorClient, chatgptShotClient, runEvidenceCollector, runRecordStore, runFinalizer, runCompletionVerifier, runDoneVerifier, runTimingRecorder, runAdmission, runLifecycleObserver };
 }
 
+function parseArguments(argv) {
+  const values = [...argv];
+  const command = values.shift() || 'run';
+  let configArgument = join(here, 'project.json');
+  if (values[0] && !values[0].startsWith('--')) configArgument = values.shift();
+  const options = {};
+  const supported = new Set(['--plan', '--hard-cap-ms', '--workflow']);
+  while (values.length) {
+    const name = values.shift();
+    if (!supported.has(name)) throw new Error(`unknown E2E option: ${name}`);
+    if (Object.hasOwn(options, name)) throw new Error(`duplicate E2E option: ${name}`);
+    const value = values.shift();
+    if (!value || value.startsWith('--')) throw new Error(`${name} requires a value`);
+    options[name] = value;
+  }
+  if (options['--hard-cap-ms'] !== undefined) {
+    if (!/^\d+$/.test(options['--hard-cap-ms'])) throw new Error('--hard-cap-ms must be a positive integer');
+    const hardCapMs = Number(options['--hard-cap-ms']);
+    if (!Number.isSafeInteger(hardCapMs) || hardCapMs <= 0) throw new Error('--hard-cap-ms must be a positive integer');
+    options.hardCapMs = hardCapMs;
+  }
+  return { command, configArgument, planPath: options['--plan'], workflowPath: options['--workflow'], hardCapMs: options.hardCapMs };
+}
+
 async function main() {
-  const [command = 'run', configArgument = join(here, 'project.json')] = process.argv.slice(2);
+  const { command, configArgument, planPath, workflowPath, hardCapMs } = parseArguments(process.argv.slice(2));
   const configPath = resolve(configArgument);
   const config = await loadE2EProjectConfig(configPath);
-  const catalog = await loadWorkloadCatalog(join(dirname(configPath), 'catalog.json'));
+  const runInput = await resolveE2ERunInput({ config, planPath, workflowPath, hardCapMs });
+  const catalog = runInput.workload ? [] : await loadWorkloadCatalog(join(dirname(configPath), 'catalog.json'));
   const dependencies = await createProductionRunDependencies(config, catalog);
-  const runner = new E2ERunner({ config, catalog, ...dependencies });
+  const runner = new E2ERunner({ config, catalog, runInput, ...dependencies });
   if (command === 'run') {
     await dependencies.notionPublisherClient.prepareProductionPublisher();
     const record = await runner.runProductionE2E();
@@ -68,7 +94,7 @@ async function main() {
   }
   if (command === 'admit') {
     const admission = await dependencies.runAdmission.checkRunAdmission();
-    console.log(JSON.stringify({ candidates: admission.workload.map(candidate => candidate.id), task_count: admission.tasks.length, remote_ref_count: Object.keys(admission.refs).length }, null, 2));
+    console.log(JSON.stringify({ workload_source: runInput.workload ? 'provided' : 'catalog_random', candidates: admission.workload.map(candidate => candidate.id), task_count: admission.tasks.length, remote_ref_count: Object.keys(admission.refs).length }, null, 2));
     return;
   }
   throw new Error('Usage: node operator/e2e/cli.mjs <run|admit> [project.json]');

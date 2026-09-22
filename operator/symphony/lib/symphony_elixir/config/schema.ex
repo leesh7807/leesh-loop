@@ -593,7 +593,7 @@ defmodule SymphonyElixir.Config.Schema do
   defp default_turn_sandbox_policy(workspace) do
     %{
       "type" => "workspaceWrite",
-      "writableRoots" => [workspace, Path.join(workspace, ".git")],
+      "writableRoots" => [workspace, Path.join(workspace, ".git"), Path.expand(System.tmp_dir!())],
       "networkAccess" => true,
       "excludeTmpdirEnvVar" => false,
       "excludeSlashTmp" => false

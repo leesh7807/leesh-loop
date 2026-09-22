@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { sha256 } from '../model/plan-identity.mjs';
 import { createRunPaths, createRunScopedBaseBranchName, createOperatorProjectConfig } from '../model/e2e-project-config.mjs';
-import { materializeWorkloadForRun, selectAvailableWorkload } from '../model/workload-catalog.mjs';
+import { resolveWorkloadForRun, resolvedRuntimeOptions } from '../model/run-input.mjs';
 import { createRunRecord, addFailure, RunRecordStore } from '../model/run-record-store.mjs';
 import { RunFinalizer } from './finalization/run-finalizer.mjs';
 import { RunTimingRecorder, createRunId, currentTimeIso, waitForNextPoll } from './run-timing.mjs';
@@ -11,10 +11,24 @@ import { RunCompletionVerifier } from './lifecycle/run-completion-verifier.mjs';
 import { RunDoneVerifier } from './lifecycle/run-done-verifier.mjs';
 import { RunLifecycleObserver } from './lifecycle/run-lifecycle-observer.mjs';
 
+async function writeRunInputSnapshots(paths, workload, workflow) {
+  await Promise.all([
+    writeFile(paths.workloadInputSnapshot, workload.source === 'catalog_random' ? workload.catalog_entry.accepted_plan : workload.supplied.accepted_plan, { mode: 0o600 }),
+    writeFile(paths.workloadPublisherSnapshot, workload.publisher.accepted_plan, { mode: 0o600 }),
+    writeFile(paths.workflowSnapshot, workflow.resolved_workflow, { mode: 0o600 })
+  ]);
+}
+
+function matchesPublisherReadback(input, readback) {
+  if (input === readback) return true;
+  return input.replace(/\r\n?/g, '\n') === readback;
+}
+
 export class E2ERunner {
-  constructor({ config, catalog, notionClient, notionPublisherClient, gitClient, githubClient, operatorClient, runEvidenceCollector, runRecordStore, lifecycleInterpreter, runFinalizer, runAdmission, runCompletionVerifier, runDoneVerifier, runTimingRecorder, runLifecycleObserver, random = Math.random, clock = () => Date.now(), waitForPoll = waitForNextPoll } = {}) {
+  constructor({ config, catalog, runInput, notionClient, notionPublisherClient, gitClient, githubClient, operatorClient, runEvidenceCollector, runRecordStore, lifecycleInterpreter, runFinalizer, runAdmission, runCompletionVerifier, runDoneVerifier, runTimingRecorder, runLifecycleObserver, random = Math.random, clock = () => Date.now(), waitForPoll = waitForNextPoll } = {}) {
     this.config = config;
     this.catalog = catalog;
+    this.runInput = runInput || { workload: null, workflow: { source: 'default', source_path: config.workflow_path, resolved_workflow: '', resolved_workflow_sha256: sha256('') } };
     this.notionClient = notionClient;
     this.notionPublisherClient = notionPublisherClient;
     this.gitClient = gitClient;
@@ -38,13 +52,18 @@ export class E2ERunner {
       await this.runRecordStore.saveAdmissionFailure(error);
       throw error;
     }
-    const selectedWorkload = selectAvailableWorkload(admission.workload, { random: this.random });
-    const workload = materializeWorkloadForRun(selectedWorkload, { tasks: admission.tasks });
+    const resolvedWorkload = resolveWorkloadForRun({ runInput: this.runInput, catalog: admission.workload, tasks: admission.tasks, random: this.random });
+    const workload = resolvedWorkload.workload;
     const runId = createRunId();
     const paths = createRunPaths(this.config, runId);
     const branch = createRunScopedBaseBranchName(runId);
     const seedCommit = await this.gitClient.resolveSeedCommit(this.config.seed_source_ref);
-    const record = createRunRecord({ config: this.config, runId, workload, paths });
+    const resolvedRunInput = {
+      workload_evidence: resolvedWorkload.evidence,
+      workflow: { ...this.runInput.workflow, snapshot_path: paths.workflowSnapshot },
+      runtime_options: resolvedRuntimeOptions(this.config)
+    };
+    const record = createRunRecord({ config: this.config, runId, workload, paths, runInput: resolvedRunInput });
     record.binding.base_branch = branch;
     record.binding.seed_commit = seedCommit;
     record.evidence.branch_refs_before = admission.refs;
@@ -54,14 +73,32 @@ export class E2ERunner {
     let task = null;
     let dashboard = null;
     try {
+      await writeRunInputSnapshots(paths, resolvedWorkload.evidence, this.runInput.workflow);
+      await this.runRecordStore.save(record);
       const baseCommit = await this.gitClient.createRunScopedBaseBranch(branch, seedCommit, this.config.seed_source_ref);
       record.binding.base_commit = baseCommit;
       await this.runRecordStore.save(record);
 
-      const project = createOperatorProjectConfig(this.config, paths, branch);
+      const project = createOperatorProjectConfig(this.config, paths, branch, paths.workflowSnapshot);
       await mkdir(dirname(paths.runtimeProject), { recursive: true, mode: 0o700 });
       await writeFile(paths.runtimeProject, `${JSON.stringify(project, null, 2)}\n`, { mode: 0o600 });
-      record.runtime = { project: project, dashboard: `http://127.0.0.1:${project.symphony_port}` };
+      record.runtime = {
+        project,
+        dashboard: `http://127.0.0.1:${project.symphony_port}`,
+        resolved_environment: {
+          repository_root: this.config.repository_root || null,
+          nested_symphony_workspace_root: project.symphony_workspace_root,
+          workspace_root_scope: 'current_repository',
+          workflow_path: project.workflow_path,
+          skip_external_readiness: project.skip_external_readiness,
+          codex_runtime: {
+            policy_source: 'resolved workflow and Symphony default Codex sandbox policy',
+            system_temporary_directory: 'system temporary directory permitted by the Symphony default policy',
+            e2e_specific_temp_relocation: false,
+            e2e_specific_sandbox_policy: false
+          }
+        }
+      };
       await this.runRecordStore.save(record);
 
       this.runTimingRecorder.recordSymphonyStartRequested(record, currentTimeIso());
@@ -74,7 +111,13 @@ export class E2ERunner {
       record.status = 'runtime_ready';
       await this.runRecordStore.save(record);
 
-      const publication = await this.notionPublisherClient.publishAcceptedPlan({ plan: workload.accepted_plan, databaseUrl: this.config.notion_database_url, directory: paths.directory });
+      let publication;
+      try {
+        publication = await this.notionPublisherClient.publishAcceptedPlan({ plan: workload.accepted_plan, databaseUrl: this.config.notion_database_url, directory: paths.directory });
+      } catch (error) {
+        record.artifacts.publisher_failure = { at: currentTimeIso(), error: String(error?.message || error) };
+        throw error;
+      }
       record.artifacts.publisher_result = publication;
       record.artifacts.task_id = publication.page_id;
       record.artifacts.task_url = publication.url || null;
@@ -85,7 +128,7 @@ export class E2ERunner {
       const publishedTask = await this.notionClient.readTask(this.config.notion_database_url, publication.page_id);
       const publicationPlanIdentifier = publication.plan_identifier || publication.identifier;
       const taskPlanIdentifier = publishedTask?.plan_identifier || (publishedTask ? `PLAN-${sha256(publishedTask.accepted_plan).slice(0, 12).toUpperCase()}` : null);
-      if (!publishedTask || publicationPlanIdentifier !== workload.plan_identifier || taskPlanIdentifier !== workload.plan_identifier || publishedTask.identifier !== publication.identifier || publishedTask.accepted_plan !== workload.accepted_plan || sha256(publishedTask.accepted_plan) !== workload.accepted_plan_sha256) throw new Error('Publisher authoritative readback does not match the selected Accepted Plan, Plan provenance, and newly issued task identity');
+      if (!publishedTask || publicationPlanIdentifier !== workload.plan_identifier || taskPlanIdentifier !== workload.plan_identifier || publishedTask.identifier !== publication.identifier || !matchesPublisherReadback(workload.accepted_plan, publishedTask.accepted_plan)) throw new Error('Publisher authoritative readback does not match the selected Accepted Plan, Plan provenance, and newly issued task identity');
       task = publishedTask;
       record.artifacts.task_identifier = task.identifier;
       this.doneVerifier.ensurePlanBinding(record, task);

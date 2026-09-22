@@ -137,12 +137,13 @@ Agents work against the target repository according to its `WORKFLOW.md`, then w
 
 The production E2E harness lives under [`operator/e2e`](operator/e2e). Run it with
 `node operator/e2e/cli.mjs run operator/e2e/project.json` after configuring the normal Operator,
-Notion, GitHub, Codex, and `chatgpt-shot` credentials. The checked-in E2E project keeps its
-dedicated Notion database binding and seed source ref; each run creates an opaque run-scoped base,
-generates a run-local Operator Project with `skip_external_readiness: true`, and uses the existing
-Publisher → `leesh-loop.mjs start` → Operator → Symphony production path. It does not introduce a
-separate E2E runtime or Symphony launcher, and stores durable evidence under the ignored
-`operator/e2e/runs/<run-id>/run.json` record.
+Notion, GitHub, and Codex credentials. The checked-in E2E project keeps its dedicated Notion
+database binding and seed source ref, resolves the repository-owned E2E workflow, creates an opaque
+run-scoped base and a nested run-local Symphony workspace inside the current checkout, and uses the
+existing Publisher → `leesh-loop.mjs start` → Operator → Symphony production path. It does not
+introduce a separate E2E runtime or Symphony launcher, and stores durable evidence under the ignored
+`operator/e2e/runs/<run-id>/run.json` record. Use `--plan PATH [--hard-cap-ms MS]` for direct workload
+input and `--workflow PATH` for an exact per-run workflow.
 
 The harness records observed lifecycle, worker/review timing, external artifacts, finalization and
 cleanup separately. A run that ends at an observed production failure or finite hard cap is still a

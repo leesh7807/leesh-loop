@@ -1,6 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve, isAbsolute } from 'node:path';
 import { extractNotionDatabaseId } from './notion-database-id.mjs';
 import { assertBranch, normalizeRef } from '../systems/git/git-ref-validation.mjs';
 
@@ -30,7 +29,7 @@ export async function loadE2EProjectConfig(configPath) {
     notion_database_id: E2E_DATABASE_ID,
     seed_source_ref: normalizeRef(raw.seed_source_ref),
     run_record_directory: resolve(base, raw.run_record_directory || 'runs'),
-    workspace_root: raw.workspace_root ? resolve(base, raw.workspace_root) : join(tmpdir(), 'leesh-loop-workspaces'),
+    workspace_root: raw.workspace_root ? resolve(base, raw.workspace_root) : join(base, 'workspaces'),
     poll_interval_ms: positiveInteger(raw.poll_interval_ms ?? 15_000, 'poll_interval_ms'),
     finalization_timeout_ms: positiveInteger(raw.finalization_timeout_ms ?? 30_000, 'finalization_timeout_ms'),
     runtime_start_timeout_ms: positiveInteger(raw.runtime_start_timeout_ms ?? 1_800_000, 'runtime_start_timeout_ms'),
@@ -39,6 +38,12 @@ export async function loadE2EProjectConfig(configPath) {
     ui_port: positiveInteger(raw.ui_port ?? 4_610, 'ui_port')
   };
   if (!config.workflow_path.startsWith('/')) throw new Error('workflow_path must resolve to an absolute path');
+  const repositoryRoot = resolve(base, '../..');
+  const workspaceRelation = relative(repositoryRoot, config.workspace_root);
+  if (!isAbsolute(config.workspace_root) || workspaceRelation === '' || workspaceRelation.startsWith('..') || isAbsolute(workspaceRelation)) {
+    throw new Error(`E2E workspace_root must be a non-root path inside the current repository: ${config.workspace_root}`);
+  }
+  config.repository_root = repositoryRoot;
   return config;
 }
 
@@ -54,16 +59,20 @@ export function createRunPaths(config, runId) {
     record: join(runDirectory, 'run.json'),
     runtimeProject: join(runDirectory, 'project.json'),
     runtimeState: join(runDirectory, 'operator-state'),
+    workloadInputSnapshot: join(runDirectory, 'workload-input.md'),
+    workloadPublisherSnapshot: join(runDirectory, 'workload-publisher.md'),
+    workflowSnapshot: join(runDirectory, 'workflow.md'),
     workspaceRoot: join(config.workspace_root, runId),
     log: join(runDirectory, 'publisher.log')
   };
 }
 
-export function createOperatorProjectConfig(config, paths, baseBranch) {
+export function createOperatorProjectConfig(config, paths, baseBranch, workflowPath = config.workflow_path) {
   return {
-    workflow_path: config.workflow_path,
+    workflow_path: workflowPath,
     notion_database_url: config.notion_database_url,
     symphony_workspace_root: paths.workspaceRoot,
+    allow_workspace_root_inside_repository: true,
     github_repository_url: config.repository_url,
     github_base_branch: baseBranch,
     skip_external_readiness: true,

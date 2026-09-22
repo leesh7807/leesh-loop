@@ -170,8 +170,9 @@ Notes:
   - `codex.approval_policy` defaults to a granular policy with `sandbox_approval`, `rules`,
     `mcp_elicitations`, `request_permissions`, and `skill_approval` all set to `false`
   - `codex.thread_sandbox` defaults to `workspace-write`
-  - `codex.turn_sandbox_policy` defaults to a `workspaceWrite` policy whose writable roots are the
-    current issue workspace and its `.git` directory, with network access enabled
+- `codex.turn_sandbox_policy` defaults to a `workspaceWrite` policy whose writable roots are the
+  current issue workspace, its `.git` directory, and the Linux system temporary directory, with
+  network access enabled
 - `codex.turn_timeout_ms` is the maximum silence interval while a turn is streaming. Each
   app-server update resets it; it is not a total turn runtime cap.
 - Supported `codex.approval_policy` values depend on the targeted Codex app-server version. In the
