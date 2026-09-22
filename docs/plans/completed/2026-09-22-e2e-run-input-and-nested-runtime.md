@@ -110,3 +110,9 @@ lifecycle, finalization, cleanup, admission reconciliation과 branch isolation �
   로컬 검증은 E2E Node 44개, Operator Node 24개, Notion Publisher 27개, `mix format
   --check-formatted`, `git diff --check` 통과. `mix test`는 환경의 missing `ssl.app`, live E2E/admit는
   missing `NOTION_TOKEN`으로 각각 실행하지 못했다.
+
+- Round 2 — reviewed HEAD `066a8cebbedf36f69e6cb47cc5e77f6c585de00e`; verdict `FINDINGS`.
+  H1 없는 provided Plan이 input resolution에서는 허용되지만 default E2E workflow가 공유 template의
+  H1 identity blocker를 그대로 적용해 worker 실행을 중단시키는 finding을 수용했다. E2E workflow에
+  provided workload 예외를 명시하고 회귀 테스트를 추가한 `a07eb54`를 적용했다. E2E Node 45개,
+  Operator Node 24개, Notion Publisher 27개와 `git diff --check`가 통과했다.
