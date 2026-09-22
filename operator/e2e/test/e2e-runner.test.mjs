@@ -101,6 +101,7 @@ test('E2ERunner reaches terminal Done through injected production dependencies',
   assert.equal(record.artifacts.merged_head, '0123456789012345678901234567890123456789');
   assert.equal(record.artifacts.remote_base_commit, 'abcdefabcdefabcdefabcdefabcdefabcdefabcd');
   assert.match(await readFile(record.paths.record, 'utf8'), /production_done/);
+  assert.equal(JSON.parse(await readFile(record.paths.runtime_project, 'utf8')).skip_external_readiness, true);
   assert.deepEqual(harness.transitions, ['Merging']);
   assert.equal(record.lifecycle.mechanical_human_review_transition.performed, true);
   assert.equal(Object.hasOwn(record.artifacts, 'mechanical_approval'), false);

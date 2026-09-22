@@ -57,21 +57,24 @@ async function loadConfig(file, { validateWorkspaceFileSources = true } = {}) {
   for (const key of ['workflow_path', 'notion_database_url', 'symphony_workspace_root', 'github_repository_url', 'github_base_branch']) if (typeof config[key] !== 'string' || !config[key]) throw new Error(`project configuration requires ${key}`);
   if (!isAbsolute(config.workflow_path) || !isAbsolute(config.symphony_workspace_root)) throw new Error('workflow_path and symphony_workspace_root must be absolute');
   await validateBaseBranch(config.github_base_branch);
+  if (config.skip_external_readiness !== undefined && typeof config.skip_external_readiness !== 'boolean') throw new Error('skip_external_readiness must be a boolean');
   if (config.startup_timeout_ms !== undefined && (!Number.isSafeInteger(config.startup_timeout_ms) || config.startup_timeout_ms <= 0)) throw new Error('startup_timeout_ms must be a positive integer');
   if (config.browser_acknowledgement_timeout_ms !== undefined && (!Number.isSafeInteger(config.browser_acknowledgement_timeout_ms) || config.browser_acknowledgement_timeout_ms <= 0)) throw new Error('browser_acknowledgement_timeout_ms must be a positive integer');
   const workspace_files = validateWorkspaceFileSources
     ? await validateWorkspaceFiles(config.workspace_files)
     : normalizeWorkspaceFiles(config.workspace_files);
-  const resolved = { ...config, workflow_path: canonical(config.workflow_path), symphony_workspace_root: canonical(config.symphony_workspace_root), workspace_files, configuration_path: canonical(file) };
+  const resolved = { ...config, skip_external_readiness: config.skip_external_readiness === true, workflow_path: canonical(config.workflow_path), symphony_workspace_root: canonical(config.symphony_workspace_root), workspace_files, configuration_path: canonical(file) };
   return resolved;
 }
 async function withLock(config, action) {
   return action();
 }
 function effective(config, runtimeId, port) {
-  return { workflow_path: config.workflow_path, notion_database_url: config.notion_database_url, symphony_workspace_root: config.symphony_workspace_root, workspace_files: config.workspace_files, worker_interface_identity: config.worker_interface_identity || 'operator/external/chatgpt-shot/chatgpt-shot', github_repository_url: config.github_repository_url, github_base_branch: config.github_base_branch, symphony_command: canonical(config.symphony_command || join(root, 'operator/app/run-symphony')), dashboard: `http://127.0.0.1:${port}`, runtime_id: runtimeId };
+  return { workflow_path: config.workflow_path, notion_database_url: config.notion_database_url, symphony_workspace_root: config.symphony_workspace_root, workspace_files: config.workspace_files, worker_interface_identity: config.worker_interface_identity || 'operator/external/chatgpt-shot/chatgpt-shot', skip_external_readiness: config.skip_external_readiness === true, github_repository_url: config.github_repository_url, github_base_branch: config.github_base_branch, symphony_command: canonical(config.symphony_command || join(root, 'operator/app/run-symphony')), dashboard: `http://127.0.0.1:${port}`, runtime_id: runtimeId };
 }
-function compatible(oldValue, current) { const { runtime_id: _old, ...oldIdentity } = oldValue || {}; const { runtime_id: _new, ...newIdentity } = current; return JSON.stringify(oldIdentity) === JSON.stringify(newIdentity); }
+function compatibilityIdentity(value) { const { runtime_id: _runtimeId, skip_external_readiness, ...identity } = value || {}; return { ...identity, skip_external_readiness: skip_external_readiness === true }; }
+function compatible(oldValue, current) { return JSON.stringify(compatibilityIdentity(oldValue)) === JSON.stringify(compatibilityIdentity(current)); }
+function operatorBootstrapArgs(config, symphony, port) { return [join(root, 'operator/app/operator-bootstrap'), ...(config.skip_external_readiness ? ['--skip-external-readiness'] : []), '--', symphony, '--port', String(port), '--i-understand-that-this-will-be-running-without-the-usual-guardrails', config.workflow_path]; }
 async function request(url) { const response = await fetch(url, { signal: AbortSignal.timeout(1_000) }); if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }
 async function reachable(url) { const response = await fetch(url, { signal: AbortSignal.timeout(1_000) }); if (!response.ok) throw new Error(`HTTP ${response.status}`); }
 async function runtimeObserved(state, requireAck = true) {
@@ -197,7 +200,7 @@ async function start(config) {
     await atomicJson(p.state, starting); await remove(p.ownership); await remove(p.authorization); await remove(p.acknowledgement); await atomicText(p.startup_status, 'launching Operator readiness checks');
     try {
       const symphony = identity.symphony_command;
-      const args = [join(root, 'operator/app/operator-bootstrap'), '--', symphony, '--port', String(port), '--i-understand-that-this-will-be-running-without-the-usual-guardrails', config.workflow_path];
+      const args = operatorBootstrapArgs(config, symphony, port);
       const notionToken = process.env.NOTION_TOKEN || await localEnvironmentValue('NOTION_TOKEN');
       if (!notionToken) throw new Error('missing NOTION_TOKEN: set it in the Operator environment or the project-root .env file');
       const env = { ...process.env, NOTION_TOKEN: notionToken, LEESH_LOOP_NOTION_DATABASE_URL: config.notion_database_url, LEESH_LOOP_WORKSPACE_FILES: JSON.stringify(config.workspace_files), SYMPHONY_WORKSPACE_ROOT: config.symphony_workspace_root, SYMPHONY_GITHUB_REPOSITORY_URL: config.github_repository_url, SYMPHONY_GITHUB_BASE_BRANCH: config.github_base_branch, SYMPHONY_DISPATCH_BARRIER: 'closed', SYMPHONY_RUNTIME_ID: runtimeId, SYMPHONY_DISPATCH_AUTHORIZATION_FILE: p.authorization, SYMPHONY_DISPATCH_ACK_FILE: p.acknowledgement, SYMPHONY_OWNERSHIP_FILE: p.ownership, SYMPHONY_OPERATOR_STARTUP_STATUS_FILE: p.startup_status };
@@ -260,4 +263,4 @@ else if (process.argv[1] && resolve(process.argv[1]) === appScript) {
   }).then(value => { if (value) console.log(JSON.stringify(value)); }).catch(error => { console.error(`Operator failed: ${error.message}`); process.exitCode = 1; });
 }
 
-export { acknowledgeBrowser, dispatchBrowser, effective, loadConfig, openProjectSurfaces, projectSurfaces, readRequestBody };
+export { acknowledgeBrowser, compatible, dispatchBrowser, effective, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, readRequestBody };

@@ -66,6 +66,7 @@ export function createOperatorProjectConfig(config, paths, baseBranch) {
     symphony_workspace_root: paths.workspaceRoot,
     github_repository_url: config.repository_url,
     github_base_branch: baseBranch,
+    skip_external_readiness: true,
     symphony_port: config.symphony_port,
     ui_port: config.ui_port,
     state_directory: paths.runtimeState
