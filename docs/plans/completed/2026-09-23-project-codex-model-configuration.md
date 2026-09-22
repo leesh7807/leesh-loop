@@ -1,0 +1,54 @@
+# 2026-09-23-project-codex-model-configuration
+
+## Objective
+
+Allow an Operator Project to optionally select the Codex worker model and reasoning effort in `project.json`. Explicit Project values must control the actual Symphony worker; omitted values must remain governed by Codex defaults.
+
+## Intent
+
+`WORKFLOW.md` currently fixes the model and reasoning effort in `codex.command`, while other Project-specific runtime bindings flow from `project.json` through Operator into Symphony's process environment and are consumed by `WORKFLOW.md`. Model and reasoning effort should use that existing Project configuration path. This moves authority for those two values without changing the worker lifecycle or Codex app-server execution structure.
+
+## Verification Requirements
+
+1. An ordinary Operator Project can independently specify `codex_model` and `codex_reasoning_effort`; each explicit value reaches the Codex worker through the normal Operator → Symphony → `WORKFLOW.md` path. `WORKFLOW.md` contains no fixed model or reasoning value.
+2. Either setting may be omitted. Omission remains valid, adds no Codex override for that setting, and lets Codex choose its own configuration.
+3. Runtime compatibility distinguishes both the value and the presence or absence of each override, so a live runtime with a different explicit setting is not reused.
+4. E2E Project values, when present, are copied into each run-local Operator Project independently; absent values remain absent.
+5. Worker lifecycle, prompt, Codex app-server structure, and the meaning of other Project bindings remain unchanged.
+
+## Definitions
+
+- **Project configuration**: Operator's `project.json` and its Project-specific runtime settings.
+- **Codex model override**: `codex_model`, set only when a Project chooses to replace Codex's default model.
+- **Reasoning effort override**: `codex_reasoning_effort`, set only when a Project chooses to replace Codex's default reasoning effort.
+- **Runtime configuration**: Project settings used to start a Symphony runtime and compare it for reuse.
+- **Run-local Operator Project**: The `project.json` generated for an E2E run and passed to the ordinary Operator entry point.
+
+## Decisions
+
+1. Add optional `codex_model` and `codex_reasoning_effort` string settings to Operator and E2E Project configuration. They are independent.
+2. Operator forwards only explicitly configured values through Symphony's process environment. `WORKFLOW.md` consumes those environment values in its existing `codex.command`; it adds no override argument for an absent value.
+3. Remove the currently fixed model and reasoning effort from `WORKFLOW.md`, preserving its command role and `app-server` launch structure.
+4. When present, each setting must be a non-empty string. Omission is valid.
+5. Include both values and their configured/omitted state in effective runtime compatibility.
+6. E2E materialization forwards only fields supplied by the E2E Project. It has no model default, override rule, or workflow variant.
+7. Do not maintain a model-name or reasoning-effort allowlist in Operator; Codex remains the validation boundary for supplied values.
+8. Update `operator/project.example.json` and Project-configuration documentation to describe optional overrides.
+9. Keep task lifecycle, dispatch/readiness, workspace creation, Git target, Notion binding, `chatgpt-shot`, Codex app-server protocol, and Symphony configuration schema unchanged.
+10. Keep existing Project loading, runtime identity, and E2E Project materialization responsibilities; add no model-only abstraction or configuration subsystem.
+
+## Verification
+
+1. Run the focused Operator and E2E tests for optional-field validation, forwarding, runtime compatibility, and run-local materialization.
+2. Through `node operator/app/leesh-loop.mjs start <project.json>`, observe configured and omitted overrides at the Symphony/Codex launch boundary. Verify the unset item has no `--config` argument and the configured item does.
+3. Through `node operator/e2e/cli.mjs run operator/e2e/project.json`, inspect the generated run-local `project.json`; when permitted and reachable, observe the selected values at worker launch without requiring completion of the full E2E lifecycle.
+4. Run the applicable existing Operator and Symphony workflow/configuration checks, inspect the full diff for preservation of unrelated behavior, search `WORKFLOW.md` for fixed model/reasoning values, and run `git diff --check`.
+5. Submit the exact PR URL and `git rev-parse HEAD` to `chatgpt-shot`; independently validate each finding against that HEAD, fix only evidenced contract violations, and repeat for every changed HEAD until the review returns PASS or no findings. Record each round at the end of this plan.
+
+## Verification Tools
+
+- Operator CLI and runtime state: Project validation, effective identity, startup, and runtime compatibility.
+- Symphony/Codex launch observation: effective Codex override arguments through the actual process path.
+- E2E CLI and generated run-local `project.json`: selective propagation into the ordinary Operator Project.
+- Operator/E2E/Symphony tests, repository search, and Git diff: regression and preservation evidence.
+- `chatgpt-shot submit` and `chatgpt-shot jobs`: independent exact-HEAD review results.

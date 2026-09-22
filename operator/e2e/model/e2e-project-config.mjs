@@ -20,6 +20,7 @@ export async function loadE2EProjectConfig(configPath) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('E2E project configuration must be an object');
   if (raw.notion_database_url !== E2E_DATABASE_URL) throw new Error('E2E project must keep the fixed E2E Notion database binding');
   for (const key of ['repository_url', 'workflow_path', 'seed_source_ref']) if (typeof raw[key] !== 'string' || !raw[key].trim()) throw new Error(`E2E project configuration requires ${key}`);
+  for (const key of ['codex_model', 'codex_reasoning_effort']) if (raw[key] !== undefined && (typeof raw[key] !== 'string' || !raw[key].trim())) throw new Error(`${key} must be a non-empty string`);
   const base = dirname(absolutePath);
   const config = {
     ...raw,
@@ -66,6 +67,8 @@ export function createOperatorProjectConfig(config, paths, baseBranch) {
     symphony_workspace_root: paths.workspaceRoot,
     github_repository_url: config.repository_url,
     github_base_branch: baseBranch,
+    ...(config.codex_model === undefined ? {} : { codex_model: config.codex_model }),
+    ...(config.codex_reasoning_effort === undefined ? {} : { codex_reasoning_effort: config.codex_reasoning_effort }),
     skip_external_readiness: true,
     symphony_port: config.symphony_port,
     ui_port: config.ui_port,

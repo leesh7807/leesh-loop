@@ -22,7 +22,7 @@ async function fixture(t) {
   return { directory, workspaceRoot, workspace };
 }
 
-async function projectConfig(directory, workspaceRoot, workspaceFiles, skipExternalReadiness) {
+async function projectConfig(directory, workspaceRoot, workspaceFiles, skipExternalReadiness, codexOverrides = {}) {
   const path = join(directory, 'project.json');
   const config = {
     workflow_path: join(root, 'WORKFLOW.md'),
@@ -33,6 +33,7 @@ async function projectConfig(directory, workspaceRoot, workspaceFiles, skipExter
   };
   if (workspaceFiles !== undefined) config.workspace_files = workspaceFiles;
   if (skipExternalReadiness !== undefined) config.skip_external_readiness = skipExternalReadiness;
+  Object.assign(config, codexOverrides);
   await writeFile(path, JSON.stringify(config));
   return path;
 }
@@ -162,6 +163,76 @@ test('Git target binding rejects invalid branch names before startup', async t =
   contents.github_base_branch = 'invalid..branch';
   await writeFile(configPath, JSON.stringify(contents));
   await assert.rejects(loadConfig(configPath), /not a valid Git branch name/);
+});
+
+test('Codex overrides are optional non-empty strings and participate in runtime compatibility', async t => {
+  const { directory, workspaceRoot } = await fixture(t);
+  const configPath = await projectConfig(directory, workspaceRoot);
+  const omitted = await loadConfig(configPath);
+  assert.equal(effective(omitted, 'omitted', 4100).codex_model, null);
+  assert.equal(effective(omitted, 'omitted', 4100).codex_reasoning_effort, null);
+
+  await writeFile(configPath, JSON.stringify({
+    workflow_path: workflow,
+    notion_database_url: 'https://notion.example/database',
+    symphony_workspace_root: workspaceRoot,
+    github_repository_url: 'https://github.com/example/repository.git',
+    github_base_branch: 'main',
+    codex_model: 'example-model'
+  }));
+  const modelOnly = await loadConfig(configPath);
+  assert.equal(modelOnly.codex_model, 'example-model');
+  assert.equal(modelOnly.codex_reasoning_effort, undefined);
+  assert.equal(compatible(effective(omitted, 'old-runtime', 4100), effective(modelOnly, 'new-runtime', 4100)), false);
+  assert.equal(compatible(effective(modelOnly, 'old-runtime', 4100), effective(omitted, 'new-runtime', 4100)), false);
+  const changedModel = { ...effective(modelOnly, 'same-runtime', 4100), codex_model: 'another-model' };
+  assert.equal(compatible(effective(modelOnly, 'old-runtime', 4100), changedModel), false);
+
+  await writeFile(configPath, JSON.stringify({
+    workflow_path: workflow,
+    notion_database_url: 'https://notion.example/database',
+    symphony_workspace_root: workspaceRoot,
+    github_repository_url: 'https://github.com/example/repository.git',
+    github_base_branch: 'main',
+    codex_reasoning_effort: 'example-effort'
+  }));
+  const effortOnly = await loadConfig(configPath);
+  assert.equal(effortOnly.codex_model, undefined);
+  assert.equal(effortOnly.codex_reasoning_effort, 'example-effort');
+  assert.equal(compatible(effective(omitted, 'old-runtime', 4100), effective(effortOnly, 'new-runtime', 4100)), false);
+  assert.equal(compatible(effective(effortOnly, 'old-runtime', 4100), effective(omitted, 'new-runtime', 4100)), false);
+  const changedEffort = { ...effective(effortOnly, 'same-runtime', 4100), codex_reasoning_effort: 'another-effort' };
+  assert.equal(compatible(effective(effortOnly, 'old-runtime', 4100), changedEffort), false);
+
+  await writeFile(configPath, JSON.stringify({
+    workflow_path: workflow,
+    notion_database_url: 'https://notion.example/database',
+    symphony_workspace_root: workspaceRoot,
+    github_repository_url: 'https://github.com/example/repository.git',
+    github_base_branch: 'main',
+    codex_model: 'example-model',
+    codex_reasoning_effort: 'example-effort'
+  }));
+  const both = await loadConfig(configPath);
+  assert.equal(compatible(effective(modelOnly, 'old-runtime', 4100), effective(both, 'new-runtime', 4100)), false);
+  assert.equal(compatible(effective(effortOnly, 'old-runtime', 4100), effective(both, 'new-runtime', 4100)), false);
+
+  const legacyOmitted = { ...effective(omitted, 'legacy-runtime', 4100) };
+  delete legacyOmitted.codex_model;
+  delete legacyOmitted.codex_reasoning_effort;
+  assert.equal(compatible(legacyOmitted, effective(omitted, 'new-runtime', 4100)), true);
+
+  for (const [key, value] of [['codex_model', ''], ['codex_model', '  '], ['codex_model', null], ['codex_model', 1], ['codex_reasoning_effort', ''], ['codex_reasoning_effort', '  '], ['codex_reasoning_effort', null], ['codex_reasoning_effort', 1]]) {
+    await writeFile(configPath, JSON.stringify({
+      workflow_path: workflow,
+      notion_database_url: 'https://notion.example/database',
+      symphony_workspace_root: workspaceRoot,
+      github_repository_url: 'https://github.com/example/repository.git',
+      github_base_branch: 'main',
+      [key]: value
+    }));
+    await assert.rejects(loadConfig(configPath), new RegExp(`${key} must be a non-empty string`));
+  }
 });
 
 test('materializer copies bytes after clone without changing unrelated workspace content', async t => {

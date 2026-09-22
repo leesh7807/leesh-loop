@@ -37,12 +37,15 @@ hooks:
 agent:
   max_turns: 20
 codex:
-  command: >-
-    env PATH="$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:$PATH"
-    codex
-    --config model="gpt-5.6-luna"
-    --config model_reasoning_effort="xhigh"
-    app-server
+  command: |
+    codex_args=()
+    if [ -n "${SYMPHONY_CODEX_MODEL:-}" ]; then
+      codex_args+=(--config "model=${SYMPHONY_CODEX_MODEL}")
+    fi
+    if [ -n "${SYMPHONY_CODEX_REASONING_EFFORT:-}" ]; then
+      codex_args+=(--config "model_reasoning_effort=${SYMPHONY_CODEX_REASONING_EFFORT}")
+    fi
+    exec env PATH="$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:$PATH" codex "${codex_args[@]}" app-server
 ---
 
 # Leesh Loop repository workflow

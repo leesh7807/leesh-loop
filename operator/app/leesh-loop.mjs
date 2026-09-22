@@ -55,6 +55,7 @@ async function loadConfig(file, { validateWorkspaceFileSources = true } = {}) {
   const config = await json(canonical(file));
   if (!config || typeof config !== 'object') throw new Error(`missing or invalid project configuration: ${file}`);
   for (const key of ['workflow_path', 'notion_database_url', 'symphony_workspace_root', 'github_repository_url', 'github_base_branch']) if (typeof config[key] !== 'string' || !config[key]) throw new Error(`project configuration requires ${key}`);
+  for (const key of ['codex_model', 'codex_reasoning_effort']) if (config[key] !== undefined && (typeof config[key] !== 'string' || !config[key].trim())) throw new Error(`${key} must be a non-empty string`);
   if (!isAbsolute(config.workflow_path) || !isAbsolute(config.symphony_workspace_root)) throw new Error('workflow_path and symphony_workspace_root must be absolute');
   await validateBaseBranch(config.github_base_branch);
   if (config.skip_external_readiness !== undefined && typeof config.skip_external_readiness !== 'boolean') throw new Error('skip_external_readiness must be a boolean');
@@ -70,9 +71,9 @@ async function withLock(config, action) {
   return action();
 }
 function effective(config, runtimeId, port) {
-  return { workflow_path: config.workflow_path, notion_database_url: config.notion_database_url, symphony_workspace_root: config.symphony_workspace_root, workspace_files: config.workspace_files, worker_interface_identity: config.worker_interface_identity || 'operator/external/chatgpt-shot/chatgpt-shot', skip_external_readiness: config.skip_external_readiness === true, github_repository_url: config.github_repository_url, github_base_branch: config.github_base_branch, symphony_command: canonical(config.symphony_command || join(root, 'operator/app/run-symphony')), dashboard: `http://127.0.0.1:${port}`, runtime_id: runtimeId };
+  return { workflow_path: config.workflow_path, notion_database_url: config.notion_database_url, symphony_workspace_root: config.symphony_workspace_root, workspace_files: config.workspace_files, codex_model: config.codex_model ?? null, codex_reasoning_effort: config.codex_reasoning_effort ?? null, worker_interface_identity: config.worker_interface_identity || 'operator/external/chatgpt-shot/chatgpt-shot', skip_external_readiness: config.skip_external_readiness === true, github_repository_url: config.github_repository_url, github_base_branch: config.github_base_branch, symphony_command: canonical(config.symphony_command || join(root, 'operator/app/run-symphony')), dashboard: `http://127.0.0.1:${port}`, runtime_id: runtimeId };
 }
-function compatibilityIdentity(value) { const { runtime_id: _runtimeId, skip_external_readiness, ...identity } = value || {}; return { ...identity, skip_external_readiness: skip_external_readiness === true }; }
+function compatibilityIdentity(value) { const { runtime_id: _runtimeId, skip_external_readiness, codex_model, codex_reasoning_effort, ...identity } = value || {}; return { ...identity, codex_model: codex_model ?? null, codex_reasoning_effort: codex_reasoning_effort ?? null, skip_external_readiness: skip_external_readiness === true }; }
 function compatible(oldValue, current) { return JSON.stringify(compatibilityIdentity(oldValue)) === JSON.stringify(compatibilityIdentity(current)); }
 function operatorBootstrapArgs(config, symphony, port) { return [join(root, 'operator/app/operator-bootstrap'), ...(config.skip_external_readiness ? ['--skip-external-readiness'] : []), '--', symphony, '--port', String(port), '--i-understand-that-this-will-be-running-without-the-usual-guardrails', config.workflow_path]; }
 async function request(url) { const response = await fetch(url, { signal: AbortSignal.timeout(1_000) }); if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }
@@ -204,6 +205,10 @@ async function start(config) {
       const notionToken = process.env.NOTION_TOKEN || await localEnvironmentValue('NOTION_TOKEN');
       if (!notionToken) throw new Error('missing NOTION_TOKEN: set it in the Operator environment or the project-root .env file');
       const env = { ...process.env, NOTION_TOKEN: notionToken, LEESH_LOOP_NOTION_DATABASE_URL: config.notion_database_url, LEESH_LOOP_WORKSPACE_FILES: JSON.stringify(config.workspace_files), SYMPHONY_WORKSPACE_ROOT: config.symphony_workspace_root, SYMPHONY_GITHUB_REPOSITORY_URL: config.github_repository_url, SYMPHONY_GITHUB_BASE_BRANCH: config.github_base_branch, SYMPHONY_DISPATCH_BARRIER: 'closed', SYMPHONY_RUNTIME_ID: runtimeId, SYMPHONY_DISPATCH_AUTHORIZATION_FILE: p.authorization, SYMPHONY_DISPATCH_ACK_FILE: p.acknowledgement, SYMPHONY_OWNERSHIP_FILE: p.ownership, SYMPHONY_OPERATOR_STARTUP_STATUS_FILE: p.startup_status };
+      if (identity.codex_model === null) delete env.SYMPHONY_CODEX_MODEL;
+      else env.SYMPHONY_CODEX_MODEL = identity.codex_model;
+      if (identity.codex_reasoning_effort === null) delete env.SYMPHONY_CODEX_REASONING_EFFORT;
+      else env.SYMPHONY_CODEX_REASONING_EFFORT = identity.codex_reasoning_effort;
       const pid = await launch(join(root, 'operator/app/owned-symphony'), args, env, p.startup_log);
       const process_start_ticks = await processStartTicks(pid);
       if (!process_start_ticks) throw new Error(`could not record startup identity for owned Symphony PID ${pid}`);

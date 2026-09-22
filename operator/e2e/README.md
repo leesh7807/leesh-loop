@@ -5,7 +5,8 @@ database URL and seed source ref in source control; secrets are read from `NOTIO
 normal GitHub CLI authentication, and the normal Operator/chatgpt-shot environment. Each run
 creates a run-local Operator Project with `skip_external_readiness: true` so production E2E can
 run inside a Symphony worker sandbox without accessing Operator-owned `chatgpt-shot` state outside
-that workspace.
+that workspace. Optional `codex_model` and `codex_reasoning_effort` fields are copied independently
+to the run-local Project when present; omitted fields leave Codex defaults in control.
 
 Run the admission check first:
 
