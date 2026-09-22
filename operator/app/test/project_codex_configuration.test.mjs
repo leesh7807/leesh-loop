@@ -24,7 +24,7 @@ test('WORKFLOW codex.command applies only configured Project overrides to app-se
   await chmod(codex, 0o755);
 
   const launch = async overrides => {
-    const result = await execFile('bash', ['-lc', command], {
+    const result = await execFile('bash', ['-lc', `exec ${command}`], {
       env: {
         PATH: `${directory}:${process.env.PATH}`,
         CHATGPT_SHOT_WORKER_INTERFACE_ROOT: directory,
