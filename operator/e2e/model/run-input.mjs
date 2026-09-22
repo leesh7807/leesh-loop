@@ -20,7 +20,7 @@ export async function readUtf8Document(path, label) {
     throw new Error(`${label} cannot be read: ${absolutePath}: ${error.message}`);
   }
   try {
-    return { path: absolutePath, content: new TextDecoder('utf-8', { fatal: true }).decode(bytes) };
+    return { path: absolutePath, content: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) };
   } catch {
     throw new Error(`${label} must be valid UTF-8: ${absolutePath}`);
   }

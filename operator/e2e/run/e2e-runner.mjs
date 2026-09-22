@@ -24,20 +24,11 @@ function matchesPublisherReadback(input, readback) {
   return input.replace(/\r\n?/g, '\n') === readback;
 }
 
-function hasExplicitTurnSandboxPolicy(workflow) {
-  if (workflow.source !== 'provided') return false;
-  const document = String(workflow.resolved_workflow || '');
-  const frontmatter = document.match(/^---\s*\n([\s\S]*?)\n---(?:\s*\n|$)/)?.[1] || '';
-  const match = frontmatter.match(/^\s*turn_sandbox_policy\s*:\s*(.*)$/m);
-  if (!match) return /\bturn_sandbox_policy\s*:/.test(frontmatter);
-  return !['', 'null', '~'].includes(match[1].trim().toLowerCase());
-}
-
 function codexRuntimeEvidence(workflow) {
-  if (hasExplicitTurnSandboxPolicy(workflow)) {
+  if (workflow.source === 'provided') {
     return {
-      policy_source: 'provided workflow codex.turn_sandbox_policy',
-      system_temporary_directory: 'determined by the provided workflow sandbox policy',
+      policy_source: 'provided workflow snapshot passed through unchanged; effective policy is runtime-owned',
+      system_temporary_directory: 'determined by the provided workflow and Symphony runtime; E2E adds no override',
       workflow_snapshot_path: workflow.snapshot_path || null,
       e2e_specific_temp_relocation: false,
       e2e_specific_sandbox_policy: false

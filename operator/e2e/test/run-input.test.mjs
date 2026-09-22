@@ -73,6 +73,15 @@ test('invalid UTF-8 and empty provided plans are rejected before production inpu
   await assert.rejects(() => resolveE2ERunInput({ config: files.config, hardCapMs: 10 }), /requires --plan/);
 });
 
+test('provided UTF-8 BOM is preserved as part of the supplied document', async t => {
+  const files = await fixtureFiles(t);
+  const planPath = join(files.directory, 'bom-plan.md');
+  const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('Accepted Plan.\n', 'utf8')]);
+  await writeFile(planPath, bytes);
+  const input = await resolveE2ERunInput({ config: files.config, planPath });
+  assert.equal(Buffer.from(input.workload.accepted_plan, 'utf8').equals(bytes), true);
+});
+
 test('provided workflow is resolved as an exact document without E2E policy rewriting', async t => {
   const files = await fixtureFiles(t);
   const workflowPath = join(files.directory, 'provided-workflow.md');

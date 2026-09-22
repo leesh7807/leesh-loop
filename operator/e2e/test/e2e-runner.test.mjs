@@ -169,8 +169,8 @@ test('E2ERunner records a provided workflow sandbox policy instead of default po
   harness.config.run_record_directory = directory + '/runs';
   harness.config.workspace_root = directory + '/workspaces';
   const record = await new E2ERunner({ ...harness, clock: () => current++, waitForPoll: async () => {} }).runProductionE2E();
-  assert.equal(record.runtime.resolved_environment.codex_runtime.policy_source, 'provided workflow codex.turn_sandbox_policy');
-  assert.equal(record.runtime.resolved_environment.codex_runtime.system_temporary_directory, 'determined by the provided workflow sandbox policy');
+  assert.equal(record.runtime.resolved_environment.codex_runtime.policy_source, 'provided workflow snapshot passed through unchanged; effective policy is runtime-owned');
+  assert.equal(record.runtime.resolved_environment.codex_runtime.system_temporary_directory, 'determined by the provided workflow and Symphony runtime; E2E adds no override');
   assert.equal(record.runtime.resolved_environment.codex_runtime.e2e_specific_sandbox_policy, false);
 });
 
