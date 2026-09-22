@@ -52,3 +52,12 @@ Allow an Operator Project to optionally select the Codex worker model and reason
 - E2E CLI and generated run-local `project.json`: selective propagation into the ordinary Operator Project.
 - Operator/E2E/Symphony tests, repository search, and Git diff: regression and preservation evidence.
 - `chatgpt-shot submit` and `chatgpt-shot jobs`: independent exact-HEAD review results.
+
+## chatgpt-shot review log
+
+### Round 1
+
+- Reviewed HEAD: `45fae5896bfe8cf7039c034cc3bd57ffa08d65ff` on [PR #52](https://github.com/leesh7807/leesh-loop/pull/52); Job `7999246c-1ffc-4c41-8461-1a59996eaabb`.
+- Verdict: `PASS`; Findings: `None.` No findings required acceptance or rejection.
+- Applied commits: `5fab229` adds the Project settings; `45fae58` fixes the actual worker launch. The first production E2E attempt exposed that Symphony prefixes `exec` to `codex.command`, so a command beginning with a shell assignment exited with status 2. The command now starts with `env` and invokes the conditional argument construction in `bash -c`.
+- Verification: Operator tests 25/25; E2E tests 38/38; Symphony workflow/configuration tests 55/55; `git diff --check` passed. The E2E run `1b8da1d6-fb41-43dd-89a8-eaa636da2cc2` materialized both configured values, started the Codex worker with `--config model=gpt-5.6-luna` and `--config model_reasoning_effort=xhigh`, and completed through authoritative `Done` readback with finalization complete and no remaining run-owned branches or workspace. Runtime compatibility was also rejected through the normal Operator CLI for changed and omitted values.
