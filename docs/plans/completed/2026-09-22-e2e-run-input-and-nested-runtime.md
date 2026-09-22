@@ -116,3 +116,9 @@ lifecycle, finalization, cleanup, admission reconciliation과 branch isolation �
   H1 identity blocker를 그대로 적용해 worker 실행을 중단시키는 finding을 수용했다. E2E workflow에
   provided workload 예외를 명시하고 회귀 테스트를 추가한 `a07eb54`를 적용했다. E2E Node 45개,
   Operator Node 24개, Notion Publisher 27개와 `git diff --check`가 통과했다.
+
+- Round 3 — reviewed HEAD `a6cab5dd384e40ed9155822fc0d07d2b32f36588`; verdict `FINDINGS`.
+  Provided workflow의 explicit `codex.turn_sandbox_policy`를 Symphony가 적용해도 runner가 default
+  sandbox와 system temporary-directory 허용으로 evidence를 기록하던 finding을 수용했다. 실제
+  workflow provenance에 맞는 runtime evidence와 회귀 테스트를 추가한 `fa66c12`를 적용했다.
+  E2E Node 46개와 `git diff --check`가 통과했다.
