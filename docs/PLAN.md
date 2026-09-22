@@ -6,6 +6,8 @@ Create and maintain a plan that keeps the work aligned with the objective and ma
 
 - Use the confirmed objective, intent, verification requirements, repository conventions, and available evidence to settle decisions that could change the outcome, externally observable behavior, contracts, responsibilities, boundaries, or verification. Include implementation details only when they are necessary to preserve one of those decisions or to make the intended work unambiguous.
 
+- Treat Objective, Intent, and Verification Requirements together as the complete top-level contract of the plan. Any fact that materially changes what result is acceptable, what externally observable behavior or boundary must hold, what failure behavior is required, or whether the objective counts as achieved must be expressed within those sections rather than introduced later.
+
 - Do not invent reasons, tradeoffs, or justifications for the user.
 
 - Define verification in terms of observable evidence. The plan must make clear how to tell whether the intended result works through the intended path.
@@ -55,7 +57,6 @@ Do not modify this section unless the user explicitly changes or asks to revise 
 
 ## Intent
 
-
 Record the confirmed problem, motivation, or desired direction that explains why the objective exists and how the user intends the objective to be interpreted.
 
 Preserve context that could materially change the meaning of success, failure, or acceptable behavior when implementation choices arise.
@@ -67,6 +68,8 @@ Do not modify this section unless the user explicitly changes or asks to revise 
 ## Verification Requirements
 
 Record the confirmed facts, guarantees, or externally observable outcomes that must be demonstrated for the objective to count as achieved.
+
+Together with `Objective` and `Intent`, this section must close the top-level contract. Do not rely on `Definitions`, `Decisions`, or `Verification` to introduce a material condition that changes whether the result is acceptable or whether the objective counts as achieved.
 
 State what must be proven, not how to prove it.
 
@@ -82,7 +85,9 @@ Define terms that are specific to the domain or repository, or that could reason
 
 ## Decisions
 
-Record only the decisions, assumptions, and defaults that materially determine the intended behavior, contracts, responsibilities, boundaries, or verification.
+Record only the decisions, assumptions, and defaults needed to preserve and carry out the objective, intent, contracts, responsibilities, boundaries, and verification requirements already established above.
+
+Do not introduce here a new externally observable guarantee, success condition, failure condition, behavioral boundary, or authoritative outcome that is necessary to judge whether the objective was achieved. If such a condition is material, it belongs in `Verification Requirements`
 
 Under Decisions only, define protected scope and naming: identify existing behavior, responsibilities, or system areas that must remain unchanged, with any crossing change deferred to a separate plan; and require file, module, type, and major function names to expose their current responsibility and role without naming around abstractions that do not yet exist. Do not carry these decisions into Objective, Intent, or Verification Requirements.
 
@@ -97,6 +102,8 @@ Do not repeat background already captured in Intent.
 ## Verification
 
 Describe how each material Verification Requirement will be demonstrated through the intended execution path and observable evidence.
+
+This section defines only how the existing Verification Requirements will be demonstrated. It must not introduce, strengthen, narrow, or reinterpret the contract. If designing verification reveals a condition that materially changes what must be true for the objective to count as achieved, move that condition into `Verification Requirements`.
 
 Prefer verification through a representative end-to-end flow that exercises the real entry point, orchestration, integrations, required external effects, and authoritative readback applicable to the objective.
 
