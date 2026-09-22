@@ -122,3 +122,9 @@ lifecycle, finalization, cleanup, admission reconciliation과 branch isolation �
   sandbox와 system temporary-directory 허용으로 evidence를 기록하던 finding을 수용했다. 실제
   workflow provenance에 맞는 runtime evidence와 회귀 테스트를 추가한 `fa66c12`를 적용했다.
   E2E Node 46개와 `git diff --check`가 통과했다.
+
+- Round 4 — reviewed HEAD `48b36dc5782b0c4cdaf1509a90d2b8b5d6920d54`; verdict `FINDINGS`.
+  UTF-8 BOM을 TextDecoder가 제거해 provided Plan/workflow pass-through를 깨는 finding과 sandbox
+  policy evidence가 주석 문자열을 정규식으로 오인할 수 있는 finding을 수용했다. BOM 보존과
+  provided runtime provenance를 수정하고 회귀 테스트를 추가한 `54a228e`를 적용했다. E2E Node
+  47개와 `git diff --check`가 통과했다.
