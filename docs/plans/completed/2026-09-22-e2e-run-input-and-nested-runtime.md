@@ -102,3 +102,11 @@ lifecycle, finalization, cleanup, admission reconciliation과 branch isolation �
 * filesystem/process observation for nested workspace and Linux system temporary-directory access
 
 ## chatgpt-shot review log
+
+- Round 1 — review target `https://github.com/leesh7807/leesh-loop/pull/50`, reviewed HEAD
+  `0c6e5a2e2ce2b0b483609d1d702faa737e0c5b3b`; verdict `BLOCKED`. `chatgpt-shot submit`가 Job ID
+  반환 전에 `CHATGPT_AUTH_REQUIRED`로 실패했으며 인증/로그인은 수행하지 않았다. 리뷰 finding은
+  확정하지 않았고 수정/재리뷰 커밋은 없다. 적용 커밋은 `0c6e5a2e2ce2b0b483609d1d702faa737e0c5b3b`이다.
+  로컬 검증은 E2E Node 44개, Operator Node 24개, Notion Publisher 27개, `mix format
+  --check-formatted`, `git diff --check` 통과. `mix test`는 환경의 missing `ssl.app`, live E2E/admit는
+  missing `NOTION_TOKEN`으로 각각 실행하지 못했다.
