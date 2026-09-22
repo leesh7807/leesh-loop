@@ -62,7 +62,18 @@ reset protocol.
 
 Read `AGENTS.md`, then apply [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md). The template
 is the reusable Plan-based execution policy; this file supplies the repository's tracker, workspace,
-bootstrap, and Codex execution settings.
+bootstrap, and Codex execution settings. The E2E workload boundary below is an explicit exception to
+the template's H1 identity rule.
+
+## E2E workload boundary
+
+Treat the Accepted Plan supplied by the bound task as the immutable workload. A provided E2E Plan is
+valid when it is a readable, non-empty UTF-8 document; it does not need a Markdown H1 or a matching
+`docs/plans/active/<date-summary>.md` path. If a provided Plan has no H1, do not turn that into a
+blocker, derive another Plan, or rewrite the Accepted Plan. Execute the task from the complete
+Accepted Plan using the normal repository and tracker lifecycle. Catalog workloads may contain the
+existing run-specific H1 materialization, but that materialization is not a requirement for provided
+workloads.
 
 ## Workspace and task surface
 

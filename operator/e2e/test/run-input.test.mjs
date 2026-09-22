@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_PROVIDED_HARD_CAP_MS, resolveE2ERunInput, resolveWorkloadForRun } from '../model/run-input.mjs';
@@ -83,4 +83,11 @@ test('provided workflow is resolved as an exact document without E2E policy rewr
   assert.equal(input.workflow.source_path, workflowPath);
   assert.equal(input.workflow.resolved_workflow, workflow);
   assert.equal(input.workflow.resolved_workflow_sha256, sha256(workflow));
+});
+
+test('default E2E workflow executes H1-less provided Plans instead of treating them as blockers', async () => {
+  const workflow = await readFile(new URL('../WORKFLOW.md', import.meta.url), 'utf8');
+  assert.match(workflow, /readable, non-empty UTF-8 document/);
+  assert.match(workflow, /If a provided Plan has no H1, do not turn that into a\s+blocker/);
+  assert.match(workflow, /Execute the task from the complete\s+Accepted Plan/);
 });
