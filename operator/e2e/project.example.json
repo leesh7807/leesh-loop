@@ -3,6 +3,8 @@
   "workflow_path": "WORKFLOW.md",
   "notion_database_url": "https://app.notion.com/p/studyleesh/3e08a2658625805cad23fe1137be4a1e?v=3e08a26586258042a8e4000c945e56e7",
   "seed_source_ref": "refs/heads/main",
+  "codex_model": "gpt-6-luna",
+  "codex_reasoning_effort": "xhigh",
   "run_record_directory": "runs",
   "workspace_root": "workspaces",
   "poll_interval_ms": 15000,

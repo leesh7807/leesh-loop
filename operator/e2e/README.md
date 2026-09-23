@@ -1,13 +1,23 @@
 # Production E2E harness
 
-`project.json` is the fixed E2E Project binding. It intentionally keeps the dedicated Notion
-database URL and seed source ref in source control; secrets are read from `NOTION_TOKEN` and the
-normal GitHub CLI authentication. The default workflow is the repository-owned
+`project.json` is the local E2E Project binding and is ignored by Git. Copy the tracked
+`project.example.json` before first use; it contains the dedicated E2E Notion database binding and
+seed source ref. The E2E CLI needs `NOTION_TOKEN` in its process environment or in the current
+repository root's `.env`; it also uses the normal GitHub CLI authentication. The token is consumed
+by the host-side E2E and Operator processes and is not copied into the nested worker workspace.
+Symphony removes tracker secrets from the Codex worker process, so run the E2E CLI from a credentialed
+host shell rather than from a worker task shell. The default workflow is the repository-owned
 [`WORKFLOW.md`](WORKFLOW.md), not the production root workflow. Each run creates a run-local
 Operator Project with `skip_external_readiness: true` and a nested Symphony workspace under the
-current checkout, so it can run inside a Symphony worker sandbox without a host-global workspace.
+current checkout, without requiring a host-global workspace.
 Optional `codex_model` and `codex_reasoning_effort` fields are copied independently to the
 run-local Project when present; omitted fields leave Codex defaults in control.
+
+Create the local configuration from the example:
+
+```sh
+cp operator/e2e/project.example.json operator/e2e/project.json
+```
 
 Run the admission check first:
 

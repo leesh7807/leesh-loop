@@ -8,7 +8,7 @@ Projects may set either or both of these optional values:
 
 ```json
 {
-  "codex_model": "gpt-5.6-luna",
+  "codex_model": "gpt-6-luna",
   "codex_reasoning_effort": "xhigh"
 }
 ```

@@ -7,7 +7,7 @@
   ],
   "github_repository_url": "https://github.com/owner/repository.git",
   "github_base_branch": "main",
-  "codex_model": "gpt-5.6-luna",
+  "codex_model": "gpt-6-luna",
   "codex_reasoning_effort": "xhigh",
   "symphony_port": 4100,
   "ui_port": 4310,
