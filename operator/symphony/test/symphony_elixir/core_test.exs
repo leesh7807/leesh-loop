@@ -2124,7 +2124,7 @@ defmodule SymphonyElixir.CoreTest do
 
       expected_turn_sandbox_policy = %{
         "type" => "workspaceWrite",
-        "writableRoots" => [canonical_workspace, Path.join(canonical_workspace, ".git")],
+        "writableRoots" => [canonical_workspace, Path.join(canonical_workspace, ".git"), Path.expand(System.tmp_dir!())],
         "networkAccess" => true,
         "excludeTmpdirEnvVar" => false,
         "excludeSlashTmp" => false

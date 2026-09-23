@@ -1055,7 +1055,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              "type" => "workspaceWrite",
              "writableRoots" => [
                canonical_default_workspace_root,
-               Path.join(canonical_default_workspace_root, ".git")
+               Path.join(canonical_default_workspace_root, ".git"),
+               Path.expand(System.tmp_dir!())
              ],
              "networkAccess" => true,
              "excludeTmpdirEnvVar" => false,
@@ -1454,7 +1455,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              "type" => "workspaceWrite",
              "writableRoots" => [
                Path.expand(Path.join(System.tmp_dir!(), "symphony_workspaces")),
-               Path.expand(Path.join([System.tmp_dir!(), "symphony_workspaces", ".git"]))
+               Path.expand(Path.join([System.tmp_dir!(), "symphony_workspaces", ".git"])),
+               Path.expand(System.tmp_dir!())
              ],
              "networkAccess" => true,
              "excludeTmpdirEnvVar" => false,
@@ -1469,7 +1471,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              "/tmp/workspace"
            ) == %{
              "type" => "workspaceWrite",
-             "writableRoots" => [Path.expand("/tmp/workspace"), Path.expand("/tmp/workspace/.git")],
+             "writableRoots" => [Path.expand("/tmp/workspace"), Path.expand("/tmp/workspace/.git"), Path.expand(System.tmp_dir!())],
              "networkAccess" => true,
              "excludeTmpdirEnvVar" => false,
              "excludeSlashTmp" => false
@@ -1489,7 +1491,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              "type" => "workspaceWrite",
              "writableRoots" => [
                Path.expand("~/.symphony-workspaces"),
-               Path.expand("~/.symphony-workspaces/.git")
+               Path.expand("~/.symphony-workspaces/.git"),
+               Path.expand(System.tmp_dir!())
              ],
              "networkAccess" => true,
              "excludeTmpdirEnvVar" => false,
@@ -1501,7 +1504,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert remote_policy == %{
              "type" => "workspaceWrite",
-             "writableRoots" => ["~/.symphony-workspaces", "~/.symphony-workspaces/.git"],
+             "writableRoots" => ["~/.symphony-workspaces", "~/.symphony-workspaces/.git", Path.expand(System.tmp_dir!())],
              "networkAccess" => true,
              "excludeTmpdirEnvVar" => false,
              "excludeSlashTmp" => false
@@ -1590,7 +1593,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       assert default_policy["writableRoots"] == [
                canonical_workspace_root,
-               Path.join(canonical_workspace_root, ".git")
+               Path.join(canonical_workspace_root, ".git"),
+               Path.expand(System.tmp_dir!())
              ]
 
       assert default_policy["networkAccess"] == true
