@@ -54,6 +54,8 @@ The Operator owns project configuration, lifecycle state, readiness, Symphony st
 
 `github_repository_url` and `github_base_branch` are always used together. `main` is only an example; it has no special meaning in the workflow. Existing configured base branches are used unchanged. If the configured base is missing, Operator readiness creates it from the configured repository's current default-branch HEAD and verifies the remote branch and commit before dispatch. Workspace creation, task branches, Rework, PRs, Merging, and Done verification then all use that same configured base branch.
 
+`codex_model` and `codex_reasoning_effort` are independent optional Project overrides. The example Project shows sample selections; remove either field to let Codex use its own setting. See [Project configuration](docs/PROJECT_CONFIGURATION.md).
+
 Use the intended entry point:
 
 ```sh

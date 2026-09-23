@@ -6,6 +6,8 @@ normal GitHub CLI authentication. The default workflow is the repository-owned
 [`WORKFLOW.md`](WORKFLOW.md), not the production root workflow. Each run creates a run-local
 Operator Project with `skip_external_readiness: true` and a nested Symphony workspace under the
 current checkout, so it can run inside a Symphony worker sandbox without a host-global workspace.
+Optional `codex_model` and `codex_reasoning_effort` fields are copied independently to the
+run-local Project when present; omitted fields leave Codex defaults in control.
 
 Run the admission check first:
 

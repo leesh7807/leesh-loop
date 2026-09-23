@@ -1,8 +1,8 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import test from 'node:test';
 import { E2E_DATABASE_URL, createOperatorProjectConfig, createRunPaths, loadE2EProjectConfig } from '../model/e2e-project-config.mjs';
 
 async function projectFixture(t, extra = {}) {
@@ -35,4 +35,29 @@ test('E2E config defaults nested Symphony workspace under the current repository
 test('E2E config rejects a host-global or external workspace authority', async t => {
   const fixture = await projectFixture(t, { workspace_root: '/tmp/e2e-workspaces' });
   await assert.rejects(() => loadE2EProjectConfig(fixture.configPath), /inside the current repository/);
+});
+
+test('E2E Codex overrides are optional and selectively copied to run-local Operator Projects', async t => {
+  for (const overrides of [
+    {},
+    { codex_model: 'example-model' },
+    { codex_reasoning_effort: 'example-effort' },
+    { codex_model: 'example-model', codex_reasoning_effort: 'example-effort' }
+  ]) {
+    const { configPath } = await projectFixture(t, overrides);
+    const config = await loadE2EProjectConfig(configPath);
+    const paths = createRunPaths(config, 'run-1');
+    const project = createOperatorProjectConfig(config, paths, 'base/run-1');
+    assert.equal(project.codex_model, overrides.codex_model);
+    assert.equal(project.codex_reasoning_effort, overrides.codex_reasoning_effort);
+    assert.equal(Object.hasOwn(project, 'codex_model'), Object.hasOwn(overrides, 'codex_model'));
+    assert.equal(Object.hasOwn(project, 'codex_reasoning_effort'), Object.hasOwn(overrides, 'codex_reasoning_effort'));
+  }
+});
+
+test('E2E Codex override configuration rejects blank and non-string values', async t => {
+  for (const [key, value] of [['codex_model', ''], ['codex_model', '  '], ['codex_model', null], ['codex_model', 1], ['codex_reasoning_effort', ''], ['codex_reasoning_effort', '  '], ['codex_reasoning_effort', null], ['codex_reasoning_effort', 1]]) {
+    const { configPath } = await projectFixture(t, { [key]: value });
+    await assert.rejects(loadE2EProjectConfig(configPath), new RegExp(key + ' must be a non-empty string'));
+  }
 });

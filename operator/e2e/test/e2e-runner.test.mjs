@@ -226,6 +226,19 @@ test('first Human Review transition ignores workpad and independent review seman
   assert.equal(record.failures.length, 0);
 });
 
+test('E2E run-local Operator Project contains only configured Codex overrides', async () => {
+  let current = 0;
+  const harness = fixture({ states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done'], clock: () => current++ });
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-codex-overrides-'));
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+  harness.config.codex_model = 'example-model';
+  const record = await new E2ERunner({ ...harness, random: () => 0, clock: () => current++, waitForPoll: async () => {} }).runProductionE2E();
+  const project = JSON.parse(await readFile(record.paths.runtime_project, 'utf8'));
+  assert.equal(project.codex_model, 'example-model');
+  assert.equal(Object.hasOwn(project, 'codex_reasoning_effort'), false);
+});
+
 test('re-entered Human Review is cancelled without a second Merging transition', async () => {
   let current = 0;
   const harness = fixture({ states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Human Review'], clock: () => current++ });
