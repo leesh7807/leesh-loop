@@ -11,6 +11,8 @@ operator/.runtime/
 operator/project.json
 operator/e2e/runs/*
 !operator/e2e/runs/.gitkeep
+operator/e2e/workspaces/*
+!operator/e2e/workspaces/.gitkeep
 
 # Legacy component locations moved beneath operator/
 /symphony/

@@ -61,7 +61,9 @@ is_under() {
 }
 
 [ "$workspace_root" != "$repository_root" ] || fail 'workspace root must not be the canonical repository.'
-is_under "$workspace_root" "$repository_root" && fail "workspace root must be outside the canonical repository: $workspace_root"
+if is_under "$workspace_root" "$repository_root" && [ "${SYMPHONY_ALLOW_WORKSPACE_ROOT_INSIDE_REPOSITORY:-false}" != true ]; then
+  fail "workspace root must be outside the canonical repository: $workspace_root"
+fi
 
 mkdir -p -- "$workspace_root" || fail "cannot create workspace root: $workspace_root"
 [ -w "$workspace_root" ] || fail "workspace root is not writable by the Operator: $workspace_root"

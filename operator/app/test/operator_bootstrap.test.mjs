@@ -107,3 +107,15 @@ test('default bootstrap still requires external readiness before child startup',
   );
   await assert.rejects(readFile(fixtureValue.log, 'utf8'), /./);
 });
+
+test('nested E2E bootstrap permits a run-owned workspace inside the current repository when explicitly configured', async t => {
+  const fixtureValue = await fixture(t);
+  const nestedWorkspace = join(root, 'operator', 'e2e', `.operator-bootstrap-test-${process.pid}-${Date.now()}`);
+  t.after(() => rm(nestedWorkspace, { recursive: true, force: true }));
+  const env = environment(fixtureValue);
+  env.SYMPHONY_WORKSPACE_ROOT = nestedWorkspace;
+  env.SYMPHONY_ALLOW_WORKSPACE_ROOT_INSIDE_REPOSITORY = 'true';
+  const result = await execFile('sh', [bootstrap, '--skip-external-readiness', '--', fixtureValue.child, 'nested'], { env });
+  assert.match(result.stdout, /external-readiness=skipped/);
+  assert.match(await readFile(fixtureValue.log, 'utf8'), /child nested/);
+});

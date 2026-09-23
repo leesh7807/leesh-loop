@@ -4,7 +4,7 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateWorkloadCatalog } from '../model/workload-catalog.mjs';
-import { derivePlanIdentifier } from '../model/plan-identity.mjs';
+import { derivePlanIdentifier, sha256 } from '../model/plan-identity.mjs';
 import { E2ERunner } from '../run/e2e-runner.mjs';
 import { RunCompletionVerifier } from '../run/lifecycle/run-completion-verifier.mjs';
 import { createRunRecord, RunRecordStore } from '../model/run-record-store.mjs';
@@ -12,7 +12,7 @@ import { createRunPaths } from '../model/e2e-project-config.mjs';
 
 const plan = '# Representative task\n\nInspect the repository and write a concise note under docs/.\n';
 
-function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, reviewEvidence } = {}) {
+function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, reviewEvidence, runInput } = {}) {
   const root = '/repo';
   const config = {
     repository_url: 'git@github.com:owner/repo.git',
@@ -73,7 +73,7 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
   const store = new RunRecordStore(config);
   const finalized = [];
   const finalizer = { async finalizeRun({ record, reason, task: currentTask }) { finalized.push(reason); if (reason === 'reentered_human_review') { const cancelled = await notion.updateTaskState(config.notion_database_url, currentTask.id, 'Cancelled'); assert.equal(cancelled.state, 'Cancelled'); record.cleanup.task_terminalized = true; } record.status = 'finished'; record.finalization.reason = reason; record.finalization.complete = true; record.ended_at = new Date(clock()).toISOString(); await store.save(record); return record; } };
-  return { config, catalog: validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 5, accepted_plan: plan }]), notionClient: notion, operatorClient: runtime, gitClient: git, notionPublisherClient: publisher, githubClient: github, runEvidenceCollector: evidence, runFinalizer: finalizer, runRecordStore: store, finalized, transitions, publishedPlans };
+  return { config, runInput, catalog: validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 5, accepted_plan: plan }]), notionClient: notion, operatorClient: runtime, gitClient: git, notionPublisherClient: publisher, githubClient: github, runEvidenceCollector: evidence, runFinalizer: finalizer, runRecordStore: store, finalized, transitions, publishedPlans };
 }
 
 test('E2ERunner reaches terminal Done through injected production dependencies', async () => {
@@ -105,6 +105,107 @@ test('E2ERunner reaches terminal Done through injected production dependencies',
   assert.deepEqual(harness.transitions, ['Merging']);
   assert.equal(record.lifecycle.mechanical_human_review_transition.performed, true);
   assert.equal(Object.hasOwn(record.artifacts, 'mechanical_approval'), false);
+});
+
+test('E2ERunner publishes a provided H1-less Plan unchanged through the production path', async () => {
+  let current = 0;
+  const providedPlan = 'Accepted work without a Markdown heading.\n한국어 내용.\n';
+  const harness = fixture({
+    states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done'],
+    clock: () => current++,
+    runInput: {
+      workload: {
+        source: 'provided',
+        source_path: '/input/provided.md',
+        accepted_plan: providedPlan,
+        accepted_plan_sha256: sha256(providedPlan),
+        plan_identifier: derivePlanIdentifier(providedPlan),
+        hard_cap_ms: 1_800_000,
+        hard_cap_provenance: 'provided_default'
+      },
+      workflow: { source: 'default', source_path: '/repo/operator/e2e/WORKFLOW.md', resolved_workflow: 'default workflow', resolved_workflow_sha256: sha256('default workflow') }
+    }
+  });
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-provided-plan-'));
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+  const record = await new E2ERunner({ ...harness, clock: () => current++, waitForPoll: async () => {} }).runProductionE2E();
+  assert.equal(record.workload.source, 'provided');
+  assert.equal(record.workload.accepted_plan, providedPlan);
+  assert.equal(record.workload.hard_cap_ms, 1_800_000);
+  assert.equal(record.run_input.workload.catalog_entry, null);
+  assert.equal(record.run_input.workload.supplied.accepted_plan, providedPlan);
+  assert.equal(record.run_input.workload.publisher.accepted_plan, providedPlan);
+  assert.equal(harness.publishedPlans[0], providedPlan);
+  assert.equal(record.runtime.project.workflow_path, record.paths.workflow_snapshot);
+  assert.equal(await readFile(record.paths.workload_input_snapshot, 'utf8'), providedPlan);
+  assert.equal(await readFile(record.paths.workload_publisher_snapshot, 'utf8'), providedPlan);
+  assert.equal(await readFile(record.paths.workflow_snapshot, 'utf8'), 'default workflow');
+  const persisted = JSON.parse(await readFile(record.paths.record, 'utf8'));
+  assert.equal(persisted.run_input.workload.publisher.accepted_plan_sha256, sha256(providedPlan));
+  assert.equal(persisted.run_input.workflow.resolved_workflow_sha256, sha256('default workflow'));
+});
+
+test('E2ERunner records a provided workflow sandbox policy instead of default policy evidence', async () => {
+  let current = 0;
+  const workflow = '---\ncodex:\n  turn_sandbox_policy:\n    type: workspaceWrite\n    writableRoots: [/workspace]\n---\nprovided workflow\n';
+  const harness = fixture({
+    states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done'],
+    clock: () => current++,
+    runInput: {
+      workload: {
+        source: 'provided',
+        source_path: '/input/provided.md',
+        accepted_plan: 'Provided task.\n',
+        accepted_plan_sha256: sha256('Provided task.\n'),
+        plan_identifier: derivePlanIdentifier('Provided task.\n'),
+        hard_cap_ms: 1_800_000,
+        hard_cap_provenance: 'provided_default'
+      },
+      workflow: { source: 'provided', source_path: '/input/workflow.md', resolved_workflow: workflow, resolved_workflow_sha256: sha256(workflow) }
+    }
+  });
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-provided-workflow-'));
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+  const record = await new E2ERunner({ ...harness, clock: () => current++, waitForPoll: async () => {} }).runProductionE2E();
+  assert.equal(record.runtime.resolved_environment.codex_runtime.policy_source, 'provided workflow snapshot passed through unchanged; effective policy is runtime-owned');
+  assert.equal(record.runtime.resolved_environment.codex_runtime.system_temporary_directory, 'determined by the provided workflow and Symphony runtime; E2E adds no override');
+  assert.equal(record.runtime.resolved_environment.codex_runtime.e2e_specific_sandbox_policy, false);
+});
+
+test('provided duplicate publication remains a production failure without Plan mutation or fallback', async () => {
+  const providedPlan = 'Duplicate publication input without H1.\n';
+  const harness = fixture({
+    states: ['Ready'],
+    clock: () => 0,
+    runInput: {
+      workload: {
+        source: 'provided',
+        source_path: '/input/duplicate.md',
+        accepted_plan: providedPlan,
+        accepted_plan_sha256: sha256(providedPlan),
+        plan_identifier: derivePlanIdentifier(providedPlan),
+        hard_cap_ms: 1_800_000,
+        hard_cap_provenance: 'provided_default'
+      },
+      workflow: { source: 'default', source_path: '/repo/operator/e2e/WORKFLOW.md', resolved_workflow: 'default workflow', resolved_workflow_sha256: sha256('default workflow') }
+    }
+  });
+  harness.notionPublisherClient.publishAcceptedPlan = async ({ plan }) => {
+    harness.publishedPlans.push(plan);
+    throw new Error('duplicate publication: PLAN-EXAMPLE already exists');
+  };
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-provided-duplicate-'));
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+  const record = await new E2ERunner({ ...harness, waitForPoll: async () => {} }).runProductionE2E();
+  assert.equal(record.status, 'finished');
+  assert.equal(record.artifacts.publisher_failure.error, 'duplicate publication: PLAN-EXAMPLE already exists');
+  assert.equal(record.failures.at(-1).error, 'duplicate publication: PLAN-EXAMPLE already exists');
+  assert.deepEqual(harness.publishedPlans, [providedPlan]);
+  assert.equal(record.run_input.workload.publisher.accepted_plan, providedPlan);
+  assert.equal(record.run_input.workload.publisher.accepted_plan_sha256, sha256(providedPlan));
 });
 
 test('first Human Review transition ignores workpad and independent review semantics', async () => {
