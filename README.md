@@ -56,10 +56,10 @@ The Operator owns project configuration, lifecycle state, readiness, Symphony st
 
 `codex_model` and `codex_reasoning_effort` are independent optional Project overrides. The example Project shows sample selections; remove either field to let Codex use its own setting. See [Project configuration](docs/PROJECT_CONFIGURATION.md).
 
-Use the intended entry point:
+From the repository root, start the Operator with:
 
 ```sh
-node operator/app/leesh-loop.mjs start operator/project.json
+npm run start
 ```
 
 The bundled development launcher uses `mise exec -- mix run`; install the pinned toolchain and
@@ -120,7 +120,7 @@ state vocabulary plus `Backlog`; `Backlog` is a normal non-active, non-terminal 
 and is never dispatched. The publisher may additionally use its transient `Publisher Pending`
 state while a task is being constructed.
 
-Symphony starts observable but dispatch-disabled. Only after the Operator publishes durable `running` authorization and Symphony writes its dispatch acknowledgement can it find runnable tasks in Notion and run agents in isolated workspaces. Repeated `start` reuses only a compatible acknowledged running runtime; use `node operator/app/leesh-loop.mjs stop operator/project.json` before replacing a live incompatible runtime. Stopping never stops the external `chatgpt-shot` Service.
+Symphony starts observable but dispatch-disabled. Only after the Operator publishes durable `running` authorization and Symphony writes its dispatch acknowledgement can it find runnable tasks in Notion and run agents in isolated workspaces. Repeated `start` reuses only a compatible acknowledged running runtime; use `npm run stop` before replacing a live incompatible runtime. Stopping never stops the external `chatgpt-shot` Service.
 
 `operator/project.json` may include `workspace_files`, an optional array of absolute host-local regular-file paths. Each configured file is copied by basename to the root of a newly created workspace after the repository clone and before dependency bootstrap; for example `/home/user/leesh-loop/.env` becomes `<workspace>/.env`. Empty or omitted arrays preserve the usual behavior. Relative, missing, non-regular, and duplicate-basename sources reject Operator startup. Existing workspace destinations are never overwritten. The setting is part of runtime compatibility, but it is only applied for new workspaces: continuations preserve their existing files and do not apply a later configuration change.
 
@@ -137,21 +137,32 @@ Agents work against the target repository according to its `WORKFLOW.md`, then w
 
 ## Production E2E harness
 
-The production E2E harness lives under [`operator/e2e`](operator/e2e). Run it with
-`node operator/e2e/cli.mjs run operator/e2e/project.json` after configuring the normal Operator,
-Notion, GitHub, and Codex credentials. The checked-in E2E project keeps its dedicated Notion
-database binding and seed source ref, resolves the repository-owned E2E workflow, creates an opaque
-run-scoped base and a nested run-local Symphony workspace inside the current checkout, and uses the
-existing Publisher → `leesh-loop.mjs start` → Operator → Symphony production path. It does not
-introduce a separate E2E runtime or Symphony launcher, and stores durable evidence under the ignored
-`operator/e2e/runs/<run-id>/run.json` record. Use `--plan PATH [--hard-cap-ms MS]` for direct workload
-input and `--workflow PATH` for an exact per-run workflow.
+The production E2E harness lives under [`operator/e2e`](operator/e2e). Its local Project
+configuration is Git-ignored. Before the first run, copy the tracked example:
+
+```sh
+cp operator/e2e/project.example.json operator/e2e/project.json
+```
+
+Then run `npm run e2e` from the repository root in a credentialed host shell.
+The E2E CLI reads `NOTION_TOKEN` from its process environment or the repository root `.env`, and
+uses the normal GitHub CLI authentication. The token stays in the host-side E2E and Operator
+processes; Symphony removes tracker secrets from the Codex worker process and the E2E harness does
+not copy `.env` into the nested workspace. The example carries the dedicated Notion database
+binding, seed source ref, and Codex selections. The harness resolves the repository-owned E2E
+workflow, creates an opaque run-scoped base and a nested run-local Symphony workspace inside the
+current checkout, and uses the existing Publisher → `leesh-loop.mjs start` → Operator → Symphony
+production path. It does not introduce a separate E2E runtime or Symphony launcher, and stores
+durable evidence under the ignored `operator/e2e/runs/<run-id>/run.json` record. Pass run options
+after `--`, for example `npm run e2e -- --plan PATH [--hard-cap-ms MS]` for direct workload input
+or `npm run e2e -- --workflow PATH` for an exact per-run workflow.
 
 The harness records observed lifecycle, worker/review timing, external artifacts, finalization and
 cleanup separately. A run that ends at an observed production failure or finite hard cap is still a
 useful result when its evidence is preserved and admission reconciliation confirms that no residue
-blocks the next run. `node operator/e2e/cli.mjs admit operator/e2e/project.json` performs the same
-pre-dispatch safety check without publishing a task.
+blocks the next run. To perform the pre-dispatch safety check without publishing a task, run
+`node operator/e2e/cli.mjs admit operator/e2e/project.json` from the repository root. The root
+`e2e` script is for running a workload; it does not select the `admit` command.
 
 ## Repository Harness
 

@@ -14,9 +14,9 @@
 ## Project Map
 
 * `README.md` — what this repository does and how its parts fit together
-* `PLAN.md` — how to plan work
-* `WORKFLOW.md` — how to execute work
-* `REVIEW.md` — how to review work
+* `docs/PLAN.md` — how to plan work
+* `WORKFLOW.md` — how to execute and review work
+* `docs/WORKFLOW_TEMPLATE.md` — reusable workflow for operated repositories
 
 # Global Agent Instructions
 

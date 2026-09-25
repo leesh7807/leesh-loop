@@ -1,0 +1,13 @@
+prefix_rule(
+    pattern = ["npm", "run", "e2e"],
+    decision = "allow",
+    justification = "Run the production E2E harness outside its parent Codex sandbox.",
+    match = [
+        "npm run e2e",
+        "npm run e2e -- --plan ./accepted-plan.md",
+    ],
+    not_match = [
+        "npm run start",
+        "npm run stop",
+    ],
+)
