@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "scripts": {
+    "start": "node operator/app/leesh-loop.mjs start operator/project.json",
+    "stop": "node operator/app/leesh-loop.mjs stop operator/project.json",
+    "e2e": "node operator/e2e/cli.mjs run operator/e2e/project.json"
+  }
+}
