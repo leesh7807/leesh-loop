@@ -6,6 +6,7 @@
   ],
   "github_repository_url": "https://github.com/owner/repository.git",
   "github_base_branch": "main",
+  "open_project_surfaces": true,
   "codex_model": "gpt-6-luna",
   "codex_reasoning_effort": "xhigh"
 }

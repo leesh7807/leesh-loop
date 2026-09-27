@@ -39,6 +39,7 @@ test('E2E config defaults nested Symphony workspace under the current repository
   assert.equal(project.symphony_workspace_root, join(config.workspace_root, 'run-1'));
   assert.equal(project.allow_workspace_root_inside_repository, true);
   assert.equal(project.skip_external_readiness, true);
+  assert.equal(project.open_project_surfaces, false);
 });
 
 test('E2E config rejects a host-global or external workspace authority', async t => {

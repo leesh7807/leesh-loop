@@ -54,6 +54,7 @@ async function loadConfig(file, { validateWorkspaceFileSources = true, requireNo
   for (const key of ['codex_model', 'codex_reasoning_effort']) if (config[key] !== undefined && (typeof config[key] !== 'string' || !config[key].trim())) throw new Error(`${key} must be a non-empty string`);
   await validateBaseBranch(config.github_base_branch);
   if (config.skip_external_readiness !== undefined && typeof config.skip_external_readiness !== 'boolean') throw new Error('skip_external_readiness must be a boolean');
+  if (config.open_project_surfaces !== undefined && typeof config.open_project_surfaces !== 'boolean') throw new Error('open_project_surfaces must be a boolean');
   if (config.allow_workspace_root_inside_repository !== undefined && typeof config.allow_workspace_root_inside_repository !== 'boolean') throw new Error('allow_workspace_root_inside_repository must be a boolean');
   if (config.startup_timeout_ms !== undefined && (!Number.isSafeInteger(config.startup_timeout_ms) || config.startup_timeout_ms <= 0)) throw new Error('startup_timeout_ms must be a positive integer');
   if (config.browser_acknowledgement_timeout_ms !== undefined && (!Number.isSafeInteger(config.browser_acknowledgement_timeout_ms) || config.browser_acknowledgement_timeout_ms <= 0)) throw new Error('browser_acknowledgement_timeout_ms must be a positive integer');
@@ -61,7 +62,7 @@ async function loadConfig(file, { validateWorkspaceFileSources = true, requireNo
   const projectDirectory = dirname(configuration_path);
   const workspace_files = normalizeWorkspaceFiles(config.workspace_files, projectDirectory, homeDirectory);
   if (validateWorkspaceFileSources) await validateWorkspaceFiles(workspace_files);
-  const resolved = { ...config, notion_database_url, skip_external_readiness: config.skip_external_readiness === true, workflow_path: resolveProjectPath(config.workflow_path, projectDirectory, homeDirectory), symphony_workspace_root: resolveProjectPath(config.symphony_workspace_root, projectDirectory, homeDirectory), workspace_files, ...(config.state_directory === undefined ? {} : { state_directory: resolveProjectPath(config.state_directory, projectDirectory, homeDirectory) }), ...(config.symphony_command === undefined ? {} : { symphony_command: resolveProjectPath(config.symphony_command, projectDirectory, homeDirectory) }), configuration_path };
+  const resolved = { ...config, notion_database_url, skip_external_readiness: config.skip_external_readiness === true, open_project_surfaces: config.open_project_surfaces ?? PROJECT_DEFAULTS.open_project_surfaces, workflow_path: resolveProjectPath(config.workflow_path, projectDirectory, homeDirectory), symphony_workspace_root: resolveProjectPath(config.symphony_workspace_root, projectDirectory, homeDirectory), workspace_files, ...(config.state_directory === undefined ? {} : { state_directory: resolveProjectPath(config.state_directory, projectDirectory, homeDirectory) }), ...(config.symphony_command === undefined ? {} : { symphony_command: resolveProjectPath(config.symphony_command, projectDirectory, homeDirectory) }), configuration_path };
   return resolved;
 }
 async function withLock(config, action) {
@@ -158,10 +159,10 @@ function uiPort(config) { return Number(config.ui_port || PROJECT_DEFAULTS.ui_po
 function ensurePublisher() {
   const publisher = join(root, 'operator/notion_publisher');
   if (!existsSync(join(publisher, 'node_modules/.bin/tsc'))) {
-    const install = spawnSync('npm', ['ci'], { cwd: publisher, stdio: 'inherit' });
+    const install = spawnSync('npm', ['ci'], { cwd: publisher, stdio: ['ignore', 'ignore', 'inherit'] });
     if (install.status !== 0) throw new Error('publisher preparation failed: npm ci');
   }
-  const build = spawnSync('npm', ['run', 'build'], { cwd: publisher, stdio: 'inherit' });
+  const build = spawnSync('npm', ['run', 'build'], { cwd: publisher, stdio: ['ignore', 'ignore', 'inherit'] });
   if (build.status !== 0) throw new Error('publisher preparation failed: npm run build');
 }
 function uiUrl(config) { return `http://127.0.0.1:${uiPort(config)}`; }
@@ -190,7 +191,7 @@ async function start(config) {
     if (existing) {
       let window_error;
       try { await ensureUi(config); } catch (error) { window_error = String(error.message || error); }
-      if (!existing.project_window_opened_at) {
+      if (config.open_project_surfaces && !existing.project_window_opened_at) {
         try {
           await openWindow(config, existing.effective.dashboard);
           await atomicJson(paths(config).state, { ...existing, project_window_opened_at: new Date().toISOString() });
@@ -240,8 +241,13 @@ async function start(config) {
       await atomicText(p.startup_status, 'waiting for Symphony dispatch acknowledgement');
       await waitFor(() => runtimeObserved(running, true), 'dispatch acknowledgement', 15_000, reportProgress('dispatch acknowledgement'), () => childFailure('dispatch acknowledgement'));
       try {
-        await openWindow(config, identity.dashboard);
-        await atomicJson(p.state, { ...running, project_window_opened_at: new Date().toISOString() }); await remove(p.startup_status);
+        if (config.open_project_surfaces) {
+          await openWindow(config, identity.dashboard);
+          await atomicJson(p.state, { ...running, project_window_opened_at: new Date().toISOString() });
+        } else {
+          await ensureUi(config);
+        }
+        await remove(p.startup_status);
         return { reused: false, pid, dashboard: identity.dashboard };
       }
       catch (windowError) { return { reused: false, pid, dashboard: identity.dashboard, window_error: String(windowError.message || windowError) }; }
@@ -430,4 +436,4 @@ if (directExecution && !['boot', 'start', 'stop', 'serve'].includes(command)) {
   }).then(value => { if (value) console.log(JSON.stringify(value)); }).catch(error => { console.error(`Operator failed: ${error.message}`); process.exitCode = 1; });
 }
 
-export { acknowledgeBrowser, compatible, dispatchBrowser, effective, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, readRequestBody };
+export { acknowledgeBrowser, compatible, dispatchBrowser, effective, ensurePublisher, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, readRequestBody };
