@@ -5,13 +5,22 @@ import { basename, join } from 'node:path';
 import { execFile as execute } from 'node:child_process';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { compatible, effective, loadConfig, operatorBootstrapArgs } from '../leesh-loop.mjs';
+import { compatible, effective, loadConfig as loadOperatorConfig, operatorBootstrapArgs } from '../leesh-loop.mjs';
 import { materializeWorkspaceFiles, validateWorkspaceFiles } from '../workspace-files.mjs';
 
 const execFile = promisify(execute);
 const root = join(import.meta.dirname, '../../..');
 const cli = join(root, 'operator', 'app', 'leesh-loop.mjs');
 const workflow = join(root, 'WORKFLOW.md');
+const testDatabaseUrl = 'https://notion.example/test-database';
+
+function loadConfig(path, options = {}) {
+  return loadOperatorConfig(path, {
+    environment: { LEESH_LOOP_NOTION_DATABASE_URL: testDatabaseUrl },
+    envFile: join(tmpdir(), 'leesh-loop-test-no-env-file'),
+    ...options
+  });
+}
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-workspace-files-'));
@@ -26,7 +35,6 @@ async function projectConfig(directory, workspaceRoot, workspaceFiles, skipExter
   const path = join(directory, 'project.json');
   const config = {
     workflow_path: join(root, 'WORKFLOW.md'),
-    notion_database_url: 'https://notion.example/database',
     symphony_workspace_root: workspaceRoot,
     github_repository_url: 'https://github.com/example/repository.git',
     github_base_branch: 'main'
@@ -48,6 +56,40 @@ test('workspace-file configuration accepts omitted, empty, and absolute regular 
   }
 });
 
+test('workspace-file configuration resolves Project-relative and home paths before validation and materialization', async t => {
+  const { directory, workspaceRoot, workspace } = await fixture(t);
+  const relativeSource = join(directory, '.env');
+  const home = join(directory, 'home');
+  const homeSource = join(home, '.env');
+  await mkdir(home);
+  await writeFile(relativeSource, 'BINDING=relative\n');
+  await writeFile(homeSource, 'BINDING=home\n');
+
+  const relativeConfig = await loadConfig(await projectConfig(directory, workspaceRoot, ['.env']));
+  assert.deepEqual(relativeConfig.workspace_files, [relativeSource]);
+  await materializeWorkspaceFiles(workspace, relativeConfig.workspace_files, workspaceRoot);
+  assert.equal(await readFile(join(workspace, '.env'), 'utf8'), 'BINDING=relative\n');
+
+  await rm(join(workspace, '.env'));
+  const homeConfig = await loadConfig(await projectConfig(directory, workspaceRoot, ['~/.env']), { homeDirectory: home });
+  assert.deepEqual(homeConfig.workspace_files, [homeSource]);
+  await materializeWorkspaceFiles(workspace, homeConfig.workspace_files, workspaceRoot);
+  assert.equal(await readFile(join(workspace, '.env'), 'utf8'), 'BINDING=home\n');
+});
+
+test('production Project database binding prefers the process environment and reports a missing binding', async t => {
+  const { directory, workspaceRoot } = await fixture(t);
+  const configPath = await projectConfig(directory, workspaceRoot);
+  const envFile = join(directory, '.env');
+  await writeFile(envFile, 'LEESH_LOOP_NOTION_DATABASE_URL=https://notion.example/file-database\n');
+  const environmentUrl = 'https://notion.example/environment-database';
+  const config = await loadConfig(configPath, { environment: { LEESH_LOOP_NOTION_DATABASE_URL: environmentUrl }, envFile });
+  assert.equal(config.notion_database_url, environmentUrl);
+  const fromFile = await loadConfig(configPath, { environment: {}, envFile });
+  assert.equal(fromFile.notion_database_url, 'https://notion.example/file-database');
+  await assert.rejects(loadConfig(configPath, { environment: {}, envFile: join(directory, 'missing.env') }), /missing LEESH_LOOP_NOTION_DATABASE_URL/);
+});
+
 test('workspace-file configuration rejects invalid paths and destination collisions', async t => {
   const { directory, workspaceRoot } = await fixture(t);
   const source = join(directory, 'source');
@@ -60,7 +102,7 @@ test('workspace-file configuration rejects invalid paths and destination collisi
   await writeFile(source, 'source');
   await writeFile(first, 'one');
   await writeFile(second, 'two');
-  await assert.rejects(loadConfig(await projectConfig(directory, workspaceRoot, ['relative.env'])), /must be an absolute path/);
+  await assert.rejects(loadConfig(await projectConfig(directory, workspaceRoot, ['relative.env'])), /does not exist/);
   await assert.rejects(loadConfig(await projectConfig(directory, workspaceRoot, [join(directory, 'missing')])), /does not exist/);
   await assert.rejects(loadConfig(await projectConfig(directory, workspaceRoot, [otherDirectory])), /not a regular file/);
   await assert.rejects(loadConfig(await projectConfig(directory, workspaceRoot, [first, second])), /conflicting destination basename/);
@@ -74,7 +116,6 @@ test('external readiness skip configuration is boolean and defaults to performin
 
   await writeFile(configPath, JSON.stringify({
     workflow_path: workflow,
-    notion_database_url: 'https://notion.example/database',
     symphony_workspace_root: workspaceRoot,
     github_repository_url: 'https://github.com/example/repository.git',
     github_base_branch: 'main',
@@ -85,7 +126,6 @@ test('external readiness skip configuration is boolean and defaults to performin
 
   await writeFile(configPath, JSON.stringify({
     workflow_path: workflow,
-    notion_database_url: 'https://notion.example/database',
     symphony_workspace_root: workspaceRoot,
     github_repository_url: 'https://github.com/example/repository.git',
     github_base_branch: 'main',
@@ -103,7 +143,6 @@ test('external readiness skip configuration is boolean and defaults to performin
 
   await writeFile(configPath, JSON.stringify({
     workflow_path: workflow,
-    notion_database_url: 'https://notion.example/database',
     symphony_workspace_root: workspaceRoot,
     github_repository_url: 'https://github.com/example/repository.git',
     github_base_branch: 'main',
@@ -119,7 +158,7 @@ test('stop accepts an invalidated workspace-file source so a live runtime remain
   const contents = JSON.parse(await readFile(config, 'utf8'));
   contents.state_directory = join(directory, 'runtime');
   await writeFile(config, JSON.stringify(contents));
-  await execFile(process.execPath, [cli, 'stop', config]);
+  await execFile(process.execPath, [cli, 'stop', config], { env: { ...process.env, LEESH_LOOP_NOTION_DATABASE_URL: testDatabaseUrl } });
 });
 
 test('workspace files participate in effective runtime identity', async t => {
@@ -174,7 +213,6 @@ test('Codex overrides are optional non-empty strings and participate in runtime 
 
   await writeFile(configPath, JSON.stringify({
     workflow_path: workflow,
-    notion_database_url: 'https://notion.example/database',
     symphony_workspace_root: workspaceRoot,
     github_repository_url: 'https://github.com/example/repository.git',
     github_base_branch: 'main',
@@ -190,7 +228,6 @@ test('Codex overrides are optional non-empty strings and participate in runtime 
 
   await writeFile(configPath, JSON.stringify({
     workflow_path: workflow,
-    notion_database_url: 'https://notion.example/database',
     symphony_workspace_root: workspaceRoot,
     github_repository_url: 'https://github.com/example/repository.git',
     github_base_branch: 'main',
@@ -206,7 +243,6 @@ test('Codex overrides are optional non-empty strings and participate in runtime 
 
   await writeFile(configPath, JSON.stringify({
     workflow_path: workflow,
-    notion_database_url: 'https://notion.example/database',
     symphony_workspace_root: workspaceRoot,
     github_repository_url: 'https://github.com/example/repository.git',
     github_base_branch: 'main',
@@ -225,7 +261,6 @@ test('Codex overrides are optional non-empty strings and participate in runtime 
   for (const [key, value] of [['codex_model', ''], ['codex_model', '  '], ['codex_model', null], ['codex_model', 1], ['codex_reasoning_effort', ''], ['codex_reasoning_effort', '  '], ['codex_reasoning_effort', null], ['codex_reasoning_effort', 1]]) {
     await writeFile(configPath, JSON.stringify({
       workflow_path: workflow,
-      notion_database_url: 'https://notion.example/database',
       symphony_workspace_root: workspaceRoot,
       github_repository_url: 'https://github.com/example/repository.git',
       github_base_branch: 'main',
@@ -285,6 +320,7 @@ test('the actual after_create materialization command runs after clone and befor
   const remote = join(directory, 'remote.git');
   await writeFile(source, 'AFTER_CREATE_SENTINEL\n');
   await mkdir(join(seed, 'operator', 'app'), { recursive: true });
+  await copyFile(join(root, 'operator', 'local-path.mjs'), join(seed, 'operator', 'local-path.mjs'));
   await copyFile(join(root, 'operator', 'app', 'workspace-files.mjs'), join(seed, 'operator', 'app', 'workspace-files.mjs'));
   await writeFile(join(seed, 'cloned.txt'), 'repository clone completed');
   await execFile('git', ['init', '--bare', remote]);

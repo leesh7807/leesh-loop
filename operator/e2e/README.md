@@ -1,19 +1,20 @@
 # Production E2E harness
 
-`project.json` is the local E2E Project binding and is ignored by Git. Copy the tracked
-`project.example.json` before first use; it contains the dedicated E2E Notion database binding and
-seed source ref. The E2E CLI needs `NOTION_TOKEN` in its process environment or in the current
-repository root's `.env`; it also uses the normal GitHub CLI authentication. The token is consumed
-by the host-side E2E and Operator processes and is not copied into the nested worker workspace.
-Symphony removes tracker secrets from the Codex worker process, so run the E2E CLI from a credentialed
-host shell rather than from a worker task shell. The default workflow is the repository-owned
+`project.json` is the optional local E2E Project binding and is ignored by Git. When present it
+overrides the tracked `project.example.json`; without it, `npm run e2e` uses the example defaults.
+The example contains the seed source ref. The E2E CLI needs
+`NOTION_TOKEN` and `LEESH_LOOP_E2E_NOTION_DATABASE_URL` in its process environment or in the
+repository root's `.env`; it also uses the normal GitHub CLI authentication. When a Project lists
+`.env` in `workspace_files`, the file is materialized into the Symphony workspace so a worker can
+run nested E2E. The nested E2E and Operator processes use the token; Symphony's existing environment
+filtering for Codex worker processes is unchanged. The default workflow is the repository-owned
 [`WORKFLOW.md`](WORKFLOW.md), not the production root workflow. Each run creates a run-local
 Operator Project with `skip_external_readiness: true` and a nested Symphony workspace under the
 current checkout, without requiring a host-global workspace.
 Optional `codex_model` and `codex_reasoning_effort` fields are copied independently to the
 run-local Project when present; omitted fields leave Codex defaults in control.
 
-Create the local configuration from the example:
+Create a local configuration only when the seed or paths need customization:
 
 ```sh
 cp operator/e2e/project.example.json operator/e2e/project.json

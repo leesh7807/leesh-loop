@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { loadWorkloadCatalog } from './model/workload-catalog.mjs';
 import { loadE2EProjectConfig } from './model/e2e-project-config.mjs';
@@ -22,21 +22,13 @@ import { RunCompletionVerifier } from './run/lifecycle/run-completion-verifier.m
 import { RunLifecycleObserver } from './run/lifecycle/run-lifecycle-observer.mjs';
 import { RunDoneVerifier } from './run/lifecycle/run-done-verifier.mjs';
 import { RunTimingRecorder } from './run/run-timing.mjs';
+import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
 
-async function localEnv(name) {
-  if (process.env[name]) return process.env[name];
-  try {
-    const content = await readFile(join(root, '.env'), 'utf8');
-    const line = content.split(/\r?\n/).find(value => value.startsWith(`${name}=`));
-    return line?.slice(name.length + 1).trim().replace(/^['"]|['"]$/g, '');
-  } catch { return undefined; }
-}
-
 async function createProductionRunDependencies(config, catalog) {
-  const token = await localEnv('NOTION_TOKEN');
+  const token = await readRepositoryEnvironmentValue('NOTION_TOKEN');
   const notionClient = new NotionClient({ token });
   const runRecordStore = new RunRecordStore(config);
   const operatorClient = new OperatorClient({ root });
@@ -80,7 +72,11 @@ function parseArguments(argv) {
 
 async function main() {
   const { command, configArgument, planPath, workflowPath, hardCapMs } = parseArguments(process.argv.slice(2));
-  const configPath = resolve(configArgument);
+  const requestedConfigPath = resolve(configArgument);
+  const defaultProject = join(here, 'project.json');
+  const configPath = requestedConfigPath === defaultProject && !existsSync(defaultProject)
+    ? join(here, 'project.example.json')
+    : requestedConfigPath;
   const config = await loadE2EProjectConfig(configPath);
   const runInput = await resolveE2ERunInput({ config, planPath, workflowPath, hardCapMs });
   const catalog = runInput.workload ? [] : await loadWorkloadCatalog(join(dirname(configPath), 'catalog.json'));

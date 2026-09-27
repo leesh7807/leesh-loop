@@ -10,7 +10,7 @@ import { RunTimingRecorder } from '../run/run-timing.mjs';
 
 test('chatgpt-shot timing keeps an observation duration when Jobs has no timestamps', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-evidence-'));
-  const config = { notion_database_url: 'https://app.notion.com/p/studyleesh/3e08a2658625805cad23fe1137be4a1e?v=3e08a26586258042a8e4000c945e56e7', repository_url: 'git@github.com:owner/repo.git', seed_source_ref: 'refs/heads/main' };
+  const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', seed_source_ref: 'refs/heads/main' };
   const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
   const record = createRunRecord({ config, runId: 'run-1', workload, paths: createRunPaths({ run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces' }, 'run-1') });
   const task = { id: 'page-1', url: 'https://notion/page-1', identifier: 'PLAN-FIXTURE', state: 'In Progress', accepted_plan: '# Fixture\n', workpad: 'Job ID: 123e4567-e89b-42d3-a456-426614174000' };
