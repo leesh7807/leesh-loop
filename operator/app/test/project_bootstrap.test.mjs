@@ -58,7 +58,8 @@ test('bootstrap creates a same-revision Git runtime and derives Project paths an
 
   const project = JSON.parse(await readFile(join(runtime, 'operator/project.json'), 'utf8'));
   assert.equal(resolveProjectPath(project.workflow_path, join(runtime, 'operator')), join(target, 'WORKFLOW.md'));
-  assert.equal(resolveProjectPath(project.symphony_workspace_root, join(runtime, 'operator')), join(runtime, 'workspaces'));
+  assert.equal(resolveProjectPath(project.symphony_workspace_root, join(runtime, 'operator')), join(runtime, 'operator/.runtime/workspaces'));
+  assert.equal(project.allow_workspace_root_inside_repository, true);
   assert.deepEqual(project.workspace_files, ['../.env']);
   assert.equal(project.github_repository_url, 'https://github.com/example/sample-project.git');
   assert.equal(project.github_base_branch, 'release/bootstrap');

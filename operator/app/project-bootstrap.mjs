@@ -134,10 +134,11 @@ function projectConfiguration(target, runtimeRoot, noExternal) {
   const projectDirectory = resolve(runtimeRoot, 'operator');
   return {
     workflow_path: relativeProjectPath(projectDirectory, target.workflowPath),
-    symphony_workspace_root: '../workspaces',
+    symphony_workspace_root: '.runtime/workspaces',
     workspace_files: ['../.env'],
     github_repository_url: target.repositoryUrl,
     github_base_branch: target.baseBranch,
+    allow_workspace_root_inside_repository: true,
     ...PROJECT_DEFAULTS,
     skip_external_readiness: noExternal
   };
@@ -192,7 +193,7 @@ export async function bootstrapProject({ targetDirectory = process.cwd(), source
     const operatorDirectory = resolve(runtimeRoot, 'operator');
     await writeFile(resolve(operatorDirectory, 'project.json'), `${JSON.stringify(project, null, 2)}\n`, { mode: 0o644, flag: 'wx' });
     await writeFile(resolve(runtimeRoot, '.env'), 'NOTION_TOKEN=\nLEESH_LOOP_NOTION_DATABASE_URL=\n', { mode: 0o600, flag: 'wx' });
-    await mkdir(resolve(runtimeRoot, 'workspaces'), { recursive: true, mode: 0o755 });
+    await mkdir(resolve(operatorDirectory, project.symphony_workspace_root), { recursive: true, mode: 0o755 });
     if (prepareDependencies) await prepareRuntimeDependencies(runtimeRoot);
 
     return {
