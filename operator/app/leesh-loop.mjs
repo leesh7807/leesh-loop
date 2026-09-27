@@ -1,17 +1,17 @@
 #!/usr/bin/env node
-import { createServer } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { chmod, mkdir, open, readFile, readlink, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createHash, randomUUID } from 'node:crypto';
 import { normalizeWorkspaceFiles, validateWorkspaceFiles } from './workspace-files.mjs';
 import { validateBaseBranch } from './git-target.mjs';
 import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
 import { resolveProjectPath } from '../local-path.mjs';
 import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
 import { bootSuccessMessage, bootstrapProject } from './project-bootstrap.mjs';
+import { defaultOperatorUiDependencies, readRequestBody, startOperatorUiServer } from './operator-ui-server.mjs';
 
 const appScript = fileURLToPath(import.meta.url);
 const root = resolve(dirname(appScript), '../..');
@@ -123,7 +123,7 @@ async function openWindow(config, dashboard) {
   await ensureUi(config);
   await openProjectSurfaces(config, dashboard);
 }
-function projectSurfaces(config, dashboard) { return [uiUrl(config), config.notion_database_url, dashboard]; }
+function projectSurfaces(config) { return [uiUrl(config)]; }
 function browserAcknowledgementTimeout(config) { return config.browser_acknowledgement_timeout_ms || PROJECT_DEFAULTS.browser_acknowledgement_timeout_ms; }
 async function openProjectSurfaces(config, dashboard) {
   const surfaces = projectSurfaces(config, dashboard);
@@ -131,7 +131,7 @@ async function openProjectSurfaces(config, dashboard) {
     if (await spawnBrowser(process.env.LEESH_LOOP_BROWSER_COMMAND, surfaces)) return;
     throw new Error(`could not launch ${process.env.LEESH_LOOP_BROWSER_COMMAND}`);
   }
-  // Hand every surface to the desktop before waiting: one opener may intentionally stay alive.
+  // The Operator is the sole startup surface; related systems remain in-app navigation.
   const requests = await Promise.all(surfaces.map(url => dispatchBrowser('xdg-open', [url])));
   await Promise.all(requests.map(request => acknowledgeBrowser(request, browserAcknowledgementTimeout(config))));
 }
@@ -156,7 +156,10 @@ async function acknowledgeBrowser(request, timeoutMs) {
   throw new Error(`${request.command} ${request.args.join(' ')} ${outcome}`);
 }
 function uiPort(config) { return Number(config.ui_port || PROJECT_DEFAULTS.ui_port); }
+let publisherBuilt = false;
+let operatorUiBuilt = false;
 function ensurePublisher() {
+  if (publisherBuilt) return;
   const publisher = join(root, 'operator/notion_publisher');
   if (!existsSync(join(publisher, 'node_modules/.bin/tsc'))) {
     const install = runPublisherCommand(['ci']);
@@ -164,14 +167,69 @@ function ensurePublisher() {
   }
   const build = runPublisherCommand(['run', 'build']);
   if (build.status !== 0) throw new Error('publisher preparation failed: npm run build');
+  publisherBuilt = true;
 }
 function runPublisherCommand(args) {
   // Operator start returns JSON on stdout for machine consumers. Keep Publisher
   // install/build output on stderr so first-run diagnostics cannot corrupt it.
   return spawnSync('npm', args, { cwd: join(root, 'operator/notion_publisher'), stdio: ['ignore', process.stderr.fd, 'inherit'] });
 }
+function ensureOperatorUi() {
+  if (operatorUiBuilt) return;
+  const ui = join(root, 'operator/ui');
+  if (!existsSync(join(ui, 'node_modules/.bin/vite'))) {
+    const install = runOperatorUiCommand(ui, ['ci']);
+    if (install.status !== 0) throw new Error('Operator UI preparation failed: npm ci');
+  }
+  const build = runOperatorUiCommand(ui, ['run', 'build']);
+  if (build.status !== 0) throw new Error('Operator UI preparation failed: npm run build');
+  operatorUiBuilt = true;
+}
+function runOperatorUiCommand(directory, args) {
+  return spawnSync('npm', args, { cwd: directory, stdio: ['ignore', process.stderr.fd, 'inherit'] });
+}
 function uiUrl(config) { return `http://127.0.0.1:${uiPort(config)}`; }
-function uiIdentity(config) { return { notion_database_url: config.notion_database_url, ui_port: uiPort(config), publisher: join(root, 'operator/notion_publisher/dist/cli.js') }; }
+function projectWindowNeedsOpening(state) { return !state?.project_window_surfaces?.includes('operator-ui-v1'); }
+function uiRuntimeSourceFiles() {
+  const files = new Set();
+  const pending = [appScript];
+  const imports = /\b(?:import|export)\s+(?:[^'";]*?\sfrom\s*)?["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/g;
+  while (pending.length) {
+    const file = resolve(pending.pop());
+    if (files.has(file)) continue;
+    files.add(file);
+    const source = readFileSync(file, 'utf8');
+    for (const match of source.matchAll(imports)) {
+      const specifier = match[1] || match[2];
+      if (specifier.startsWith('.')) {
+        const dependency = resolve(dirname(file), specifier);
+        if (existsSync(dependency)) pending.push(dependency);
+      }
+    }
+  }
+  const addTree = directory => {
+    if (!existsSync(directory)) return;
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) addTree(path);
+      else if (entry.isFile()) files.add(path);
+    }
+  };
+  addTree(join(root, 'operator/notion_publisher/dist'));
+  addTree(join(root, 'operator/ui/dist'));
+  files.add(join(root, 'operator/notion_publisher/examples/publisher-config.json'));
+  return [...files].sort();
+}
+function uiIdentity(config) {
+  const revision = createHash('sha256');
+  for (const path of uiRuntimeSourceFiles()) {
+    revision.update(relative(root, path));
+    revision.update('\0');
+    revision.update(readFileSync(path));
+    revision.update('\0');
+  }
+  return { notion_database_url: config.notion_database_url, ui_port: uiPort(config), dashboard_port: Number(config.symphony_port || PROJECT_DEFAULTS.symphony_port), publisher: join(root, 'operator/notion_publisher/dist/src/cli.js'), revision: revision.digest('hex') };
+}
 function sameIdentity(first, second) { return JSON.stringify(first) === JSON.stringify(second); }
 async function stopUi(config) { const ui = await json(paths(config).ui); if (ui) await terminate(ui); await remove(paths(config).ui); }
 async function ensureUi(config) {
@@ -180,33 +238,34 @@ async function ensureUi(config) {
     try { await reachable(uiUrl(config)); return; } catch { await stopUi(config); }
   } else if (ui) await stopUi(config);
   let unmanaged = false;
-  try { await reachable(uiUrl(config)); unmanaged = true; } catch { /* start the project-local publish surface */ }
-  if (unmanaged) throw new Error(`publish surface at ${uiUrl(config)} is not owned by this project`);
-  const child = spawn(process.execPath, [appScript, 'serve', config.configuration_path], { cwd: root, detached: true, stdio: 'ignore', env: process.env });
+  try { await reachable(uiUrl(config)); unmanaged = true; } catch { /* start the project-local Operator UI */ }
+  if (unmanaged) throw new Error(`Operator UI at ${uiUrl(config)} is not owned by this project`);
+  const child = spawn(process.execPath, [appScript, 'serve-prepared', config.configuration_path], { cwd: root, detached: true, stdio: 'ignore', env: process.env });
   child.unref();
   const process_start_ticks = processStartTicks(child.pid);
   if (!process_start_ticks) throw new Error(`could not record startup identity for publish UI PID ${child.pid}`);
   await atomicJson(p.ui, { pid: child.pid, process_start_ticks, identity });
-  await waitFor(async () => { try { await reachable(uiUrl(config)); return true; } catch { return false; } }, 'publish surface');
+  await waitFor(async () => { try { await reachable(uiUrl(config)); return true; } catch { return false; } }, 'Operator UI');
 }
 
 async function start(config) {
   return withLock(config, async () => {
     const port = Number(config.symphony_port || PROJECT_DEFAULTS.symphony_port); const p = paths(config); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
+    if (!existing) console.error('Operator: preparing Publisher and Symphony startup.');
+    ensurePublisher();
+    ensureOperatorUi();
     if (existing) {
       let window_error;
       try { await ensureUi(config); } catch (error) { window_error = String(error.message || error); }
-      if (config.open_project_surfaces && !existing.project_window_opened_at) {
+      if (config.open_project_surfaces && projectWindowNeedsOpening(existing)) {
         try {
           await openWindow(config, existing.effective.dashboard);
-          await atomicJson(paths(config).state, { ...existing, project_window_opened_at: new Date().toISOString() });
+          await atomicJson(paths(config).state, { ...existing, project_window_opened_at: new Date().toISOString(), project_window_surfaces: ['operator-ui-v1'] });
           await remove(p.startup_status);
         } catch (error) { window_error = String(error.message || error); }
       }
       return { reused: true, pid: existing.pid, dashboard: existing.effective.dashboard, ...(window_error ? { window_error } : {}) };
     }
-    console.error('Operator: preparing Publisher and Symphony startup.');
-    ensurePublisher();
     const runtimeId = randomUUID(); const identity = effective(config, runtimeId, port);
     const starting = { status: 'starting', runtime_id: runtimeId, effective: identity, authorization_path: p.authorization, acknowledgement_path: p.acknowledgement, ownership_path: p.ownership, created_at: new Date().toISOString() };
     await atomicJson(p.state, starting); await remove(p.ownership); await remove(p.authorization); await remove(p.acknowledgement); await atomicText(p.startup_status, 'launching Operator readiness checks');
@@ -239,7 +298,7 @@ async function start(config) {
         const detail = output ? `: ${output.slice(-4_000)}` : '';
         return new Error(`owned Symphony process ${pid} exited before ${description}${detail}`);
       };
-      await waitFor(() => runtimeObserved({ ...provisional, effective: identity }, false), 'Symphony observability', config.startup_timeout_ms || PROJECT_DEFAULTS.startup_timeout_ms, reportProgress('Symphony observability'), () => childFailure('Symphony observability'));
+      await waitFor(() => runtimeObserved({ ...provisional, effective: identity }, false), 'Symphony observability', config.startup_timeout_ms || 30 * 60_000, reportProgress('Symphony observability'), () => childFailure('Symphony observability'));
       const committed = { ...provisional, status: 'committed-disabled' }; await atomicJson(p.state, committed);
       const running = { ...committed, status: 'running', authorized_at: new Date().toISOString() }; await atomicJson(p.state, running);
       await atomicJson(p.authorization, { state: 'running', runtime_id: runtimeId, published_at: new Date().toISOString() });
@@ -248,7 +307,7 @@ async function start(config) {
       try {
         if (config.open_project_surfaces) {
           await openWindow(config, identity.dashboard);
-          await atomicJson(p.state, { ...running, project_window_opened_at: new Date().toISOString() });
+          await atomicJson(p.state, { ...running, project_window_opened_at: new Date().toISOString(), project_window_surfaces: ['operator-ui-v1'] });
         } else {
           await ensureUi(config);
         }
@@ -261,149 +320,19 @@ async function start(config) {
 }
 async function stop(config) { return withLock(config, async () => { const state = await json(paths(config).state); if (state) await terminate(state); await stopUi(config); await clear(config); return { stopped: Boolean(state) }; }); }
 
-const html = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-function page(config, { plan = '', state = '', states = [], defaultState = 'Ready', result = null } = {}) {
-  const stateOptions = [
-    `<option value=""${state === '' ? ' selected' : ''}>Publisher default</option>`,
-    ...states.map(value => `<option value="${html(value)}"${state === value ? ' selected' : ''}>${html(value)}</option>`)
-  ].join('');
-  const resultPanel = result ? `<section class="result" aria-labelledby="result-title" ${result.kind === 'success' ? 'role="status"' : 'role="alert"'}>
-    <p class="eyebrow">Publication result</p>
-    <h2 id="result-title">${result.kind === 'success' ? 'Plan published' : 'Publish failed'}</h2>
-    ${result.kind === 'success'
-      ? `<p>Published task <code>${html(result.identifier)}</code> with State <code>${html(result.state)}</code>.</p>${result.url ? `<p><a href="${html(result.url)}">Open published task in Notion</a></p>` : '<p>Open Notion Tasks to find the published task.</p>'}<p><a href="/">Publish another Plan</a></p>`
-      : `<p class="error-detail">${html(result.message)}</p><p>Your Plan and selected State are still in the form above. Correct the Plan if needed, then publish again.</p>`}
-  </section>` : '';
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Publish a Plan · Leesh Loop</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; font: 16px/1.55 system-ui, sans-serif; }
-    a { color: inherit; text-underline-offset: .18em; }
-    .page-shell { width: min(100% - 2rem, 76rem); margin: 0 auto; padding: clamp(1.25rem, 4vw, 3.5rem) 0; }
-    .page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid; }
-    .eyebrow { margin: 0 0 .4rem; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-    h1 { max-width: 18ch; margin: 0; font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.05; letter-spacing: -.035em; }
-    .page-intro { max-width: 62ch; margin: .8rem 0 0; }
-    nav { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; padding-top: .35rem; font-size: .92rem; white-space: nowrap; }
-    main { padding-top: 2rem; }
-    .plan-workspace { max-width: 74rem; }
-    .section-heading { margin: 0 0 .85rem; font-size: 1.25rem; }
-    label { display: block; margin-bottom: .55rem; font-weight: 700; }
-    textarea, select, button { font: inherit; }
-    textarea { display: block; width: 100%; min-height: min(58vh, 42rem); padding: 1rem; border: 1px solid; border-radius: .35rem; line-height: 1.55; resize: vertical; }
-    .field-help { margin: .55rem 0 0; font-size: .9rem; }
-    .decision { display: flex; align-items: flex-end; justify-content: space-between; gap: 1.5rem; margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid; }
-    .state-field { width: min(100%, 24rem); }
-    select { width: 100%; min-height: 2.8rem; padding: .45rem .65rem; border: 1px solid; border-radius: .3rem; background: white; }
-    button { min-height: 2.8rem; padding: .55rem 1.15rem; border: 2px solid; border-radius: .3rem; background: white; color: inherit; font-weight: 750; cursor: pointer; }
-    button:hover { text-decoration: underline; text-underline-offset: .18em; }
-    .result { max-width: 74rem; margin-top: 2rem; padding: 1.25rem 1.4rem; border: 1px solid; border-radius: .35rem; }
-    .result h2 { margin: 0; font-size: 1.35rem; }
-    .result p { max-width: 70ch; }
-    .result p:last-child { margin-bottom: 0; }
-    .error-detail { white-space: pre-wrap; overflow-wrap: anywhere; }
-    code { overflow-wrap: anywhere; }
-    @media (max-width: 44rem) {
-      .page-shell { width: min(100% - 1.25rem, 76rem); }
-      .page-header { flex-direction: column; gap: 1rem; }
-      nav { padding-top: 0; gap: .4rem 1rem; white-space: normal; }
-      main { padding-top: 1.35rem; }
-      textarea { min-height: 48vh; padding: .75rem; }
-      .decision { align-items: stretch; flex-direction: column; gap: 1rem; }
-      .state-field { width: 100%; }
-      button { width: 100%; }
-      .result { padding: 1rem; }
-    }
-  </style>
-</head>
-<body>
-  <div class="page-shell">
-    <header class="page-header">
-      <div>
-        <p class="eyebrow">Leesh Loop · Plan publication</p>
-        <h1>Publish a Plan</h1>
-        <p class="page-intro">Review the Plan, choose its publication State, then publish it as a Notion task.</p>
-      </div>
-      <nav aria-label="Related work">
-        <a href="${html(config.notion_database_url)}">Notion Tasks</a>
-        <a href="${`http://127.0.0.1:${Number(config.symphony_port || PROJECT_DEFAULTS.symphony_port)}`}">Symphony Dashboard</a>
-      </nav>
-    </header>
-    <main>
-      <form class="plan-workspace" accept-charset="UTF-8" method="post">
-        <section aria-labelledby="plan-heading">
-          <h2 class="section-heading" id="plan-heading">1. Review the Plan</h2>
-          <label for="plan">Plan content</label>
-          <textarea id="plan" name="plan" rows="20" required>${html(plan)}</textarea>
-        </section>
-        <section class="decision" aria-labelledby="decision-heading">
-          <div class="state-field">
-            <h2 class="section-heading" id="decision-heading">2. Choose publication State</h2>
-            <label for="state">State</label>
-            <select id="state" name="state">${stateOptions}</select>
-            <p class="field-help">Leaving the Publisher default selected keeps the existing ${html(defaultState)} default.</p>
-          </div>
-          <button type="submit">Publish Plan</button>
-        </section>
-      </form>
-      ${resultPanel}
-    </main>
-  </div>
-</body>
-</html>`;
-}
-async function readRequestBody(request) { const chunks = []; for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)); return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)); }
-async function publisherStateConfiguration() {
-  ensurePublisher();
-  const [publisherConfigModule, publisherCore] = await Promise.all([
-    import(pathToFileURL(join(root, 'operator/notion_publisher/dist/src/config.js')).href),
-    import(pathToFileURL(join(root, 'operator/notion_publisher/dist/src/core.js')).href)
-  ]);
-  const { policy } = await publisherConfigModule.loadConfig(join(root, 'operator/notion_publisher/examples/publisher-config.json'));
-  return { states: policy.stateSeeds, defaultState: publisherCore.PUBLISHER_READY_STATE };
-}
-async function serve(config) {
-  const { states, defaultState } = await publisherStateConfiguration();
+async function serve(config, { prepared = false } = {}) {
+  if (!prepared) {
+    ensurePublisher();
+    ensureOperatorUi();
+  }
   const existing = await json(paths(config).ui), process_start_ticks = processStartTicks(process.pid);
-  if (!process_start_ticks) throw new Error(`could not record startup identity for publish UI PID ${process.pid}`);
-  if (existing && (existing.pid !== process.pid || existing.process_start_ticks !== process_start_ticks) && processStartTicks(existing.pid) === existing.process_start_ticks) throw new Error(`publish UI is already owned on ${uiUrl(config)}`);
-  await atomicJson(paths(config).ui, { pid: process.pid, process_start_ticks, identity: uiIdentity(config) });
-  const server = createServer(async (req, res) => {
-    const sendPage = (body, status = 200) => { res.statusCode = status; res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(body); };
-    if (req.method === 'GET') { sendPage(page(config, { states, defaultState })); return; }
-    if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
-    let body;
-    try { body = await readRequestBody(req); }
-    catch { sendPage(page(config, { states, defaultState, result: { kind: 'failure', message: 'Plan request body must be valid UTF-8.' } }), 400); return; }
-    const fields = new URLSearchParams(body), plan = fields.get('plan') || '', state = fields.get('state') || '';
-    const temp = join(paths(config).dir, `publish-${randomUUID()}.md`);
-    try {
-      await writeFile(temp, plan);
-      const args = [join(root, 'operator/notion_publisher/dist/src/cli.js'), '--plan', temp, '--config', join(root, 'operator/notion_publisher/examples/publisher-config.json'), '--database-url', config.notion_database_url];
-      if (state !== '') args.push('--state', state);
-      const publisher = spawn(process.execPath, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
-      let output = '', errors = '';
-      for await (const chunk of publisher.stdout) output += chunk;
-      for await (const chunk of publisher.stderr) errors += chunk;
-      const code = await new Promise(resolveExit => publisher.on('close', resolveExit));
-      if (code === 0) {
-        try {
-          const publication = JSON.parse(output.trim());
-          sendPage(page(config, { states, defaultState, result: { kind: 'success', identifier: publication.identifier, state: publication.state, url: publication.url } }));
-        } catch {
-          sendPage(page(config, { states, defaultState, plan, state, result: { kind: 'failure', message: 'Publisher returned a successful response that the Operator could not read. Check Notion Tasks before retrying.' } }), 502);
-        }
-      } else {
-        sendPage(page(config, { states, defaultState, plan, state, result: { kind: 'failure', message: errors.trim() || 'Publishing failed.' } }), 400);
-      }
-    } finally { await remove(temp); }
-  });
-  server.listen(uiPort(config), '127.0.0.1');
+  if (!process_start_ticks) throw new Error(`could not record startup identity for Operator UI PID ${process.pid}`);
+  if (existing && (existing.pid !== process.pid || existing.process_start_ticks !== process_start_ticks) && processStartTicks(existing.pid) === existing.process_start_ticks) throw new Error(`Operator UI is already owned on ${uiUrl(config)}`);
+  const identity = uiIdentity(config);
+  const dependencies = await defaultOperatorUiDependencies(root, config, paths(config).dir);
+  await atomicJson(paths(config).ui, { pid: process.pid, process_start_ticks, identity });
+  const server = await startOperatorUiServer(dependencies);
+  server.once('error', error => { console.error(`Operator UI server failed: ${error.message}`); process.exitCode = 1; });
 }
 
 const args = process.argv.slice(2);
@@ -412,7 +341,7 @@ const [command, ...commandArgs] = locked ? args.slice(1) : args;
 const configFile = commandArgs[0] || defaultConfig;
 let directExecution = false;
 try { directExecution = Boolean(process.argv[1] && realpathSync(process.argv[1]) === appScript); } catch { /* Node may be importing this module from another entry point. */ }
-if (directExecution && !['boot', 'start', 'stop', 'serve'].includes(command)) {
+if (directExecution && !['boot', 'start', 'stop', 'serve', 'serve-prepared'].includes(command)) {
   const usage = 'Usage: leesh-loop <boot [--no-external]|start|stop|serve> [project-config.json]';
   if (command === '--help' || command === '-h') console.log(usage);
   else { console.error(usage); process.exitCode = 2; }
@@ -437,8 +366,8 @@ if (directExecution && !['boot', 'start', 'stop', 'serve'].includes(command)) {
       process.exitCode = result.status ?? 1;
       return undefined;
     }
-    return command === 'start' ? start(config) : command === 'stop' ? stop(config) : serve(config);
+    return command === 'start' ? start(config) : command === 'stop' ? stop(config) : serve(config, { prepared: command === 'serve-prepared' });
   }).then(value => { if (value) console.log(JSON.stringify(value)); }).catch(error => { console.error(`Operator failed: ${error.message}`); process.exitCode = 1; });
 }
 
-export { acknowledgeBrowser, compatible, dispatchBrowser, effective, ensurePublisher, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, readRequestBody, runPublisherCommand };
+export { acknowledgeBrowser, compatible, dispatchBrowser, effective, ensurePublisher, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, projectWindowNeedsOpening, readRequestBody, runPublisherCommand, uiIdentity, uiRuntimeSourceFiles };

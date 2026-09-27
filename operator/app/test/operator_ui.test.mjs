@@ -4,17 +4,17 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
-import { spawn } from 'node:child_process';
 import { execFile as execute } from 'node:child_process';
 import { promisify } from 'node:util';
-import { effective, ensurePublisher, loadConfig as loadOperatorConfig, openProjectSurfaces, readRequestBody } from '../leesh-loop.mjs';
+import { createOperatorUiServer, readRequestBody } from '../operator-ui-server.mjs';
+import { effective, ensurePublisher, loadConfig as loadOperatorConfig, openProjectSurfaces, projectSurfaces, projectWindowNeedsOpening, uiIdentity, uiRuntimeSourceFiles } from '../leesh-loop.mjs';
 
 const execFile = promisify(execute);
 const root = resolve(import.meta.dirname, '../../..');
 const cli = join(root, 'operator/app/leesh-loop.mjs');
 const databaseUrl = 'https://notion.example/project-surface-test';
 
-test('publish request decoding preserves Unicode across byte chunk boundaries', async () => {
+test('request decoding preserves Unicode across byte chunk boundaries', async () => {
   const plan = '# 한국어 😀 café — 𐐷\nentity text: &#x1F600; & <tag>';
   const bytes = Buffer.from(plan, 'utf8');
   const emojiOffset = bytes.indexOf(Buffer.from('😀', 'utf8'));
@@ -37,53 +37,66 @@ test('Publisher preparation keeps build output off the Operator JSON stdout chan
   assert.equal(stdout.trim(), '{"ready":true}');
 });
 
-test('the publish surface orders Plan, publication decision, and secondary navigation in a monochrome responsive layout', async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-ui-'));
-  const port = 43_500 + Math.floor(Math.random() * 500);
-  const config = join(directory, 'project.json');
-  const bindingUrl = 'https://www.notion.so/example';
-  await writeFile(config, JSON.stringify({
-    workflow_path: join(root, 'WORKFLOW.md'),
-    symphony_workspace_root: join(directory, 'workspaces'),
-    github_repository_url: 'https://github.com/example/repository.git',
-    github_base_branch: 'main',
-    ui_port: port
-  }));
-  const child = spawn(process.execPath, [cli, 'serve', config], { stdio: 'ignore', env: { ...process.env, LEESH_LOOP_NOTION_DATABASE_URL: bindingUrl } });
-  t.after(() => child.kill('SIGTERM'));
-  let response;
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    try { response = await fetch(`http://127.0.0.1:${port}`); break; } catch { await new Promise(done => setTimeout(done, 100)); }
-  }
-  assert.equal(response?.status, 200);
-  const page = await response.text();
-  assert.match(page, /<title>Publish a Plan · Leesh Loop<\/title>/);
-  assert.match(page, /<meta charset="utf-8">/i);
-  assert.match(page, /<form class="plan-workspace" accept-charset="UTF-8" method="post">/i);
-  assert.match(response.headers.get('content-type') || '', /text\/html; charset=utf-8/i);
-  assert.ok(page.includes(bindingUrl));
-  assert.match(page, /Symphony Dashboard/);
-  assert.match(page, /Review the Plan/);
-  assert.match(page, /Choose publication State/);
-  assert.match(page, /Publish Plan/);
-  assert.match(page, /Leaving the Publisher default selected keeps the existing Ready default/);
-  const publisherConfig = JSON.parse(await readFile(join(root, 'operator/notion_publisher/examples/publisher-config.json'), 'utf8'));
-  const renderedStates = [...page.matchAll(/<option value="([^"]*)"/g)].map(([, value]) => value);
-  assert.deepEqual(renderedStates, ['', ...publisherConfig.state_seeds]);
-  assert.ok(page.indexOf('id="plan-heading"') < page.indexOf('id="decision-heading"'));
-  assert.match(page, /@media \(max-width: 44rem\)/);
-  assert.match(page, /aria-label="Related work"/);
-  assert.doesNotMatch(page, /linear-gradient|box-shadow|accent-color/i);
+test('task refresh errors do not own or block the independent publication route', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-ui-api-'));
+  const calls = [];
+  let reads = 0;
+  const server = await createOperatorUiServer({
+    root,
+    config: { notion_database_url: 'https://www.notion.so/example', ui_port: 4310, symphony_port: 4100 },
+    stateDirectory: directory,
+    publisherConfigPath: join(root, 'operator/notion_publisher/examples/publisher-config.json'),
+    publisherState: { states: ['Backlog', 'Ready', 'Human Review'], defaultState: 'Ready' },
+    notionToken: 'server-only-fixture-token',
+    loadTaskReader: async token => {
+      assert.equal(token, 'server-only-fixture-token');
+      return { listTasks: async () => {
+        reads += 1;
+        if (reads === 2) throw new Error('temporary Notion read failure');
+        return [{ title: reads === 1 ? 'Last successful task' : 'Recovered task', state: 'Backlog', blockedBy: [], priority: 3, labels: [], identifier: 'PLAN-EXAMPLE', taskUrl: 'https://www.notion.so/task', planUrl: 'https://www.notion.so/plan' }];
+      } };
+    },
+    runPublisher: async input => { calls.push(input); return { identifier: 'PLAN-PUBLISHED', state: input.state || 'Ready', url: 'https://www.notion.so/published' }; }
+  });
+  server.listen(0, '127.0.0.1');
+  await new Promise((resolveListen, rejectListen) => { server.once('listening', resolveListen); server.once('error', rejectListen); });
+  t.after(() => new Promise(resolveClose => { server.closeAllConnections(); server.close(resolveClose); }));
+  const address = server.address();
+  const base = `http://127.0.0.1:${address.port}`;
+
+  const config = await fetch(`${base}/api/v1/config`).then(response => response.json());
+  assert.deepEqual(config.states, ['Backlog', 'Ready', 'Human Review']);
+  assert.equal(config.defaultState, 'Ready');
+  assert.equal(config.dashboardUrl, 'http://127.0.0.1:4100');
+
+  const first = await fetch(`${base}/api/v1/tasks`);
+  assert.equal(first.status, 200);
+  assert.equal((await first.json()).tasks[0].title, 'Last successful task');
+  const failed = await fetch(`${base}/api/v1/tasks`);
+  assert.equal(failed.status, 503);
+  assert.match((await failed.json()).error, /temporary Notion read failure/);
+
+  const publication = await fetch(`${base}/api/v1/publish`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ plan: '# Keep this Plan\n\n## Work', state: 'Human Review' })
+  });
+  assert.equal(publication.status, 200);
+  assert.equal((await publication.json()).identifier, 'PLAN-PUBLISHED');
+  assert.deepEqual(calls, [{ plan: '# Keep this Plan\n\n## Work', state: 'Human Review' }]);
+
+  const recovered = await fetch(`${base}/api/v1/tasks`);
+  assert.equal(recovered.status, 200);
+  assert.equal((await recovered.json()).tasks[0].title, 'Recovered task');
 });
 
-test('the system browser path dispatches every project surface before bounded acknowledgement', { concurrency: false }, async t => {
+test('the desktop browser path opens only the Operator UI', { concurrency: false }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-browser-'));
   const bin = join(directory, 'bin');
   const log = join(directory, 'openers.log');
-  await writeFile(join(directory, 'xdg-open'), `#!/bin/sh\nprintf 'xdg-open %s\\n' "$1" >> "$LEESH_LOOP_TEST_LOG"\ncase "$1" in *hang*) sleep 2;; *failure*) exit 7;; *signal*) kill -TERM $$;; esac\n`);
+  await writeFile(join(directory, 'xdg-open'), `#!/bin/sh\nprintf 'xdg-open %s\\n' "$1" >> "$LEESH_LOOP_TEST_LOG"\ncase "$1" in *43445*) sleep 2;; *43446*) exit 7;; *43447*) kill -TERM $$;; esac\n`);
   await writeFile(join(directory, 'override'), `#!/bin/sh\nprintf 'override %s\\n' "$*" >> "$LEESH_LOOP_TEST_LOG"\n`);
   await mkdir(bin);
-  // The executable names deliberately contain neither Chrome nor Chromium.
   await writeFile(join(bin, 'xdg-open'), await readFile(join(directory, 'xdg-open')));
   await writeFile(join(bin, 'override'), await readFile(join(directory, 'override')));
   await Promise.all([chmod(join(bin, 'xdg-open'), 0o755), chmod(join(bin, 'override'), 0o755)]);
@@ -98,23 +111,21 @@ test('the system browser path dispatches every project surface before bounded ac
     if (originalLog === undefined) delete process.env.LEESH_LOOP_TEST_LOG; else process.env.LEESH_LOOP_TEST_LOG = originalLog;
     if (originalOverride === undefined) delete process.env.LEESH_LOOP_BROWSER_COMMAND; else process.env.LEESH_LOOP_BROWSER_COMMAND = originalOverride;
   });
-  const base = { notion_database_url: 'https://notion.example/surface', ui_port: 43444, browser_acknowledgement_timeout_ms: 80 };
+
+  assert.deepEqual(projectSurfaces({ ui_port: 43445, notion_database_url: 'https://notion.example' }, 'http://dashboard.example'), ['http://127.0.0.1:43445']);
   const started = Date.now();
-  await openProjectSurfaces({ ...base, ui_port: 43445 }, 'http://dashboard.example/hang');
+  await openProjectSurfaces({ ui_port: 43445, notion_database_url: 'https://notion.example', browser_acknowledgement_timeout_ms: 80 }, 'http://dashboard.example/hang');
   assert.ok(Date.now() - started < 500, 'a running xdg-open is a successful handoff after the acknowledgement bound');
   let lines = (await readFile(log, 'utf8')).trim().split('\n');
-  assert.deepEqual(lines.sort(), [
-    'xdg-open http://127.0.0.1:43445',
-    'xdg-open http://dashboard.example/hang',
-    'xdg-open https://notion.example/surface'
-  ].sort());
-  await assert.rejects(openProjectSurfaces({ ...base, notion_database_url: 'https://notion.example/failure' }, 'http://dashboard.example'), /exited with status 7/);
-  await assert.rejects(openProjectSurfaces({ ...base, notion_database_url: 'https://notion.example/signal' }, 'http://dashboard.example'), /terminated by SIGTERM/);
+  assert.deepEqual(lines, ['xdg-open http://127.0.0.1:43445']);
+
+  await assert.rejects(openProjectSurfaces({ ui_port: 43446, browser_acknowledgement_timeout_ms: 80 }, 'http://dashboard.example'), /exited with status 7/);
+  await assert.rejects(openProjectSurfaces({ ui_port: 43447, browser_acknowledgement_timeout_ms: 80 }, 'http://dashboard.example'), /terminated by SIGTERM/);
   process.env.PATH = directory;
-  await assert.rejects(openProjectSurfaces(base, 'http://dashboard.example'), /could not launch xdg-open/);
+  await assert.rejects(openProjectSurfaces({ ui_port: 43448 }, 'http://dashboard.example'), /could not launch xdg-open/);
   process.env.PATH = `${bin}:${originalPath}`;
   process.env.LEESH_LOOP_BROWSER_COMMAND = 'override';
-  await openProjectSurfaces(base, 'http://dashboard.example');
+  await openProjectSurfaces({ ui_port: 43449 }, 'http://dashboard.example');
   for (let attempt = 0; attempt < 20; attempt += 1) {
     lines = (await readFile(log, 'utf8')).trim().split('\n');
     if (lines.some(line => line.startsWith('override '))) break;
@@ -122,10 +133,24 @@ test('the system browser path dispatches every project surface before bounded ac
   }
   lines = (await readFile(log, 'utf8')).trim().split('\n');
   assert.equal(lines.filter(line => line.startsWith('override ')).length, 1);
-  assert.match(lines.at(-1), /override http:\/\/127\.0\.0\.1:43444 https:\/\/notion\.example\/surface http:\/\/dashboard\.example/);
+  assert.equal(lines.at(-1), 'override http://127.0.0.1:43449');
 });
 
-test('start skips desktop dispatch without recording an opening, then opens once when enabled on the same runtime', async t => {
+test('a prior multi-surface startup marker does not suppress the new Operator UI surface', () => {
+  assert.equal(projectWindowNeedsOpening({ project_window_opened_at: '2026-09-26T00:00:00.000Z' }), true);
+  assert.equal(projectWindowNeedsOpening({ project_window_surfaces: ['operator-ui-v1'] }), false);
+});
+
+test('Operator UI reuse identity follows imported modules and served Publisher/UI artifacts', () => {
+  const sources = new Set(uiRuntimeSourceFiles().map(path => path.replaceAll('\\', '/')));
+  assert.ok(sources.has(`${root}/operator/local-environment.mjs`));
+  assert.ok(sources.has(`${root}/operator/app/operator-ui-server.mjs`));
+  assert.ok([...sources].some(path => path.endsWith('/operator/notion_publisher/dist/src/task-reader.js')));
+  assert.ok([...sources].some(path => path.endsWith('/operator/ui/dist/index.html')));
+  assert.equal(uiIdentity({ notion_database_url: 'https://notion.example/db', ui_port: 4310, symphony_port: 4101 }).dashboard_port, 4101);
+});
+
+test('start skips desktop dispatch without recording an opening, then opens the Operator UI once when enabled', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-surface-policy-'));
   const stateDirectory = join(directory, 'state');
   const workspaceRoot = join(directory, 'workspaces');
@@ -196,6 +221,7 @@ test('start skips desktop dispatch without recording an opening, then opens once
   await assert.rejects(readFile(browserLog, 'utf8'), { code: 'ENOENT' });
   const disabledState = JSON.parse(await readFile(join(stateDirectory, 'runtime.json'), 'utf8'));
   assert.equal(Object.hasOwn(disabledState, 'project_window_opened_at'), false);
+  assert.equal(Object.hasOwn(disabledState, 'project_window_surfaces'), false);
   assert.equal((await fetch(`http://127.0.0.1:${uiPort}`)).status, 200);
   assert.deepEqual(await (await fetch(`http://127.0.0.1:${dashboardPort}/api/v1/runtime`)).json(), { pid: process.pid, runtime_id: runtimeId, dispatch_capable: true });
 
@@ -206,19 +232,16 @@ test('start skips desktop dispatch without recording an opening, then opens once
   let launches = [];
   for (let attempt = 0; attempt < 30; attempt += 1) {
     launches = (await readFile(browserLog, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean);
-    if (launches.length === 3) break;
+    if (launches.length === 1) break;
     await new Promise(done => setTimeout(done, 20));
   }
-  assert.deepEqual(launches.sort(), [
-    `http://127.0.0.1:${uiPort}`,
-    databaseUrl,
-    `http://127.0.0.1:${dashboardPort}`
-  ].sort());
+  assert.deepEqual(launches, [`http://127.0.0.1:${uiPort}`]);
   const enabledState = JSON.parse(await readFile(join(stateDirectory, 'runtime.json'), 'utf8'));
   assert.ok(enabledState.project_window_opened_at);
+  assert.deepEqual(enabledState.project_window_surfaces, ['operator-ui-v1']);
 
   await execFile(process.execPath, [cli, 'start', configPath], { env: environment, timeout: 60_000 });
   await new Promise(done => setTimeout(done, 30));
   launches = (await readFile(browserLog, 'utf8')).trim().split('\n').filter(Boolean);
-  assert.equal(launches.length, 3);
+  assert.equal(launches.length, 1);
 });
