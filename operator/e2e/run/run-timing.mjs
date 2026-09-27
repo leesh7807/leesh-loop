@@ -44,11 +44,6 @@ export class RunTimingRecorder {
       timing.observations.push({ observed_at: at, job_id: jobId, state: chatgptShot.terminal_state ?? null, result: chatgptShot.result ?? null, error: chatgptShot.error ?? null });
     }
 
-    const workerStartedAt = snapshot.symphony?.issue?.running?.started_at || snapshot.symphony?.issue?.retry?.started_at || null;
-    if (workerStartedAt) {
-      record.timing.symphony.worker_started_at ||= workerStartedAt;
-      record.timing.symphony.observed_duration_ms = Date.parse(at) - Date.parse(record.timing.symphony.worker_started_at);
-    }
   }
 
   recordRunEnded(record, endedAt) {

@@ -78,6 +78,7 @@ export function createOperatorProjectConfig(config, paths, baseBranch, workflowP
     ...(config.codex_model === undefined ? {} : { codex_model: config.codex_model }),
     ...(config.codex_reasoning_effort === undefined ? {} : { codex_reasoning_effort: config.codex_reasoning_effort }),
     skip_external_readiness: true,
+    open_project_surfaces: false,
     symphony_port: config.symphony_port,
     ui_port: config.ui_port,
     state_directory: paths.runtimeState

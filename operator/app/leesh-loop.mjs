@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
 import { chmod, mkdir, open, readFile, readlink, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
@@ -9,6 +9,8 @@ import { normalizeWorkspaceFiles, validateWorkspaceFiles } from './workspace-fil
 import { validateBaseBranch } from './git-target.mjs';
 import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
 import { resolveProjectPath } from '../local-path.mjs';
+import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
+import { bootSuccessMessage, bootstrapProject } from './project-bootstrap.mjs';
 import { defaultOperatorUiDependencies, readRequestBody, startOperatorUiServer } from './operator-ui-server.mjs';
 
 const appScript = fileURLToPath(import.meta.url);
@@ -52,6 +54,7 @@ async function loadConfig(file, { validateWorkspaceFileSources = true, requireNo
   for (const key of ['codex_model', 'codex_reasoning_effort']) if (config[key] !== undefined && (typeof config[key] !== 'string' || !config[key].trim())) throw new Error(`${key} must be a non-empty string`);
   await validateBaseBranch(config.github_base_branch);
   if (config.skip_external_readiness !== undefined && typeof config.skip_external_readiness !== 'boolean') throw new Error('skip_external_readiness must be a boolean');
+  if (config.open_project_surfaces !== undefined && typeof config.open_project_surfaces !== 'boolean') throw new Error('open_project_surfaces must be a boolean');
   if (config.allow_workspace_root_inside_repository !== undefined && typeof config.allow_workspace_root_inside_repository !== 'boolean') throw new Error('allow_workspace_root_inside_repository must be a boolean');
   if (config.startup_timeout_ms !== undefined && (!Number.isSafeInteger(config.startup_timeout_ms) || config.startup_timeout_ms <= 0)) throw new Error('startup_timeout_ms must be a positive integer');
   if (config.browser_acknowledgement_timeout_ms !== undefined && (!Number.isSafeInteger(config.browser_acknowledgement_timeout_ms) || config.browser_acknowledgement_timeout_ms <= 0)) throw new Error('browser_acknowledgement_timeout_ms must be a positive integer');
@@ -59,7 +62,7 @@ async function loadConfig(file, { validateWorkspaceFileSources = true, requireNo
   const projectDirectory = dirname(configuration_path);
   const workspace_files = normalizeWorkspaceFiles(config.workspace_files, projectDirectory, homeDirectory);
   if (validateWorkspaceFileSources) await validateWorkspaceFiles(workspace_files);
-  const resolved = { ...config, notion_database_url, skip_external_readiness: config.skip_external_readiness === true, workflow_path: resolveProjectPath(config.workflow_path, projectDirectory, homeDirectory), symphony_workspace_root: resolveProjectPath(config.symphony_workspace_root, projectDirectory, homeDirectory), workspace_files, ...(config.state_directory === undefined ? {} : { state_directory: resolveProjectPath(config.state_directory, projectDirectory, homeDirectory) }), ...(config.symphony_command === undefined ? {} : { symphony_command: resolveProjectPath(config.symphony_command, projectDirectory, homeDirectory) }), configuration_path };
+  const resolved = { ...config, notion_database_url, skip_external_readiness: config.skip_external_readiness === true, open_project_surfaces: config.open_project_surfaces ?? PROJECT_DEFAULTS.open_project_surfaces, workflow_path: resolveProjectPath(config.workflow_path, projectDirectory, homeDirectory), symphony_workspace_root: resolveProjectPath(config.symphony_workspace_root, projectDirectory, homeDirectory), workspace_files, ...(config.state_directory === undefined ? {} : { state_directory: resolveProjectPath(config.state_directory, projectDirectory, homeDirectory) }), ...(config.symphony_command === undefined ? {} : { symphony_command: resolveProjectPath(config.symphony_command, projectDirectory, homeDirectory) }), configuration_path };
   return resolved;
 }
 async function withLock(config, action) {
@@ -121,7 +124,7 @@ async function openWindow(config, dashboard) {
   await openProjectSurfaces(config, dashboard);
 }
 function projectSurfaces(config) { return [uiUrl(config)]; }
-function browserAcknowledgementTimeout(config) { return config.browser_acknowledgement_timeout_ms || 1_000; }
+function browserAcknowledgementTimeout(config) { return config.browser_acknowledgement_timeout_ms || PROJECT_DEFAULTS.browser_acknowledgement_timeout_ms; }
 async function openProjectSurfaces(config, dashboard) {
   const surfaces = projectSurfaces(config, dashboard);
   if (process.env.LEESH_LOOP_BROWSER_COMMAND) {
@@ -152,30 +155,38 @@ async function acknowledgeBrowser(request, timeoutMs) {
   const outcome = result.signal ? `was terminated by ${result.signal}` : `exited with status ${result.code}`;
   throw new Error(`${request.command} ${request.args.join(' ')} ${outcome}`);
 }
-function uiPort(config) { return Number(config.ui_port || 4310); }
+function uiPort(config) { return Number(config.ui_port || PROJECT_DEFAULTS.ui_port); }
 let publisherBuilt = false;
 let operatorUiBuilt = false;
 function ensurePublisher() {
   if (publisherBuilt) return;
   const publisher = join(root, 'operator/notion_publisher');
   if (!existsSync(join(publisher, 'node_modules/.bin/tsc'))) {
-    const install = spawnSync('npm', ['ci'], { cwd: publisher, stdio: 'inherit' });
+    const install = runPublisherCommand(['ci']);
     if (install.status !== 0) throw new Error('publisher preparation failed: npm ci');
   }
-  const build = spawnSync('npm', ['run', 'build'], { cwd: publisher, stdio: 'inherit' });
+  const build = runPublisherCommand(['run', 'build']);
   if (build.status !== 0) throw new Error('publisher preparation failed: npm run build');
   publisherBuilt = true;
+}
+function runPublisherCommand(args) {
+  // Operator start returns JSON on stdout for machine consumers. Keep Publisher
+  // install/build output on stderr so first-run diagnostics cannot corrupt it.
+  return spawnSync('npm', args, { cwd: join(root, 'operator/notion_publisher'), stdio: ['ignore', process.stderr.fd, 'inherit'] });
 }
 function ensureOperatorUi() {
   if (operatorUiBuilt) return;
   const ui = join(root, 'operator/ui');
   if (!existsSync(join(ui, 'node_modules/.bin/vite'))) {
-    const install = spawnSync('npm', ['ci'], { cwd: ui, stdio: 'inherit' });
+    const install = runOperatorUiCommand(ui, ['ci']);
     if (install.status !== 0) throw new Error('Operator UI preparation failed: npm ci');
   }
-  const build = spawnSync('npm', ['run', 'build'], { cwd: ui, stdio: 'inherit' });
+  const build = runOperatorUiCommand(ui, ['run', 'build']);
   if (build.status !== 0) throw new Error('Operator UI preparation failed: npm run build');
   operatorUiBuilt = true;
+}
+function runOperatorUiCommand(directory, args) {
+  return spawnSync('npm', args, { cwd: directory, stdio: ['ignore', process.stderr.fd, 'inherit'] });
 }
 function uiUrl(config) { return `http://127.0.0.1:${uiPort(config)}`; }
 function projectWindowNeedsOpening(state) { return !state?.project_window_surfaces?.includes('operator-ui-v1'); }
@@ -217,7 +228,7 @@ function uiIdentity(config) {
     revision.update(readFileSync(path));
     revision.update('\0');
   }
-  return { notion_database_url: config.notion_database_url, ui_port: uiPort(config), dashboard_port: Number(config.symphony_port || 4100), publisher: join(root, 'operator/notion_publisher/dist/src/cli.js'), revision: revision.digest('hex') };
+  return { notion_database_url: config.notion_database_url, ui_port: uiPort(config), dashboard_port: Number(config.symphony_port || PROJECT_DEFAULTS.symphony_port), publisher: join(root, 'operator/notion_publisher/dist/src/cli.js'), revision: revision.digest('hex') };
 }
 function sameIdentity(first, second) { return JSON.stringify(first) === JSON.stringify(second); }
 async function stopUi(config) { const ui = await json(paths(config).ui); if (ui) await terminate(ui); await remove(paths(config).ui); }
@@ -239,14 +250,14 @@ async function ensureUi(config) {
 
 async function start(config) {
   return withLock(config, async () => {
-    const port = Number(config.symphony_port || 4100); const p = paths(config); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
+    const port = Number(config.symphony_port || PROJECT_DEFAULTS.symphony_port); const p = paths(config); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
     if (!existing) console.error('Operator: preparing Publisher and Symphony startup.');
     ensurePublisher();
     ensureOperatorUi();
     if (existing) {
       let window_error;
       try { await ensureUi(config); } catch (error) { window_error = String(error.message || error); }
-      if (projectWindowNeedsOpening(existing)) {
+      if (config.open_project_surfaces && projectWindowNeedsOpening(existing)) {
         try {
           await openWindow(config, existing.effective.dashboard);
           await atomicJson(paths(config).state, { ...existing, project_window_opened_at: new Date().toISOString(), project_window_surfaces: ['operator-ui-v1'] });
@@ -294,8 +305,13 @@ async function start(config) {
       await atomicText(p.startup_status, 'waiting for Symphony dispatch acknowledgement');
       await waitFor(() => runtimeObserved(running, true), 'dispatch acknowledgement', 15_000, reportProgress('dispatch acknowledgement'), () => childFailure('dispatch acknowledgement'));
       try {
-        await openWindow(config, identity.dashboard);
-        await atomicJson(p.state, { ...running, project_window_opened_at: new Date().toISOString(), project_window_surfaces: ['operator-ui-v1'] }); await remove(p.startup_status);
+        if (config.open_project_surfaces) {
+          await openWindow(config, identity.dashboard);
+          await atomicJson(p.state, { ...running, project_window_opened_at: new Date().toISOString(), project_window_surfaces: ['operator-ui-v1'] });
+        } else {
+          await ensureUi(config);
+        }
+        await remove(p.startup_status);
         return { reused: false, pid, dashboard: identity.dashboard };
       }
       catch (windowError) { return { reused: false, pid, dashboard: identity.dashboard, window_error: String(windowError.message || windowError) }; }
@@ -321,9 +337,26 @@ async function serve(config, { prepared = false } = {}) {
 
 const args = process.argv.slice(2);
 const locked = args[0] === '__locked';
-const [command, configFile = defaultConfig] = locked ? args.slice(1) : args;
-if (process.argv[1] && resolve(process.argv[1]) === appScript && !['start', 'stop', 'serve', 'serve-prepared'].includes(command)) { console.error('Usage: leesh-loop <start|stop|serve> [project-config.json]'); process.exitCode = 2; }
-else if (process.argv[1] && resolve(process.argv[1]) === appScript) {
+const [command, ...commandArgs] = locked ? args.slice(1) : args;
+const configFile = commandArgs[0] || defaultConfig;
+let directExecution = false;
+try { directExecution = Boolean(process.argv[1] && realpathSync(process.argv[1]) === appScript); } catch { /* Node may be importing this module from another entry point. */ }
+if (directExecution && !['boot', 'start', 'stop', 'serve', 'serve-prepared'].includes(command)) {
+  const usage = 'Usage: leesh-loop <boot [--no-external]|start|stop|serve> [project-config.json]';
+  if (command === '--help' || command === '-h') console.log(usage);
+  else { console.error(usage); process.exitCode = 2; }
+} else if (directExecution && command === 'boot') {
+  const noExternal = commandArgs.includes('--no-external');
+  const invalid = commandArgs.find(argument => argument !== '--no-external');
+  if (invalid) {
+    console.error(`leesh-loop boot does not accept argument: ${invalid}`);
+    process.exitCode = 2;
+  } else {
+    bootstrapProject({ targetDirectory: process.cwd(), sourceDirectory: root, noExternal })
+      .then(result => console.log(bootSuccessMessage(result)))
+      .catch(error => { console.error(`Leesh Loop boot failed: ${error.message}`); process.exitCode = 1; });
+  }
+} else if (directExecution) {
   loadConfig(configFile, { validateWorkspaceFileSources: command === 'start', requireNotionDatabase: command !== 'stop' }).then(async config => {
     if (!locked && ['start', 'stop'].includes(command)) {
       await mkdir(stateRoot(config), { recursive: true, mode: 0o700 });
@@ -337,4 +370,4 @@ else if (process.argv[1] && resolve(process.argv[1]) === appScript) {
   }).then(value => { if (value) console.log(JSON.stringify(value)); }).catch(error => { console.error(`Operator failed: ${error.message}`); process.exitCode = 1; });
 }
 
-export { acknowledgeBrowser, compatible, dispatchBrowser, effective, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, projectWindowNeedsOpening, readRequestBody, uiIdentity, uiRuntimeSourceFiles };
+export { acknowledgeBrowser, compatible, dispatchBrowser, effective, ensurePublisher, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, projectWindowNeedsOpening, readRequestBody, runPublisherCommand, uiIdentity, uiRuntimeSourceFiles };
