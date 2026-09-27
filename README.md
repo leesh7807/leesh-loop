@@ -37,6 +37,35 @@ bar/       ← bar-loop
 
 There is no separate central project manager for coordinating multiple repositories.
 
+## Install the local CLI and bootstrap a Project
+
+Clone and set up Leesh Loop once, then link its root package into your PATH:
+
+```sh
+git clone https://github.com/leesh7807/leesh-loop.git
+cd leesh-loop
+(cd operator/symphony && mise trust && mise exec -- mix deps.get)
+npm link
+```
+
+Run the linked command from the root of a Git project that already has its own Leesh Loop
+`WORKFLOW.md`:
+
+```sh
+cd /path/to/target-project
+leesh-loop boot
+```
+
+This creates the sibling `<target-project>-loop` runtime, prepares its Project configuration and
+runtime dependencies, and creates an empty production `.env` for `NOTION_TOKEN` and
+`LEESH_LOOP_NOTION_DATABASE_URL`. Fill those bindings, then run `npm start` in the new runtime;
+use `npm stop` there to stop it. `leesh-loop boot --no-external` writes the existing
+`skip_external_readiness: true` setting for environments that do not need external readiness.
+
+Bootstrap uses the target checkout's upstream/tracking information to select its repository and
+base branch and prints both selections. Review `operator/project.json` if that initial binding is
+not the intended target. It does not generate or modify the target's `WORKFLOW.md`.
+
 The root `WORKFLOW.md` in this repository is the concrete execution contract for Leesh Loop itself. It is not the generic workflow for every repository operated by a loop.
 
 When a separate loop is created for another source repository, that repository needs a workflow adapted to its own runtime and repository rules. [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md) is the reusable starting point and reference for defining that repository-specific workflow.

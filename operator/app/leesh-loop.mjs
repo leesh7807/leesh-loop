@@ -2,7 +2,7 @@
 import { createServer } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { chmod, mkdir, open, readFile, readlink, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -10,6 +10,8 @@ import { normalizeWorkspaceFiles, validateWorkspaceFiles } from './workspace-fil
 import { validateBaseBranch } from './git-target.mjs';
 import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
 import { resolveProjectPath } from '../local-path.mjs';
+import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
+import { bootSuccessMessage, bootstrapProject } from './project-bootstrap.mjs';
 
 const appScript = fileURLToPath(import.meta.url);
 const root = resolve(dirname(appScript), '../..');
@@ -121,7 +123,7 @@ async function openWindow(config, dashboard) {
   await openProjectSurfaces(config, dashboard);
 }
 function projectSurfaces(config, dashboard) { return [uiUrl(config), config.notion_database_url, dashboard]; }
-function browserAcknowledgementTimeout(config) { return config.browser_acknowledgement_timeout_ms || 1_000; }
+function browserAcknowledgementTimeout(config) { return config.browser_acknowledgement_timeout_ms || PROJECT_DEFAULTS.browser_acknowledgement_timeout_ms; }
 async function openProjectSurfaces(config, dashboard) {
   const surfaces = projectSurfaces(config, dashboard);
   if (process.env.LEESH_LOOP_BROWSER_COMMAND) {
@@ -152,7 +154,7 @@ async function acknowledgeBrowser(request, timeoutMs) {
   const outcome = result.signal ? `was terminated by ${result.signal}` : `exited with status ${result.code}`;
   throw new Error(`${request.command} ${request.args.join(' ')} ${outcome}`);
 }
-function uiPort(config) { return Number(config.ui_port || 4310); }
+function uiPort(config) { return Number(config.ui_port || PROJECT_DEFAULTS.ui_port); }
 function ensurePublisher() {
   const publisher = join(root, 'operator/notion_publisher');
   if (!existsSync(join(publisher, 'node_modules/.bin/tsc'))) {
@@ -184,7 +186,7 @@ async function ensureUi(config) {
 
 async function start(config) {
   return withLock(config, async () => {
-    const port = Number(config.symphony_port || 4100); const p = paths(config); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
+    const port = Number(config.symphony_port || PROJECT_DEFAULTS.symphony_port); const p = paths(config); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
     if (existing) {
       let window_error;
       try { await ensureUi(config); } catch (error) { window_error = String(error.message || error); }
@@ -231,7 +233,7 @@ async function start(config) {
         const detail = output ? `: ${output.slice(-4_000)}` : '';
         return new Error(`owned Symphony process ${pid} exited before ${description}${detail}`);
       };
-      await waitFor(() => runtimeObserved({ ...provisional, effective: identity }, false), 'Symphony observability', config.startup_timeout_ms || 30 * 60_000, reportProgress('Symphony observability'), () => childFailure('Symphony observability'));
+      await waitFor(() => runtimeObserved({ ...provisional, effective: identity }, false), 'Symphony observability', config.startup_timeout_ms || PROJECT_DEFAULTS.startup_timeout_ms, reportProgress('Symphony observability'), () => childFailure('Symphony observability'));
       const committed = { ...provisional, status: 'committed-disabled' }; await atomicJson(p.state, committed);
       const running = { ...committed, status: 'running', authorized_at: new Date().toISOString() }; await atomicJson(p.state, running);
       await atomicJson(p.authorization, { state: 'running', runtime_id: runtimeId, published_at: new Date().toISOString() });
@@ -318,7 +320,7 @@ function page(config, { plan = '', state = '', states = [], defaultState = 'Read
       </div>
       <nav aria-label="Related work">
         <a href="${html(config.notion_database_url)}">Notion Tasks</a>
-        <a href="${`http://127.0.0.1:${Number(config.symphony_port || 4100)}`}">Symphony Dashboard</a>
+        <a href="${`http://127.0.0.1:${Number(config.symphony_port || PROJECT_DEFAULTS.symphony_port)}`}">Symphony Dashboard</a>
       </nav>
     </header>
     <main>
@@ -395,9 +397,26 @@ async function serve(config) {
 
 const args = process.argv.slice(2);
 const locked = args[0] === '__locked';
-const [command, configFile = defaultConfig] = locked ? args.slice(1) : args;
-if (process.argv[1] && resolve(process.argv[1]) === appScript && !['start', 'stop', 'serve'].includes(command)) { console.error('Usage: leesh-loop <start|stop|serve> [project-config.json]'); process.exitCode = 2; }
-else if (process.argv[1] && resolve(process.argv[1]) === appScript) {
+const [command, ...commandArgs] = locked ? args.slice(1) : args;
+const configFile = commandArgs[0] || defaultConfig;
+let directExecution = false;
+try { directExecution = Boolean(process.argv[1] && realpathSync(process.argv[1]) === appScript); } catch { /* Node may be importing this module from another entry point. */ }
+if (directExecution && !['boot', 'start', 'stop', 'serve'].includes(command)) {
+  const usage = 'Usage: leesh-loop <boot [--no-external]|start|stop|serve> [project-config.json]';
+  if (command === '--help' || command === '-h') console.log(usage);
+  else { console.error(usage); process.exitCode = 2; }
+} else if (directExecution && command === 'boot') {
+  const noExternal = commandArgs.includes('--no-external');
+  const invalid = commandArgs.find(argument => argument !== '--no-external');
+  if (invalid) {
+    console.error(`leesh-loop boot does not accept argument: ${invalid}`);
+    process.exitCode = 2;
+  } else {
+    bootstrapProject({ targetDirectory: process.cwd(), sourceDirectory: root, noExternal })
+      .then(result => console.log(bootSuccessMessage(result)))
+      .catch(error => { console.error(`Leesh Loop boot failed: ${error.message}`); process.exitCode = 1; });
+  }
+} else if (directExecution) {
   loadConfig(configFile, { validateWorkspaceFileSources: command === 'start', requireNotionDatabase: command !== 'stop' }).then(async config => {
     if (!locked && ['start', 'stop'].includes(command)) {
       await mkdir(stateRoot(config), { recursive: true, mode: 0o700 });
