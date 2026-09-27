@@ -129,6 +129,7 @@ test("normal publisher entry point creates the two-source canonical representati
   const [planPage] = client.planPages();
 
   assert.equal(result.page_id, task.id);
+  assert.equal(result.state, PUBLISHER_READY_STATE);
   assert.deepEqual([...client.sources.keys()].sort(), ["plan-source", "task-source"]);
   assert.equal(client.sources.get("task-source")!.properties[PLAN_PROPERTY].relation.data_source_id, "plan-source");
   assert.equal("Name" in client.sources.get("task-source")!.properties, false);
@@ -149,7 +150,8 @@ test("normal publisher entry point creates the two-source canonical representati
 test("publisher can select Backlog without changing canonical publication", async () => {
   const { plan, config } = await inputs("# Queue me\naccepted plan");
   const client = new PublicationFake();
-  await publishPlanFile(plan, config, DATABASE_URL, client, "Backlog");
+  const result = await publishPlanFile(plan, config, DATABASE_URL, client, "Backlog");
+  assert.equal(result.state, "Backlog");
   assert.equal(client.taskPage().properties.State.select.name, "Backlog");
   assert.equal(client.planPages()[0].children.map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "# Queue me\naccepted plan");
 });

@@ -159,7 +159,15 @@ async function acknowledgeBrowser(request, timeoutMs) {
   throw new Error(`${request.command} ${request.args.join(' ')} ${outcome}`);
 }
 function uiPort(config) { return Number(config.ui_port || 4310); }
-function ensurePublisher() { const publisher = join(root, 'operator/notion_publisher'); if (existsSync(join(publisher, 'dist/src/cli.js'))) return; for (const args of [['ci'], ['run', 'build']]) { const result = spawnSync('npm', args, { cwd: publisher, stdio: 'inherit' }); if (result.status !== 0) throw new Error(`publisher preparation failed: npm ${args.join(' ')}`); } }
+function ensurePublisher() {
+  const publisher = join(root, 'operator/notion_publisher');
+  if (!existsSync(join(publisher, 'node_modules/.bin/tsc'))) {
+    const install = spawnSync('npm', ['ci'], { cwd: publisher, stdio: 'inherit' });
+    if (install.status !== 0) throw new Error('publisher preparation failed: npm ci');
+  }
+  const build = spawnSync('npm', ['run', 'build'], { cwd: publisher, stdio: 'inherit' });
+  if (build.status !== 0) throw new Error('publisher preparation failed: npm run build');
+}
 function uiUrl(config) { return `http://127.0.0.1:${uiPort(config)}`; }
 function uiIdentity(config) { return { notion_database_url: config.notion_database_url, ui_port: uiPort(config), publisher: join(root, 'operator/notion_publisher/dist/cli.js') }; }
 function sameIdentity(first, second) { return JSON.stringify(first) === JSON.stringify(second); }
@@ -379,7 +387,7 @@ async function serve(config) {
       if (code === 0) {
         try {
           const publication = JSON.parse(output.trim());
-          sendPage(page(config, { states, defaultState, result: { kind: 'success', identifier: publication.identifier, state: state || defaultState, url: publication.url } }));
+          sendPage(page(config, { states, defaultState, result: { kind: 'success', identifier: publication.identifier, state: publication.state, url: publication.url } }));
         } catch {
           sendPage(page(config, { states, defaultState, plan, state, result: { kind: 'failure', message: 'Publisher returned a successful response that the Operator could not read. Check Notion Tasks before retrying.' } }), 502);
         }
