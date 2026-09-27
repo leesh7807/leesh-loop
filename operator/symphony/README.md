@@ -36,6 +36,15 @@ issue claimed and exposes it as blocked in the runtime state, JSON API, and dash
 entries are in memory only; restarting the orchestrator clears that blocked map, so any still-active
 tracker issue can become a dispatch candidate again after restart.
 
+Worker executions also have a bounded structured history independent of live scheduler state. The
+default retention is 500 non-active executions and can be changed with
+`observability.execution_history_retention`. The history is stored as `log/execution-history.json`
+beside the diagnostic `log/symphony.log` (or under the configured `--logs-root`), exposed through
+`GET /api/v1/executions?issue_identifier=<identifier>`, and reconciles interrupted `running`
+records on restart. Active executions are retained until they finish; older completed or
+interrupted records are evicted by the configured count. The rotating text log remains a separate
+human diagnostic surface.
+
 ## How to use it
 
 1. Make sure your codebase is set up to work well with agents: see

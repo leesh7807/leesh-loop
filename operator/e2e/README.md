@@ -67,6 +67,11 @@ options, actual run-local Operator Project, nested workspace root, and sandbox/r
 `operator/e2e/runs/<run-id>/run.json`. The snapshot files and record are outside destructive nested
 workspace cleanup and remain durable after finalization.
 
+Production Symphony execution history is captured in those evidence snapshots through
+`GET /api/v1/executions?issue_identifier=<identifier>`. E2E observation timestamps remain in the
+snapshot envelope; worker start/end/runtime, attempt, session, turn, and token values come from the
+production execution records. E2E lifecycle and whole-run durations remain E2E observations.
+
 A terminal run is a useful result even when production stops before `Done`. Inspect
 `verified_through`, `verification_gaps`, `failures`, `finalization`, `cleanup` and the evidence
 snapshots separately. An unresolved finalization or branch-isolation finding deliberately blocks

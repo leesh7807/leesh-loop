@@ -159,11 +159,16 @@ function uiPort(config) { return Number(config.ui_port || PROJECT_DEFAULTS.ui_po
 function ensurePublisher() {
   const publisher = join(root, 'operator/notion_publisher');
   if (!existsSync(join(publisher, 'node_modules/.bin/tsc'))) {
-    const install = spawnSync('npm', ['ci'], { cwd: publisher, stdio: ['ignore', 'ignore', 'inherit'] });
+    const install = runPublisherCommand(['ci']);
     if (install.status !== 0) throw new Error('publisher preparation failed: npm ci');
   }
-  const build = spawnSync('npm', ['run', 'build'], { cwd: publisher, stdio: ['ignore', 'ignore', 'inherit'] });
+  const build = runPublisherCommand(['run', 'build']);
   if (build.status !== 0) throw new Error('publisher preparation failed: npm run build');
+}
+function runPublisherCommand(args) {
+  // Operator start returns JSON on stdout for machine consumers. Keep Publisher
+  // install/build output on stderr so first-run diagnostics cannot corrupt it.
+  return spawnSync('npm', args, { cwd: join(root, 'operator/notion_publisher'), stdio: ['ignore', process.stderr.fd, 'inherit'] });
 }
 function uiUrl(config) { return `http://127.0.0.1:${uiPort(config)}`; }
 function uiIdentity(config) { return { notion_database_url: config.notion_database_url, ui_port: uiPort(config), publisher: join(root, 'operator/notion_publisher/dist/cli.js') }; }
@@ -436,4 +441,4 @@ if (directExecution && !['boot', 'start', 'stop', 'serve'].includes(command)) {
   }).then(value => { if (value) console.log(JSON.stringify(value)); }).catch(error => { console.error(`Operator failed: ${error.message}`); process.exitCode = 1; });
 }
 
-export { acknowledgeBrowser, compatible, dispatchBrowser, effective, ensurePublisher, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, readRequestBody };
+export { acknowledgeBrowser, compatible, dispatchBrowser, effective, ensurePublisher, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, readRequestBody, runPublisherCommand };
