@@ -14,15 +14,28 @@ test('catalog requires a finite cap and keeps harness metadata outside the accep
   assert.throws(() => validateWorkloadCatalog([{ id: 'bad', hard_cap_ms: 0, accepted_plan: planA }]), /finite positive/);
 });
 
-test('selection remains eligible after prior task instances are published', () => {
+test('selection remains random among entries without a completed catalog run', () => {
   const catalog = validateWorkloadCatalog([
     { id: 'a', hard_cap_ms: 10, accepted_plan: planA },
     { id: 'b', hard_cap_ms: 10, accepted_plan: planB }
   ]);
-  const selected = selectAvailableWorkload(catalog, { random: () => 0.99 });
+  const completedCatalogEntryIds = ['a'];
+  const selected = selectAvailableWorkload(catalog, { completedCatalogEntryIds, random: () => 0.99 });
   assert.equal(selected.id, 'b');
+  assert.equal(selectAvailableWorkload(catalog, { completedCatalogEntryIds, random: () => 0 }).id, 'b');
   assert.equal(selectAvailableWorkload(catalog, { random: () => 0 }).id, 'a');
   assert.equal(selectAvailableWorkload(catalog, { random: () => 0.99 }).id, 'b');
+});
+
+test('selection rejects an exhausted catalog after every entry has a completed run', () => {
+  const catalog = validateWorkloadCatalog([
+    { id: 'a', hard_cap_ms: 10, accepted_plan: planA },
+    { id: 'b', hard_cap_ms: 10, accepted_plan: planB }
+  ]);
+  assert.throws(() => selectAvailableWorkload(catalog, {
+    completedCatalogEntryIds: ['a', 'b'],
+    random: () => 0
+  }), /no unfinished entries; replace completed catalog workloads/);
 });
 
 test('materialization suffixes the plan title and re-derives the plan identity', () => {

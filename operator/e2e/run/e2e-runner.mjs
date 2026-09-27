@@ -71,7 +71,7 @@ export class E2ERunner {
       await this.runRecordStore.saveAdmissionFailure(error);
       throw error;
     }
-    const resolvedWorkload = resolveWorkloadForRun({ runInput: this.runInput, catalog: admission.workload, tasks: admission.tasks, random: this.random });
+    const resolvedWorkload = resolveWorkloadForRun({ runInput: this.runInput, catalog: admission.workload, tasks: admission.tasks, completedCatalogEntryIds: admission.completedCatalogEntryIds, random: this.random });
     const workload = resolvedWorkload.workload;
     const runId = createRunId();
     const paths = createRunPaths(this.config, runId);
