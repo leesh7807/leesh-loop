@@ -86,6 +86,18 @@ export class NotionClient {
     return { taskDataSourceId: task.id, planDataSourceId: plan.id };
   }
 
+  // The Operator task surface may read an initialized binding but must not bootstrap schema.
+  async existingDatabaseBinding(databaseId: string, policy: Policy): Promise<DatabaseBinding> {
+    const database = await this.request("GET", `/databases/${databaseId}`);
+    const entries = database.data_sources;
+    if (!Array.isArray(entries) || entries.some((entry: any) => typeof entry?.id !== "string")) throw new PublicationError("provider/API failure: database returned malformed data-source metadata");
+    const sources = await Promise.all(entries.map(async (entry: any) => ({ id: entry.id, schema: await this.request("GET", `/data_sources/${entry.id}`) })));
+    const plans = sources.filter(({ schema }) => this.isPlanSchema(schema));
+    const tasks = sources.filter(({ id, schema }) => this.isTaskSchema(schema, id, policy));
+    if (tasks.length !== 1 || plans.length !== 1 || relationTarget(tasks[0].schema.properties[PLAN_PROPERTY]) !== plans[0].id || !hasSingleProperty(tasks[0].schema.properties[PLAN_PROPERTY].relation)) throw this.unsupported();
+    return { taskDataSourceId: tasks[0].id, planDataSourceId: plans[0].id };
+  }
+
   private unsupported(): PublicationError { return new PublicationError("The selected Notion database is not empty or does not match the canonical Leesh Loop schema.\nUse an empty database or a database already initialized with the canonical Leesh Loop schema."); }
 
   private async isEmpty(dataSource: string): Promise<boolean> {
