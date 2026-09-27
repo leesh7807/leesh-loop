@@ -43,10 +43,11 @@ node operator/e2e/cli.mjs run operator/e2e/project.json --plan ./accepted-plan.m
 node operator/e2e/cli.mjs run operator/e2e/project.json --plan ./accepted-plan.md --hard-cap-ms 600000
 ```
 
-Use `--workflow ./WORKFLOW.md` to supply one exact workflow document for a run. The workflow is
-resolved once before the production runtime starts and is copied verbatim into that run's evidence.
-There is no catalog-id selector; without `--plan`, catalog random remains the only default workload
-selection behavior.
+For targeted scenario inputs, `--plan ./accepted-plan.md` supplies the Accepted Plan and
+`--workflow ./WORKFLOW.md` supplies one exact workflow document. Both are inputs to the same
+production E2E path; they do not introduce a separate run mode. Without `--plan`, a run randomly
+selects a catalog Plan to check the production lifecycle and PR delivery path. The workflow is
+resolved once before the production runtime starts and copied verbatim into that run's evidence.
 
 The implementation is grouped by responsibility:
 
