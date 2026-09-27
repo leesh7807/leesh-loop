@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { NotionClient } from '../systems/notion/notion-client.mjs';
 
-const databaseUrl = 'https://app.notion.com/p/studyleesh/3e08a2658625805cad23fe1137be4a1e?v=3e08a26586258042a8e4000c945e56e7';
+const databaseUrl = `https://app.notion.com/${randomUUID()}`;
 
 function response(body, ok = true) {
   return { ok, status: ok ? 200 : 400, async json() { return body; }, async text() { return JSON.stringify(body); } };

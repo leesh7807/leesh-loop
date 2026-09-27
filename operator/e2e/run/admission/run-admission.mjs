@@ -36,7 +36,7 @@ export class RunAdmission {
     }
     const tasks = await this.notionClient.listTasks(this.config.notion_database_url);
     const conflicting = tasks.filter(task => ACTIVE_STATES.has(task.state) || task.state === 'Publisher Pending');
-    if (conflicting.length) throw new Error(`fixed E2E Notion database has active or dispatchable residue: ${conflicting.map(task => `${task.identifier}:${task.state}`).join(', ')}`);
+    if (conflicting.length) throw new Error(`resolved E2E Notion database has active or dispatchable residue: ${conflicting.map(task => `${task.identifier}:${task.state}`).join(', ')}`);
     const refs = await this.gitClient.listRemoteBranchRefs();
     for (const previous of records) {
       const branch = previous.binding?.base_branch;

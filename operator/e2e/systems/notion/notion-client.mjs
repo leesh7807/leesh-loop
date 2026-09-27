@@ -42,7 +42,7 @@ export class NotionClient {
     const plans = sources.filter(source => this.isPlanSchema(source.schema));
     const tasks = sources.filter(source => this.isTaskSchema(source.schema, source.id));
     if (sources.length === 1 && this.isPristineSchema(sources[0].schema)) return { databaseId, pristine: true, pristineTaskDataSourceId: sources[0].id };
-    if (plans.length !== 1 || tasks.length !== 1) throw new Error('fixed E2E Notion database does not have one canonical task source and one Plan source');
+    if (plans.length !== 1 || tasks.length !== 1) throw new Error('resolved E2E Notion database does not have one canonical task source and one Plan source');
     const task = tasks[0];
     if (task.schema.properties.Plan?.relation?.data_source_id !== plans[0].id) throw new Error('E2E task Plan relation points outside the canonical Plan source');
     const binding = { databaseId, taskDataSourceId: task.id, planDataSourceId: plans[0].id };
@@ -111,7 +111,7 @@ export class NotionClient {
 
   async readTask(databaseUrl, identifierOrId, signal) {
     const binding = await this.resolveE2ENotionDatabaseBinding(databaseUrl, signal);
-    if (binding.pristine) throw new Error('fixed E2E Notion database is still pristine; the production Publisher must bootstrap it before task readback');
+    if (binding.pristine) throw new Error('resolved E2E Notion database is still pristine; the production Publisher must bootstrap it before task readback');
     let page;
     if (/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(identifierOrId)) {
       page = await this.request('GET', `/pages/${identifierOrId}`, undefined, signal);
@@ -120,7 +120,7 @@ export class NotionClient {
       if (rows.length !== 1) throw new Error(`Notion task identifier ${identifierOrId} resolved to ${rows.length} pages`);
       page = await this.request('GET', `/pages/${rows[0].id}`, undefined, signal);
     }
-    if (page?.parent?.type !== 'data_source_id' || page.parent.data_source_id !== binding.taskDataSourceId) throw new Error('Notion page is outside the fixed E2E task data source');
+    if (page?.parent?.type !== 'data_source_id' || page.parent.data_source_id !== binding.taskDataSourceId) throw new Error('Notion page is outside the resolved E2E task data source');
     const summary = this.summarizeTaskPage(page);
     const planIds = relationIds(page.properties?.[PLAN_PROPERTY]);
     if (!planIds || planIds.length !== 1) throw new Error('E2E task Plan relation is not exactly one page');
@@ -142,7 +142,7 @@ export class NotionClient {
     const binding = await this.resolveE2ENotionDatabaseBinding(databaseUrl, signal);
     if (binding.pristine) {
       const pages = await this.queryDataSource(binding.pristineTaskDataSourceId, {}, signal);
-      if (pages.length) throw new Error('fixed E2E Notion database is pristine but already contains pages; canonical binding cannot be established safely');
+      if (pages.length) throw new Error('resolved E2E Notion database is pristine but already contains pages; canonical binding cannot be established safely');
       return [];
     }
     const pages = await this.queryDataSource(binding.taskDataSourceId, {}, signal);

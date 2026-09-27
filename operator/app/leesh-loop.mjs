@@ -8,6 +8,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { normalizeWorkspaceFiles, validateWorkspaceFiles } from './workspace-files.mjs';
 import { validateBaseBranch } from './git-target.mjs';
+import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
+import { resolveProjectPath } from '../local-path.mjs';
 
 const appScript = fileURLToPath(import.meta.url);
 const root = resolve(dirname(appScript), '../..');
@@ -31,16 +33,6 @@ async function atomicText(path, value) {
   await rename(temporary, path);
 }
 async function json(path) { try { return JSON.parse(await readFile(path, 'utf8')); } catch { return null; } }
-async function localEnvironmentValue(name) {
-  try {
-    const contents = await readFile(join(root, '.env'), 'utf8');
-    for (const line of contents.split(/\r?\n/)) {
-      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-      if (match?.[1] === name) return match[2].trim().replace(/^['"]|['"]$/g, '');
-    }
-  } catch { /* a caller may instead provide the environment variable */ }
-  return undefined;
-}
 function alive(pid) { try { process.kill(pid, 0); return true; } catch { return false; } }
 function processStartTicks(pid) {
   try {
@@ -51,21 +43,23 @@ function processStartTicks(pid) {
 }
 async function remove(path) { await rm(path, { force: true }); }
 
-async function loadConfig(file, { validateWorkspaceFileSources = true } = {}) {
+async function loadConfig(file, { validateWorkspaceFileSources = true, requireNotionDatabase = true, environment = process.env, envFile = join(root, '.env'), homeDirectory } = {}) {
   const config = await json(canonical(file));
   if (!config || typeof config !== 'object') throw new Error(`missing or invalid project configuration: ${file}`);
-  for (const key of ['workflow_path', 'notion_database_url', 'symphony_workspace_root', 'github_repository_url', 'github_base_branch']) if (typeof config[key] !== 'string' || !config[key]) throw new Error(`project configuration requires ${key}`);
+  for (const key of ['workflow_path', 'symphony_workspace_root', 'github_repository_url', 'github_base_branch']) if (typeof config[key] !== 'string' || !config[key]) throw new Error(`project configuration requires ${key}`);
+  const notion_database_url = await readRepositoryEnvironmentValue('LEESH_LOOP_NOTION_DATABASE_URL', { environment, envFile });
+  if (requireNotionDatabase && !notion_database_url) throw new Error('missing LEESH_LOOP_NOTION_DATABASE_URL: set it in the Operator environment or repository-root .env');
   for (const key of ['codex_model', 'codex_reasoning_effort']) if (config[key] !== undefined && (typeof config[key] !== 'string' || !config[key].trim())) throw new Error(`${key} must be a non-empty string`);
-  if (!isAbsolute(config.workflow_path) || !isAbsolute(config.symphony_workspace_root)) throw new Error('workflow_path and symphony_workspace_root must be absolute');
   await validateBaseBranch(config.github_base_branch);
   if (config.skip_external_readiness !== undefined && typeof config.skip_external_readiness !== 'boolean') throw new Error('skip_external_readiness must be a boolean');
   if (config.allow_workspace_root_inside_repository !== undefined && typeof config.allow_workspace_root_inside_repository !== 'boolean') throw new Error('allow_workspace_root_inside_repository must be a boolean');
   if (config.startup_timeout_ms !== undefined && (!Number.isSafeInteger(config.startup_timeout_ms) || config.startup_timeout_ms <= 0)) throw new Error('startup_timeout_ms must be a positive integer');
   if (config.browser_acknowledgement_timeout_ms !== undefined && (!Number.isSafeInteger(config.browser_acknowledgement_timeout_ms) || config.browser_acknowledgement_timeout_ms <= 0)) throw new Error('browser_acknowledgement_timeout_ms must be a positive integer');
-  const workspace_files = validateWorkspaceFileSources
-    ? await validateWorkspaceFiles(config.workspace_files)
-    : normalizeWorkspaceFiles(config.workspace_files);
-  const resolved = { ...config, skip_external_readiness: config.skip_external_readiness === true, workflow_path: canonical(config.workflow_path), symphony_workspace_root: canonical(config.symphony_workspace_root), workspace_files, configuration_path: canonical(file) };
+  const configuration_path = canonical(file);
+  const projectDirectory = dirname(configuration_path);
+  const workspace_files = normalizeWorkspaceFiles(config.workspace_files, projectDirectory, homeDirectory);
+  if (validateWorkspaceFileSources) await validateWorkspaceFiles(workspace_files);
+  const resolved = { ...config, notion_database_url, skip_external_readiness: config.skip_external_readiness === true, workflow_path: resolveProjectPath(config.workflow_path, projectDirectory, homeDirectory), symphony_workspace_root: resolveProjectPath(config.symphony_workspace_root, projectDirectory, homeDirectory), workspace_files, ...(config.state_directory === undefined ? {} : { state_directory: resolveProjectPath(config.state_directory, projectDirectory, homeDirectory) }), ...(config.symphony_command === undefined ? {} : { symphony_command: resolveProjectPath(config.symphony_command, projectDirectory, homeDirectory) }), configuration_path };
   return resolved;
 }
 async function withLock(config, action) {
@@ -211,7 +205,7 @@ async function start(config) {
     try {
       const symphony = identity.symphony_command;
       const args = operatorBootstrapArgs(config, symphony, port);
-      const notionToken = process.env.NOTION_TOKEN || await localEnvironmentValue('NOTION_TOKEN');
+      const notionToken = await readRepositoryEnvironmentValue('NOTION_TOKEN');
       if (!notionToken) throw new Error('missing NOTION_TOKEN: set it in the Operator environment or the project-root .env file');
       const env = { ...process.env, NOTION_TOKEN: notionToken, LEESH_LOOP_NOTION_DATABASE_URL: config.notion_database_url, LEESH_LOOP_WORKSPACE_FILES: JSON.stringify(config.workspace_files), SYMPHONY_WORKSPACE_ROOT: config.symphony_workspace_root, SYMPHONY_ALLOW_WORKSPACE_ROOT_INSIDE_REPOSITORY: config.allow_workspace_root_inside_repository === true ? 'true' : 'false', SYMPHONY_GITHUB_REPOSITORY_URL: config.github_repository_url, SYMPHONY_GITHUB_BASE_BRANCH: config.github_base_branch, SYMPHONY_DISPATCH_BARRIER: 'closed', SYMPHONY_RUNTIME_ID: runtimeId, SYMPHONY_DISPATCH_AUTHORIZATION_FILE: p.authorization, SYMPHONY_DISPATCH_ACK_FILE: p.acknowledgement, SYMPHONY_OWNERSHIP_FILE: p.ownership, SYMPHONY_OPERATOR_STARTUP_STATUS_FILE: p.startup_status };
       if (identity.codex_model === null) delete env.SYMPHONY_CODEX_MODEL;
@@ -404,7 +398,7 @@ const locked = args[0] === '__locked';
 const [command, configFile = defaultConfig] = locked ? args.slice(1) : args;
 if (process.argv[1] && resolve(process.argv[1]) === appScript && !['start', 'stop', 'serve'].includes(command)) { console.error('Usage: leesh-loop <start|stop|serve> [project-config.json]'); process.exitCode = 2; }
 else if (process.argv[1] && resolve(process.argv[1]) === appScript) {
-  loadConfig(configFile, { validateWorkspaceFileSources: command === 'start' }).then(async config => {
+  loadConfig(configFile, { validateWorkspaceFileSources: command === 'start', requireNotionDatabase: command !== 'stop' }).then(async config => {
     if (!locked && ['start', 'stop'].includes(command)) {
       await mkdir(stateRoot(config), { recursive: true, mode: 0o700 });
       const lockPath = join(stateRoot(config), 'lifecycle.flock');

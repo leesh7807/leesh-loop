@@ -17,7 +17,7 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
   const config = {
     repository_url: 'git@github.com:owner/repo.git',
     workflow_path: '/repo/WORKFLOW.md',
-    notion_database_url: 'https://app.notion.com/p/studyleesh/3e08a2658625805cad23fe1137be4a1e?v=3e08a26586258042a8e4000c945e56e7',
+    notion_database_url: 'https://notion.example/database',
     seed_source_ref: 'refs/heads/main',
     run_record_directory: root + '/runs',
     workspace_root: root + '/workspaces',
@@ -47,7 +47,8 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
     async updateTaskState(_databaseUrl, _taskId, nextState) { transitions.push(nextState); observedState = nextState; return task(observedState); },
     async appendWorkpad() {}
   };
-  const runtime = { async startConfiguredOperatorProject() { return { dashboard: 'http://127.0.0.1:4410' }; }, async stopConfiguredOperatorProject() { return { stopped: true }; } };
+  const startedDatabaseUrls = [];
+  const runtime = { async startConfiguredOperatorProject(_projectPath, _timeout, databaseUrl) { startedDatabaseUrls.push(databaseUrl); return { dashboard: 'http://127.0.0.1:4410' }; }, async stopConfiguredOperatorProject() { return { stopped: true }; } };
   const git = {
     async listRemoteBranchRefs() { return {}; },
     async resolveSeedCommit() { return '0123456789012345678901234567890123456789'; },
@@ -73,7 +74,7 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
   const store = new RunRecordStore(config);
   const finalized = [];
   const finalizer = { async finalizeRun({ record, reason, task: currentTask }) { finalized.push(reason); if (reason === 'reentered_human_review') { const cancelled = await notion.updateTaskState(config.notion_database_url, currentTask.id, 'Cancelled'); assert.equal(cancelled.state, 'Cancelled'); record.cleanup.task_terminalized = true; } record.status = 'finished'; record.finalization.reason = reason; record.finalization.complete = true; record.ended_at = new Date(clock()).toISOString(); await store.save(record); return record; } };
-  return { config, runInput, catalog: validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 5, accepted_plan: plan }]), notionClient: notion, operatorClient: runtime, gitClient: git, notionPublisherClient: publisher, githubClient: github, runEvidenceCollector: evidence, runFinalizer: finalizer, runRecordStore: store, finalized, transitions, publishedPlans };
+  return { config, runInput, catalog: validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 5, accepted_plan: plan }]), notionClient: notion, operatorClient: runtime, gitClient: git, notionPublisherClient: publisher, githubClient: github, runEvidenceCollector: evidence, runFinalizer: finalizer, runRecordStore: store, finalized, transitions, publishedPlans, startedDatabaseUrls };
 }
 
 test('E2ERunner reaches terminal Done through injected production dependencies', async () => {
@@ -95,6 +96,7 @@ test('E2ERunner reaches terminal Done through injected production dependencies',
   assert.equal(record.binding.seed_commit.length, 40);
   assert.equal(persistedStartRequests.length, 1);
   assert.ok(persistedStartRequests[0]);
+  assert.deepEqual(harness.startedDatabaseUrls, [harness.config.notion_database_url]);
   assert.equal(record.lifecycle.observations[0].state, 'Ready');
   assert.equal(record.workload.execution_number, 1);
   assert.equal(harness.publishedPlans[0].startsWith('# Representative task-1\n'), true);

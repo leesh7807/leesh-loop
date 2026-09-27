@@ -9,7 +9,7 @@ import { createRunRecord } from '../model/run-record-store.mjs';
 
 test('finalization preserves an external stop failure and still converges finitely', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-'));
-  const config = { notion_database_url: 'https://app.notion.com/p/studyleesh/3e08a2658625805cad23fe1137be4a1e?v=3e08a26586258042a8e4000c945e56e7', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
+  const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
   const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
   const record = createRunRecord({ config, runId: 'run-1', workload, paths: createRunPaths(config, 'run-1') });
   record.binding.base_branch = 'base/run-1';
@@ -36,7 +36,7 @@ test('finalization preserves an external stop failure and still converges finite
 
 test('successful reconciliation clears an earlier unresolved action', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-retry-'));
-  const config = { notion_database_url: 'https://app.notion.com/p/studyleesh/3e08a2658625805cad23fe1137be4a1e?v=3e08a26586258042a8e4000c945e56e7', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
+  const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
   const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
   const record = createRunRecord({ config, runId: 'run-1', workload, paths: createRunPaths(config, 'run-1') });
   record.binding.base_branch = 'base/run-1';
@@ -58,7 +58,7 @@ test('successful reconciliation clears an earlier unresolved action', async () =
 
 test('reconciliation stops a runtime whose start was durably requested before a crash', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-starting-'));
-  const config = { notion_database_url: 'https://app.notion.com/p/studyleesh/3e08a2658625805cad23fe1137be4a1e?v=3e08a26586258042a8e4000c945e56e7', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
+  const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
   const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
   const record = createRunRecord({ config, runId: 'run-starting', workload, paths: createRunPaths(config, 'run-starting') });
   record.binding.base_branch = 'base/run-starting';
@@ -78,7 +78,7 @@ test('reconciliation stops a runtime whose start was durably requested before a 
 
 test('branch isolation distinguishes external changes from unresolved new refs', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-refs-'));
-  const config = { notion_database_url: 'https://app.notion.com/p/studyleesh/3e08a2658625805cad23fe1137be4a1e?v=3e08a26586258042a8e4000c945e56e7', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
+  const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
   const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
   const record = createRunRecord({ config, runId: 'run-refs', workload, paths: createRunPaths(config, 'run-refs') });
   record.binding.base_branch = 'base/run-refs';
