@@ -203,8 +203,4 @@ The UI is scoped to one repository and its loop.
 
 ## Example Workflow
 
-This repository may include an example workflow showing how Leesh Loop can be used in a real development process.
-
-The planned example uses [`chatgpt-shot`](https://github.com/leesh7807/chatgpt-shot) as an external utility for independent review.
-
-A concrete workflow and execution example can be added once that structure is implemented.
+The repository includes a concrete production E2E workflow at [`operator/e2e/WORKFLOW.md`](operator/e2e/WORKFLOW.md). It exercises the normal Publisher, Operator, Symphony, worker, and delivery flow while omitting the Operator-owned external readiness setup. See the [E2E guide](operator/e2e/README.md) for configuration, run inputs, and durable evidence.

@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OperatorClient } from '../systems/operator/operator-client.mjs';
 
-test('nested Operator start receives the resolved E2E database binding through its process environment', async () => {
+test('nested Operator start parses its result after Publisher build logs and receives the E2E database binding', async () => {
   let invocation;
   const client = new OperatorClient({
     root: '/repository',
     app: '/repository/operator/app/leesh-loop.mjs',
     commandRunner: async (...args) => {
       invocation = args;
-      return { stdout: '{"dashboard":"http://127.0.0.1:4410"}' };
+      return { stdout: '> publisher@1.0.0 build\n> tsc\n{"dashboard":"http://127.0.0.1:4410"}\n' };
     }
   });
   const databaseUrl = 'https://notion.example/e2e-binding';

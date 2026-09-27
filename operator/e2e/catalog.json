@@ -1,17 +1,17 @@
 [
   {
-    "id": "publisher-plan-surface",
-    "hard_cap_ms": 2700000,
-    "accepted_plan": "# 2026-09-19-publisher-plan-surface\n\nInspect the canonical plan publication and task handoff in this repository. Create a concise Korean investigation note under docs/ describing the observed Publisher entry point, the canonical Plan/task relationship, and one concrete verification command. Do not change production behavior or credentials. Run the most direct focused check available, record its actual result, and prepare the repository change for the normal review and delivery workflow.\n"
+    "id": "readme-live-e2e-workflow",
+    "hard_cap_ms": 1200000,
+    "accepted_plan": "# 2026-09-27-readme-live-e2e-workflow\n\nCorrect the stale `Example Workflow` section in the root `README.md`: it still calls the concrete workflow planned even though `operator/e2e/WORKFLOW.md` and its production E2E documentation already exist. Update only that section to describe and link the current E2E workflow and `operator/e2e/README.md`. Keep the change factual and documentation-only. Verify the referenced files exist and run `git diff --check`.\n"
   },
   {
-    "id": "workspace-contract-surface",
-    "hard_cap_ms": 2700000,
-    "accepted_plan": "# 2026-09-19-workspace-contract-surface\n\nInspect the workspace bootstrap and Git target contract in this repository. Create a concise Korean investigation note under docs/ describing how a configured base reaches a worker workspace and one concrete isolation or readiness risk. Do not change production behavior or credentials. Run the most direct focused check available, record its actual result, and prepare the repository change for the normal review and delivery workflow.\n"
+    "id": "e2e-catalog-scenario-purpose",
+    "hard_cap_ms": 1200000,
+    "accepted_plan": "# 2026-09-27-e2e-catalog-scenario-purpose\n\nClarify `operator/e2e/README.md` so a reader can choose between a default catalog E2E and a scenario run. State that the default randomly selects a catalog Plan to check the production lifecycle and PR delivery path, while `--plan` and `--workflow` supply targeted scenario inputs through the same production E2E path. Keep the addition concise and consistent with the current CLI; do not add a new mode or change runtime behavior. Verify the documented options against `operator/e2e/cli.mjs` and run `git diff --check`.\n"
   },
   {
-    "id": "review-job-surface",
-    "hard_cap_ms": 2700000,
-    "accepted_plan": "# 2026-09-19-review-job-surface\n\nInspect the worker-facing independent review boundary in this repository. Create a concise Korean investigation note under docs/ describing the submit/readback contract, the evidence retained for a terminal result, and one concrete verification command. Do not change production behavior or credentials. Run the most direct focused check available, record its actual result, and prepare the repository change for the normal review and delivery workflow.\n"
+    "id": "e2e-run-timing-lookup",
+    "hard_cap_ms": 1200000,
+    "accepted_plan": "# 2026-09-27-e2e-run-timing-lookup\n\nAdd one concise `jq` example to `operator/e2e/README.md` showing how to inspect an existing `operator/e2e/runs/<run-id>/run.json` for workload source/catalog entry, workflow provenance, resolved hard cap, and observed run, Symphony, lifecycle, and chatgpt-shot timing. Use field names present in the current durable record implementation and keep the example documentation-only. Verify the fields against `operator/e2e/model/run-record-store.mjs` and run `git diff --check`.\n"
   }
 ]
