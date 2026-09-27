@@ -25,7 +25,7 @@ test('publish request decoding preserves Unicode across byte chunk boundaries', 
   );
 });
 
-test('the publish surface exposes the configured external links without custom styling', async t => {
+test('the publish surface orders Plan, publication decision, and secondary navigation in a monochrome responsive layout', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-ui-'));
   const port = 43_500 + Math.floor(Math.random() * 500);
   const config = join(directory, 'project.json');
@@ -45,13 +45,23 @@ test('the publish surface exposes the configured external links without custom s
   }
   assert.equal(response?.status, 200);
   const page = await response.text();
-  assert.match(page, /Leesh Loop Publish/);
+  assert.match(page, /<title>Publish a Plan · Leesh Loop<\/title>/);
   assert.match(page, /<meta charset="utf-8">/i);
-  assert.match(page, /<form accept-charset="UTF-8" method="post">/i);
+  assert.match(page, /<form class="plan-workspace" accept-charset="UTF-8" method="post">/i);
   assert.match(response.headers.get('content-type') || '', /text\/html; charset=utf-8/i);
   assert.ok(page.includes(bindingUrl));
   assert.match(page, /Symphony Dashboard/);
-  assert.doesNotMatch(page, /<style|stylesheet/i);
+  assert.match(page, /Review the Plan/);
+  assert.match(page, /Choose publication State/);
+  assert.match(page, /Publish Plan/);
+  assert.match(page, /Leaving the Publisher default selected keeps the existing Ready default/);
+  const publisherConfig = JSON.parse(await readFile(join(root, 'operator/notion_publisher/examples/publisher-config.json'), 'utf8'));
+  const renderedStates = [...page.matchAll(/<option value="([^"]*)"/g)].map(([, value]) => value);
+  assert.deepEqual(renderedStates, ['', ...publisherConfig.state_seeds]);
+  assert.ok(page.indexOf('id="plan-heading"') < page.indexOf('id="decision-heading"'));
+  assert.match(page, /@media \(max-width: 44rem\)/);
+  assert.match(page, /aria-label="Related work"/);
+  assert.doesNotMatch(page, /linear-gradient|box-shadow|accent-color/i);
 });
 
 test('the system browser path dispatches every project surface before bounded acknowledgement', { concurrency: false }, async t => {

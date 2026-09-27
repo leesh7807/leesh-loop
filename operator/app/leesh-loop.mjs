@@ -3,8 +3,8 @@ import { createServer } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { chmod, mkdir, open, readFile, readlink, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { normalizeWorkspaceFiles, validateWorkspaceFiles } from './workspace-files.mjs';
 import { validateBaseBranch } from './git-target.mjs';
@@ -153,7 +153,15 @@ async function acknowledgeBrowser(request, timeoutMs) {
   throw new Error(`${request.command} ${request.args.join(' ')} ${outcome}`);
 }
 function uiPort(config) { return Number(config.ui_port || 4310); }
-function ensurePublisher() { const publisher = join(root, 'operator/notion_publisher'); if (existsSync(join(publisher, 'dist/src/cli.js'))) return; for (const args of [['ci'], ['run', 'build']]) { const result = spawnSync('npm', args, { cwd: publisher, stdio: 'inherit' }); if (result.status !== 0) throw new Error(`publisher preparation failed: npm ${args.join(' ')}`); } }
+function ensurePublisher() {
+  const publisher = join(root, 'operator/notion_publisher');
+  if (!existsSync(join(publisher, 'node_modules/.bin/tsc'))) {
+    const install = spawnSync('npm', ['ci'], { cwd: publisher, stdio: 'inherit' });
+    if (install.status !== 0) throw new Error('publisher preparation failed: npm ci');
+  }
+  const build = spawnSync('npm', ['run', 'build'], { cwd: publisher, stdio: 'inherit' });
+  if (build.status !== 0) throw new Error('publisher preparation failed: npm run build');
+}
 function uiUrl(config) { return `http://127.0.0.1:${uiPort(config)}`; }
 function uiIdentity(config) { return { notion_database_url: config.notion_database_url, ui_port: uiPort(config), publisher: join(root, 'operator/notion_publisher/dist/cli.js') }; }
 function sameIdentity(first, second) { return JSON.stringify(first) === JSON.stringify(second); }
@@ -241,9 +249,149 @@ async function start(config) {
 async function stop(config) { return withLock(config, async () => { const state = await json(paths(config).state); if (state) await terminate(state); await stopUi(config); await clear(config); return { stopped: Boolean(state) }; }); }
 
 const html = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-function page(config, { plan = '', result = '' } = {}) { return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Leesh Loop Publish</title><main><h1>Leesh Loop Publish</h1><form accept-charset="UTF-8" method="post"><label for="plan">Plan</label><textarea id="plan" name="plan" rows="20" required>${html(plan)}</textarea><button>Publish</button></form><p><a href="${html(config.notion_database_url)}">Notion Tasks</a> · <a href="${`http://127.0.0.1:${Number(config.symphony_port || 4100)}`}">Symphony Dashboard</a></p><output>${html(result)}</output></main>`; }
+function page(config, { plan = '', state = '', states = [], defaultState = 'Ready', result = null } = {}) {
+  const stateOptions = [
+    `<option value=""${state === '' ? ' selected' : ''}>Publisher default</option>`,
+    ...states.map(value => `<option value="${html(value)}"${state === value ? ' selected' : ''}>${html(value)}</option>`)
+  ].join('');
+  const resultPanel = result ? `<section class="result" aria-labelledby="result-title" ${result.kind === 'success' ? 'role="status"' : 'role="alert"'}>
+    <p class="eyebrow">Publication result</p>
+    <h2 id="result-title">${result.kind === 'success' ? 'Plan published' : 'Publish failed'}</h2>
+    ${result.kind === 'success'
+      ? `<p>Published task <code>${html(result.identifier)}</code> with State <code>${html(result.state)}</code>.</p>${result.url ? `<p><a href="${html(result.url)}">Open published task in Notion</a></p>` : '<p>Open Notion Tasks to find the published task.</p>'}<p><a href="/">Publish another Plan</a></p>`
+      : `<p class="error-detail">${html(result.message)}</p><p>Your Plan and selected State are still in the form above. Correct the Plan if needed, then publish again.</p>`}
+  </section>` : '';
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Publish a Plan · Leesh Loop</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 16px/1.55 system-ui, sans-serif; }
+    a { color: inherit; text-underline-offset: .18em; }
+    .page-shell { width: min(100% - 2rem, 76rem); margin: 0 auto; padding: clamp(1.25rem, 4vw, 3.5rem) 0; }
+    .page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid; }
+    .eyebrow { margin: 0 0 .4rem; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { max-width: 18ch; margin: 0; font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.05; letter-spacing: -.035em; }
+    .page-intro { max-width: 62ch; margin: .8rem 0 0; }
+    nav { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; padding-top: .35rem; font-size: .92rem; white-space: nowrap; }
+    main { padding-top: 2rem; }
+    .plan-workspace { max-width: 74rem; }
+    .section-heading { margin: 0 0 .85rem; font-size: 1.25rem; }
+    label { display: block; margin-bottom: .55rem; font-weight: 700; }
+    textarea, select, button { font: inherit; }
+    textarea { display: block; width: 100%; min-height: min(58vh, 42rem); padding: 1rem; border: 1px solid; border-radius: .35rem; line-height: 1.55; resize: vertical; }
+    .field-help { margin: .55rem 0 0; font-size: .9rem; }
+    .decision { display: flex; align-items: flex-end; justify-content: space-between; gap: 1.5rem; margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid; }
+    .state-field { width: min(100%, 24rem); }
+    select { width: 100%; min-height: 2.8rem; padding: .45rem .65rem; border: 1px solid; border-radius: .3rem; background: white; }
+    button { min-height: 2.8rem; padding: .55rem 1.15rem; border: 2px solid; border-radius: .3rem; background: white; color: inherit; font-weight: 750; cursor: pointer; }
+    button:hover { text-decoration: underline; text-underline-offset: .18em; }
+    .result { max-width: 74rem; margin-top: 2rem; padding: 1.25rem 1.4rem; border: 1px solid; border-radius: .35rem; }
+    .result h2 { margin: 0; font-size: 1.35rem; }
+    .result p { max-width: 70ch; }
+    .result p:last-child { margin-bottom: 0; }
+    .error-detail { white-space: pre-wrap; overflow-wrap: anywhere; }
+    code { overflow-wrap: anywhere; }
+    @media (max-width: 44rem) {
+      .page-shell { width: min(100% - 1.25rem, 76rem); }
+      .page-header { flex-direction: column; gap: 1rem; }
+      nav { padding-top: 0; gap: .4rem 1rem; white-space: normal; }
+      main { padding-top: 1.35rem; }
+      textarea { min-height: 48vh; padding: .75rem; }
+      .decision { align-items: stretch; flex-direction: column; gap: 1rem; }
+      .state-field { width: 100%; }
+      button { width: 100%; }
+      .result { padding: 1rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-shell">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Leesh Loop · Plan publication</p>
+        <h1>Publish a Plan</h1>
+        <p class="page-intro">Review the Plan, choose its publication State, then publish it as a Notion task.</p>
+      </div>
+      <nav aria-label="Related work">
+        <a href="${html(config.notion_database_url)}">Notion Tasks</a>
+        <a href="${`http://127.0.0.1:${Number(config.symphony_port || 4100)}`}">Symphony Dashboard</a>
+      </nav>
+    </header>
+    <main>
+      <form class="plan-workspace" accept-charset="UTF-8" method="post">
+        <section aria-labelledby="plan-heading">
+          <h2 class="section-heading" id="plan-heading">1. Review the Plan</h2>
+          <label for="plan">Plan content</label>
+          <textarea id="plan" name="plan" rows="20" required>${html(plan)}</textarea>
+        </section>
+        <section class="decision" aria-labelledby="decision-heading">
+          <div class="state-field">
+            <h2 class="section-heading" id="decision-heading">2. Choose publication State</h2>
+            <label for="state">State</label>
+            <select id="state" name="state">${stateOptions}</select>
+            <p class="field-help">Leaving the Publisher default selected keeps the existing ${html(defaultState)} default.</p>
+          </div>
+          <button type="submit">Publish Plan</button>
+        </section>
+      </form>
+      ${resultPanel}
+    </main>
+  </div>
+</body>
+</html>`;
+}
 async function readRequestBody(request) { const chunks = []; for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)); return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)); }
-async function serve(config) { const existing = await json(paths(config).ui), process_start_ticks = processStartTicks(process.pid); if (!process_start_ticks) throw new Error(`could not record startup identity for publish UI PID ${process.pid}`); if (existing && (existing.pid !== process.pid || existing.process_start_ticks !== process_start_ticks) && processStartTicks(existing.pid) === existing.process_start_ticks) throw new Error(`publish UI is already owned on ${uiUrl(config)}`); await atomicJson(paths(config).ui, { pid: process.pid, process_start_ticks, identity: uiIdentity(config) }); const server = createServer(async (req, res) => { const sendPage = (body, status = 200) => { res.statusCode = status; res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(body); }; if (req.method === 'GET') { sendPage(page(config)); return; } if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; } let body; try { body = await readRequestBody(req); } catch { sendPage(page(config, { result: 'Plan request body must be valid UTF-8.' }), 400); return; } const plan = new URLSearchParams(body).get('plan') || ''; const temp = join(paths(config).dir, `publish-${randomUUID()}.md`); try { await writeFile(temp, plan); const publisher = spawn('node', [join(root, 'operator/notion_publisher/dist/src/cli.js'), '--plan', temp, '--config', join(root, 'operator/notion_publisher/examples/publisher-config.json'), '--database-url', config.notion_database_url], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] }); let output = '', errors = ''; for await (const chunk of publisher.stdout) output += chunk; for await (const chunk of publisher.stderr) errors += chunk; const code = await new Promise(resolveExit => publisher.on('close', resolveExit)); sendPage(page(config, { plan: code === 0 ? '' : plan, result: code === 0 ? output : errors || 'Publishing failed.' })); } finally { await remove(temp); } }); server.listen(uiPort(config), '127.0.0.1'); }
+async function publisherStateConfiguration() {
+  ensurePublisher();
+  const [publisherConfigModule, publisherCore] = await Promise.all([
+    import(pathToFileURL(join(root, 'operator/notion_publisher/dist/src/config.js')).href),
+    import(pathToFileURL(join(root, 'operator/notion_publisher/dist/src/core.js')).href)
+  ]);
+  const { policy } = await publisherConfigModule.loadConfig(join(root, 'operator/notion_publisher/examples/publisher-config.json'));
+  return { states: policy.stateSeeds, defaultState: publisherCore.PUBLISHER_READY_STATE };
+}
+async function serve(config) {
+  const { states, defaultState } = await publisherStateConfiguration();
+  const existing = await json(paths(config).ui), process_start_ticks = processStartTicks(process.pid);
+  if (!process_start_ticks) throw new Error(`could not record startup identity for publish UI PID ${process.pid}`);
+  if (existing && (existing.pid !== process.pid || existing.process_start_ticks !== process_start_ticks) && processStartTicks(existing.pid) === existing.process_start_ticks) throw new Error(`publish UI is already owned on ${uiUrl(config)}`);
+  await atomicJson(paths(config).ui, { pid: process.pid, process_start_ticks, identity: uiIdentity(config) });
+  const server = createServer(async (req, res) => {
+    const sendPage = (body, status = 200) => { res.statusCode = status; res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(body); };
+    if (req.method === 'GET') { sendPage(page(config, { states, defaultState })); return; }
+    if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
+    let body;
+    try { body = await readRequestBody(req); }
+    catch { sendPage(page(config, { states, defaultState, result: { kind: 'failure', message: 'Plan request body must be valid UTF-8.' } }), 400); return; }
+    const fields = new URLSearchParams(body), plan = fields.get('plan') || '', state = fields.get('state') || '';
+    const temp = join(paths(config).dir, `publish-${randomUUID()}.md`);
+    try {
+      await writeFile(temp, plan);
+      const args = [join(root, 'operator/notion_publisher/dist/src/cli.js'), '--plan', temp, '--config', join(root, 'operator/notion_publisher/examples/publisher-config.json'), '--database-url', config.notion_database_url];
+      if (state !== '') args.push('--state', state);
+      const publisher = spawn(process.execPath, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+      let output = '', errors = '';
+      for await (const chunk of publisher.stdout) output += chunk;
+      for await (const chunk of publisher.stderr) errors += chunk;
+      const code = await new Promise(resolveExit => publisher.on('close', resolveExit));
+      if (code === 0) {
+        try {
+          const publication = JSON.parse(output.trim());
+          sendPage(page(config, { states, defaultState, result: { kind: 'success', identifier: publication.identifier, state: publication.state, url: publication.url } }));
+        } catch {
+          sendPage(page(config, { states, defaultState, plan, state, result: { kind: 'failure', message: 'Publisher returned a successful response that the Operator could not read. Check Notion Tasks before retrying.' } }), 502);
+        }
+      } else {
+        sendPage(page(config, { states, defaultState, plan, state, result: { kind: 'failure', message: errors.trim() || 'Publishing failed.' } }), 400);
+      }
+    } finally { await remove(temp); }
+  });
+  server.listen(uiPort(config), '127.0.0.1');
+}
 
 const args = process.argv.slice(2);
 const locked = args[0] === '__locked';

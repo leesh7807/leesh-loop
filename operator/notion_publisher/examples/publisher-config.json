@@ -1,4 +1,5 @@
 {
   "priority": 3,
-  "labels": ["symphony"]
+  "labels": ["symphony"],
+  "state_seeds": ["Backlog", "Ready", "In Progress", "Human Review", "Rework", "Merging", "Done", "Cancelled"]
 }
