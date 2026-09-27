@@ -211,16 +211,6 @@ NODE
 
 report 'checking chatgpt-shot Service health'
 if ! service_accepting; then
-  if [ -e "$chatgpt_discovery_path" ]; then
-    chatgpt-shot stop >/dev/null 2>&1 || true
-    wait_count=0
-    while [ -e "$chatgpt_discovery_path" ]; do
-      [ "$wait_count" -lt 300 ] || fail 'stale chatgpt-shot Service discovery did not clear during recovery.'
-      sleep 0.1
-      wait_count=$((wait_count + 1))
-    done
-  fi
-
   chatgpt-shot start >/dev/null 2>&1 || fail 'chatgpt-shot Service could not be started.'
 fi
 
