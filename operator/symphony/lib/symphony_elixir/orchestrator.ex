@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, ExecutionHistory, StatusDashboard, Tracker, Workspace}
   alias SymphonyElixir.Tracker.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -34,6 +34,8 @@ defmodule SymphonyElixir.Orchestrator do
       :tick_timer_ref,
       :tick_token,
       :dispatch_enabled,
+      :execution_history_path,
+      :execution_history_retention,
       task_supervisor: SymphonyElixir.TaskSupervisor,
       running: %{},
       completed: MapSet.new(),
@@ -58,6 +60,16 @@ defmodule SymphonyElixir.Orchestrator do
     case Config.settings() do
       {:ok, config} ->
         now_ms = System.monotonic_time(:millisecond)
+        execution_history_path = Keyword.get(opts, :execution_history_path, ExecutionHistory.default_path())
+
+        case ExecutionHistory.reconcile(
+               execution_history_path,
+               config.observability.execution_history_retention,
+               DateTime.utc_now()
+             ) do
+          :ok -> :ok
+          {:error, reason} -> Logger.warning("Unable to reconcile durable execution history: #{inspect(reason)}")
+        end
 
         state = %State{
           poll_interval_ms: config.polling.interval_ms,
@@ -67,6 +79,8 @@ defmodule SymphonyElixir.Orchestrator do
           tick_timer_ref: nil,
           tick_token: nil,
           dispatch_enabled: false,
+          execution_history_path: execution_history_path,
+          execution_history_retention: config.observability.execution_history_retention,
           task_supervisor: Keyword.get(opts, :task_supervisor, SymphonyElixir.TaskSupervisor),
           codex_totals: @empty_codex_totals,
           codex_rate_limits: nil
@@ -144,7 +158,9 @@ defmodule SymphonyElixir.Orchestrator do
 
       issue_id ->
         {running_entry, state} = pop_running_entry(state, issue_id)
-        state = record_session_completion_totals(state, running_entry)
+        ended_at = DateTime.utc_now()
+        state = record_session_completion_totals(state, running_entry, ended_at)
+        persist_finished_execution(state, running_entry, ended_at, agent_execution_result(reason, running_entry))
         session_id = running_entry_session_id(running_entry)
 
         state = handle_agent_down(reason, state, issue_id, running_entry, session_id)
@@ -168,6 +184,8 @@ defmodule SymphonyElixir.Orchestrator do
           |> maybe_put_runtime_value(:worker_host, runtime_info[:worker_host])
           |> maybe_put_runtime_value(:workspace_path, runtime_info[:workspace_path])
 
+        persist_running_execution(state, updated_running_entry)
+
         notify_dashboard()
         {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
     end
@@ -188,6 +206,8 @@ defmodule SymphonyElixir.Orchestrator do
           state
           |> apply_codex_token_delta(token_delta)
           |> apply_codex_rate_limits(update)
+
+        persist_running_execution(state, updated_running_entry)
 
         notify_dashboard()
         {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
@@ -432,12 +452,12 @@ defmodule SymphonyElixir.Orchestrator do
       terminal_issue_state?(issue.state, terminal_states) ->
         Logger.info("Issue moved to terminal state: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
 
-        terminate_running_issue(state, issue.id, true)
+        terminate_running_issue(state, issue.id, true, "tracker_terminal")
 
       !issue_routable?(issue) ->
         Logger.info("Issue no longer routed to this worker: #{issue_context(issue)} assignee=#{inspect(issue.assignee_id)}; stopping active agent")
 
-        terminate_running_issue(state, issue.id, false)
+        terminate_running_issue(state, issue.id, false, "issue_unrouted")
 
       active_issue_state?(issue.state, active_states) ->
         refresh_running_issue_state(state, issue)
@@ -445,7 +465,7 @@ defmodule SymphonyElixir.Orchestrator do
       true ->
         Logger.info("Issue moved to non-active state: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
 
-        terminate_running_issue(state, issue.id, false)
+        terminate_running_issue(state, issue.id, false, "issue_inactive")
     end
   end
 
@@ -499,7 +519,7 @@ defmodule SymphonyElixir.Orchestrator do
         state_acc
       else
         log_missing_running_issue(state_acc, issue_id)
-        terminate_running_issue(state_acc, issue_id, false)
+        terminate_running_issue(state_acc, issue_id, false, "issue_missing")
       end
     end)
   end
@@ -560,7 +580,7 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp terminate_running_issue(%State{} = state, issue_id, cleanup_workspace) do
+  defp terminate_running_issue(%State{} = state, issue_id, cleanup_workspace, reason) do
     case Map.get(state.running, issue_id) do
       nil ->
         release_issue_claim(state, issue_id)
@@ -569,6 +589,12 @@ defmodule SymphonyElixir.Orchestrator do
         state = record_session_completion_totals(state, running_entry)
 
         stop_running_task(pid, ref, state.task_supervisor)
+
+        persist_finished_execution(state, running_entry, DateTime.utc_now(), %{
+          status: "terminated",
+          result: "orchestrator_terminated",
+          reason: reason
+        })
 
         if cleanup_workspace do
           cleanup_issue_workspace(Map.get(running_entry, :issue, identifier), running_entry)
@@ -635,7 +661,7 @@ defmodule SymphonyElixir.Orchestrator do
         next_attempt = next_retry_attempt_from_running(running_entry)
 
         state
-        |> terminate_running_issue(issue_id, false)
+        |> terminate_running_issue(issue_id, false, "worker_stalled")
         |> schedule_issue_retry(issue_id, next_attempt, %{
           identifier: identifier,
           issue_url: running_entry.issue.url,
@@ -759,6 +785,12 @@ defmodule SymphonyElixir.Orchestrator do
       Map.get(running_entry, :ref),
       state.task_supervisor
     )
+
+    persist_finished_execution(state, running_entry, DateTime.utc_now(), %{
+      status: "blocked",
+      result: "operator_input_required",
+      reason: error
+    })
 
     block_issue_from_entry(state, issue_id, running_entry, error)
   end
@@ -960,6 +992,9 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp spawn_issue_on_worker_host(%State{} = state, issue, attempt, recipient, worker_host) do
+    execution_id = Ecto.UUID.generate()
+    started_at = DateTime.utc_now()
+
     case Task.Supervisor.start_child(state.task_supervisor, fn ->
            AgentRunner.run(issue, recipient, attempt: attempt, worker_host: worker_host)
          end) do
@@ -968,30 +1003,34 @@ defmodule SymphonyElixir.Orchestrator do
 
         Logger.info("Dispatching issue to agent: #{issue_context(issue)} pid=#{inspect(pid)} attempt=#{inspect(attempt)} worker_host=#{worker_host || "local"}")
 
-        running =
-          Map.put(state.running, issue.id, %{
-            pid: pid,
-            ref: ref,
-            identifier: issue.identifier,
-            dispatch_issue: issue,
-            issue: issue,
-            worker_host: worker_host,
-            workspace_path: nil,
-            session_id: nil,
-            last_codex_message: nil,
-            last_codex_timestamp: nil,
-            last_codex_event: nil,
-            codex_app_server_pid: nil,
-            codex_input_tokens: 0,
-            codex_output_tokens: 0,
-            codex_total_tokens: 0,
-            codex_last_reported_input_tokens: 0,
-            codex_last_reported_output_tokens: 0,
-            codex_last_reported_total_tokens: 0,
-            turn_count: 0,
-            retry_attempt: normalize_retry_attempt(attempt),
-            started_at: DateTime.utc_now()
-          })
+        running_entry = %{
+          pid: pid,
+          ref: ref,
+          execution_id: execution_id,
+          identifier: issue.identifier,
+          dispatch_issue: issue,
+          issue: issue,
+          worker_host: worker_host,
+          workspace_path: nil,
+          session_id: nil,
+          last_codex_message: nil,
+          last_codex_timestamp: nil,
+          last_codex_event: nil,
+          codex_app_server_pid: nil,
+          codex_input_tokens: 0,
+          codex_output_tokens: 0,
+          codex_total_tokens: 0,
+          codex_last_reported_input_tokens: 0,
+          codex_last_reported_output_tokens: 0,
+          codex_last_reported_total_tokens: 0,
+          turn_count: 0,
+          retry_attempt: normalize_retry_attempt(attempt),
+          started_at: started_at
+        }
+
+        persist_running_execution(state, running_entry)
+
+        running = Map.put(state.running, issue.id, running_entry)
 
         %{
           state
@@ -1413,6 +1452,22 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  @spec execution_history(GenServer.server(), String.t() | nil, timeout()) ::
+          {:ok, [map()]} | {:error, :unavailable | :timeout | term()}
+  def execution_history(server, issue_identifier, timeout)
+      when is_nil(issue_identifier) or is_binary(issue_identifier) do
+    if Process.whereis(server) do
+      try do
+        GenServer.call(server, {:execution_history, issue_identifier}, timeout)
+      catch
+        :exit, {:timeout, _} -> {:error, :timeout}
+        :exit, _ -> {:error, :unavailable}
+      end
+    else
+      {:error, :unavailable}
+    end
+  end
+
   @spec snapshot(GenServer.server(), timeout()) :: map() | :timeout | :unavailable
   def snapshot(server, timeout) do
     if Process.whereis(server) do
@@ -1441,6 +1496,11 @@ defmodule SymphonyElixir.Orchestrator do
           _ -> {:reply, {:error, :not_found}, state}
         end
     end
+  end
+
+  @impl true
+  def handle_call({:execution_history, issue_identifier}, _from, state) do
+    {:reply, ExecutionHistory.list(state.execution_history_path, issue_identifier), state}
   end
 
   @impl true
@@ -1648,8 +1708,88 @@ defmodule SymphonyElixir.Orchestrator do
     {Map.get(state.running, issue_id), %{state | running: Map.delete(state.running, issue_id)}}
   end
 
+  defp persist_running_execution(%State{} = state, running_entry) do
+    record = execution_record(running_entry)
+    persist_execution_record(state, record)
+  end
+
+  defp persist_finished_execution(%State{} = state, running_entry, ended_at, result) do
+    record =
+      running_entry
+      |> execution_record()
+      |> Map.merge(result)
+      |> Map.put(:ended_at, DateTime.to_iso8601(ended_at))
+      |> Map.put(:runtime_seconds, running_seconds(running_entry.started_at, ended_at))
+
+    persist_execution_record(state, record)
+  end
+
+  defp execution_record(running_entry) do
+    issue = Map.get(running_entry, :issue) || Map.get(running_entry, :dispatch_issue)
+
+    %{
+      execution_id: Map.get(running_entry, :execution_id),
+      issue_id: issue && issue.id,
+      issue_identifier: Map.get(running_entry, :identifier),
+      issue_url: issue && issue.url,
+      attempt: Map.get(running_entry, :retry_attempt, 0),
+      status: "running",
+      started_at: Map.get(running_entry, :started_at) |> execution_timestamp(),
+      ended_at: nil,
+      result: nil,
+      reason: nil,
+      worker_host: Map.get(running_entry, :worker_host),
+      workspace_path: Map.get(running_entry, :workspace_path),
+      session_id: running_entry_session_id_value(running_entry),
+      turn_count: Map.get(running_entry, :turn_count, 0),
+      tokens: %{
+        input_tokens: Map.get(running_entry, :codex_input_tokens, 0),
+        output_tokens: Map.get(running_entry, :codex_output_tokens, 0),
+        total_tokens: Map.get(running_entry, :codex_total_tokens, 0)
+      },
+      runtime_seconds: nil
+    }
+  end
+
+  defp execution_timestamp(%DateTime{} = datetime), do: DateTime.to_iso8601(datetime)
+  defp execution_timestamp(_datetime), do: nil
+
+  defp running_entry_session_id_value(%{session_id: session_id}) when is_binary(session_id), do: session_id
+  defp running_entry_session_id_value(_running_entry), do: nil
+
+  defp persist_execution_record(%State{execution_history_path: path, execution_history_retention: retention}, record)
+       when is_binary(record.execution_id) do
+    case ExecutionHistory.upsert(path, record, retention) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Unable to persist execution history for execution_id=#{record.execution_id}: #{inspect(reason)}")
+        :error
+    end
+  end
+
+  defp persist_execution_record(_state, _record), do: :ok
+
+  defp agent_execution_result(reason, running_entry) do
+    if input_required_blocker?(running_entry) do
+      %{status: "blocked", result: "operator_input_required", reason: blocker_error(running_entry, "agent exited: #{inspect(reason)}")}
+    else
+      case reason do
+        :normal -> %{status: "completed", result: "normal", reason: nil}
+        _ -> %{status: "terminated", result: "abnormal_exit", reason: inspect(reason)}
+      end
+    end
+  end
+
   defp record_session_completion_totals(state, running_entry) when is_map(running_entry) do
-    runtime_seconds = running_seconds(running_entry.started_at, DateTime.utc_now())
+    record_session_completion_totals(state, running_entry, DateTime.utc_now())
+  end
+
+  defp record_session_completion_totals(state, _running_entry), do: state
+
+  defp record_session_completion_totals(state, running_entry, ended_at) when is_map(running_entry) do
+    runtime_seconds = running_seconds(running_entry.started_at, ended_at)
 
     codex_totals =
       apply_token_delta(
@@ -1665,15 +1805,29 @@ defmodule SymphonyElixir.Orchestrator do
     %{state | codex_totals: codex_totals}
   end
 
-  defp record_session_completion_totals(state, _running_entry), do: state
-
   defp refresh_runtime_config(%State{} = state) do
     config = Config.settings!()
+    retention = config.observability.execution_history_retention
+
+    applied_retention =
+      if retention == state.execution_history_retention do
+        retention
+      else
+        case ExecutionHistory.cleanup(state.execution_history_path, retention) do
+          :ok ->
+            retention
+
+          {:error, reason} ->
+            Logger.warning("Unable to apply execution history retention: #{inspect(reason)}")
+            state.execution_history_retention
+        end
+      end
 
     %{
       state
       | poll_interval_ms: config.polling.interval_ms,
-        max_concurrent_agents: config.agent.max_concurrent_agents
+        max_concurrent_agents: config.agent.max_concurrent_agents,
+        execution_history_retention: applied_retention
     }
   end
 

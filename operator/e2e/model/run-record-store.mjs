@@ -30,7 +30,7 @@ export function createRunRecord({ config, runId, workload, paths, runInput, star
   };
   const workflow = runInput?.workflow || { source: 'default', source_path: config.workflow_path, resolved_workflow: '', resolved_workflow_sha256: sha256('') };
   return {
-    schema_version: 2,
+    schema_version: 3,
     run_id: runId,
     status: 'admitted',
     started_at: startedAt,
@@ -60,7 +60,7 @@ export function createRunRecord({ config, runId, workload, paths, runInput, star
     binding: { notion_database_url: config.notion_database_url, repository_url: config.repository_url, seed_source_ref: config.seed_source_ref, seed_commit: null, base_branch: null, base_commit: null },
     artifacts: { task_id: null, task_url: null, task_identifier: null, publisher_result: null, publisher_failure: null, plan_binding: null, delivery_prs: [], delivered_head: null, delivered_head_locked: false, merged_head: null, remote_base_commit: null },
     lifecycle: { observations: [], verified_through: null, verification_gaps: [], terminal_state: null, mechanical_human_review_transition: { performed: false, observed_at: null } },
-    timing: { run: { started_at: startedAt, ended_at: null, observed_duration_ms: null }, lifecycle: {}, symphony: { start_requested_at: null, started_at: null, worker_started_at: null, stopped_at: null, observed_duration_ms: null }, chatgpt_shot: { job_id: null, first_observed_at: null, last_observed_at: null, observations: [], terminal_state: null, observed_duration_ms: null } },
+    timing: { run: { started_at: startedAt, ended_at: null, observed_duration_ms: null }, lifecycle: {}, symphony: { start_requested_at: null, started_at: null, stopped_at: null }, chatgpt_shot: { job_id: null, first_observed_at: null, last_observed_at: null, observations: [], terminal_state: null, observed_duration_ms: null } },
     evidence: { snapshots: [], errors: [], branch_refs_before: null, branch_refs_after: null, branch_isolation: null, workspace_paths: [] },
     failures: [],
     finalization: { reason: null, actor: 'e2e-harness', actions: [], complete: false, incomplete: false, unresolved: [] },

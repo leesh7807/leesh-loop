@@ -38,6 +38,19 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
     end
   end
 
+  @spec executions(Conn.t(), map()) :: Conn.t()
+  def executions(conn, params) do
+    issue_identifier = Map.get(params, "issue_identifier")
+
+    case Presenter.execution_history_payload(issue_identifier, orchestrator(), snapshot_timeout_ms()) do
+      {:ok, payload} ->
+        json(conn, payload)
+
+      {:error, reason} ->
+        error_response(conn, 503, "execution_history_unavailable", inspect(reason))
+    end
+  end
+
   @spec refresh(Conn.t(), map()) :: Conn.t()
   def refresh(conn, _params) do
     case Presenter.refresh_payload(orchestrator()) do

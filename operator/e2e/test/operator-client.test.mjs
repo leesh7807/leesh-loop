@@ -18,3 +18,20 @@ test('nested Operator start receives the resolved E2E database binding through i
   assert.deepEqual(invocation[1], ['/repository/operator/app/leesh-loop.mjs', 'start', '/tmp/run/project.json']);
   assert.equal(invocation[2].env.LEESH_LOOP_NOTION_DATABASE_URL, databaseUrl);
 });
+
+test('Symphony execution history is read through the production observability route', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl;
+  globalThis.fetch = async url => {
+    requestedUrl = String(url);
+    return { ok: true, async json() { return { issue_identifier: 'PLAN-1', executions: [] }; } };
+  };
+  try {
+    const client = new OperatorClient({ root: '/repository' });
+    const result = await client.readSymphonyExecutions('http://127.0.0.1:4410', 'PLAN-1');
+    assert.equal(requestedUrl, 'http://127.0.0.1:4410/api/v1/executions?issue_identifier=PLAN-1');
+    assert.deepEqual(result, { issue_identifier: 'PLAN-1', executions: [] });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

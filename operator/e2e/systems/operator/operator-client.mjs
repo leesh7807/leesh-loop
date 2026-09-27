@@ -44,6 +44,13 @@ export class OperatorClient {
     return response.json();
   }
 
+  async readSymphonyExecutions(dashboard, identifier, signal) {
+    const query = new URLSearchParams({ issue_identifier: identifier });
+    const response = await fetch(`${dashboard}/api/v1/executions?${query}`, { signal: this.requestSignal(signal, 5_000) });
+    if (!response.ok) throw new Error(`Symphony execution history inspection failed with HTTP ${response.status}`);
+    return response.json();
+  }
+
   async readDispatchedTrackerInput(dashboard, identifier, signal) {
     const response = await fetch(`${dashboard}/api/v1/${encodeURIComponent(identifier)}/input`, { signal: this.requestSignal(signal, 5_000) });
     if (response.status === 404) return null;

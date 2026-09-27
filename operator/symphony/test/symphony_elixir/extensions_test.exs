@@ -64,6 +64,12 @@ defmodule SymphonyElixir.ExtensionsTest do
         _ -> {:reply, {:error, :not_found}, state}
       end
     end
+
+    def handle_call({:execution_history, issue_identifier}, _from, state) do
+      records = Keyword.get(state, :executions, [])
+      records = if is_binary(issue_identifier), do: Enum.filter(records, &(&1.issue_identifier == issue_identifier)), else: records
+      {:reply, {:ok, records}, state}
+    end
   end
 
   setup do
@@ -265,7 +271,27 @@ defmodule SymphonyElixir.ExtensionsTest do
           identifier: "MT-HTTP",
           description: "# Accepted Plan\n\nDispatch-bound description\n",
           state: "In Progress"
-        }
+        },
+        executions: [
+          %{
+            execution_id: "execution-http",
+            issue_id: "issue-http",
+            issue_identifier: "MT-HTTP",
+            issue_url: "https://example.org/issues/MT-HTTP",
+            attempt: 1,
+            status: "completed",
+            started_at: "2026-09-27T10:00:00Z",
+            ended_at: "2026-09-27T10:01:00Z",
+            result: "normal",
+            reason: nil,
+            worker_host: "worker-a",
+            workspace_path: "/workspaces/MT-HTTP",
+            session_id: "thread-http",
+            turn_count: 2,
+            tokens: %{input_tokens: 4, output_tokens: 8, total_tokens: 12},
+            runtime_seconds: 60
+          }
+        ]
       )
 
     start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
@@ -370,6 +396,23 @@ defmodule SymphonyElixir.ExtensionsTest do
              "state" => "In Progress",
              "description" => "# Accepted Plan\n\nDispatch-bound description\n"
            }
+
+    conn = get(build_conn(), "/api/v1/executions?issue_identifier=MT-HTTP")
+
+    assert %{
+             "issue_identifier" => "MT-HTTP",
+             "executions" => [
+               %{
+                 "execution_id" => "execution-http",
+                 "status" => "completed",
+                 "attempt" => 1,
+                 "started_at" => "2026-09-27T10:00:00Z",
+                 "ended_at" => "2026-09-27T10:01:00Z",
+                 "runtime_seconds" => 60,
+                 "tokens" => %{"input_tokens" => 4, "output_tokens" => 8, "total_tokens" => 12}
+               }
+             ]
+           } = json_response(conn, 200)
 
     conn = get(build_conn(), "/api/v1/MT-RETRY")
 

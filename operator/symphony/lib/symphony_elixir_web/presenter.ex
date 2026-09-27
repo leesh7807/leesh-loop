@@ -66,6 +66,18 @@ defmodule SymphonyElixirWeb.Presenter do
     end
   end
 
+  @spec execution_history_payload(String.t() | nil, GenServer.name(), timeout()) ::
+          {:ok, map()} | {:error, term()}
+  def execution_history_payload(issue_identifier, orchestrator, timeout_ms) do
+    case Orchestrator.execution_history(orchestrator, issue_identifier, timeout_ms) do
+      {:ok, executions} ->
+        {:ok, %{issue_identifier: issue_identifier, executions: Enum.map(executions, &execution_payload/1)}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   @spec refresh_payload(GenServer.name()) :: {:ok, map()} | {:error, :unavailable}
   def refresh_payload(orchestrator) do
     case Orchestrator.request_refresh(orchestrator) do
@@ -206,6 +218,27 @@ defmodule SymphonyElixirWeb.Presenter do
       last_message: summarize_message(blocked.last_codex_message),
       last_event_at: iso8601(blocked.last_codex_timestamp)
     }
+  end
+
+  defp execution_payload(execution) do
+    Map.take(execution, [
+      :execution_id,
+      :issue_id,
+      :issue_identifier,
+      :issue_url,
+      :attempt,
+      :status,
+      :started_at,
+      :ended_at,
+      :result,
+      :reason,
+      :worker_host,
+      :workspace_path,
+      :session_id,
+      :turn_count,
+      :tokens,
+      :runtime_seconds
+    ])
   end
 
   defp workspace_path(issue_identifier, running, retry, blocked) do

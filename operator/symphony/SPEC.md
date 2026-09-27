@@ -1453,6 +1453,17 @@ Runtime accounting:
   or cancellation/termination).
 - Continuous background ticking of runtime totals is not REQUIRED.
 
+### 13.6 Durable Worker Execution History
+
+An implementation that needs execution facts after live workers disappear MAY expose a separate
+structured history read alongside its current runtime snapshot. History MUST distinguish each
+dispatch attempt and MUST NOT present completed or interrupted executions as active workers.
+Production start/end timestamps, runtime, session, turn, token, host, workspace, and terminal
+outcome values MUST come from the orchestration runtime's observed facts. Persisted history SHOULD
+have a finite default retention; active executions MUST remain available until they finish, and
+restart-stale records MUST be reconcilable and subject to bounded cleanup. History persistence
+failure SHOULD remain observable without changing worker dispatch or completion semantics.
+
 Rate-limit tracking:
 
 - Track the latest rate-limit payload seen in any agent update.
