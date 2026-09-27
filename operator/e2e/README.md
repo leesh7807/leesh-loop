@@ -27,8 +27,10 @@ node operator/e2e/cli.mjs admit operator/e2e/project.json
 ```
 
 Run one workload through the existing production Publisher → `leesh-loop.mjs start` → Operator →
-Symphony path. The skip option only omits external readiness; it is not an E2E-specific runtime or
-alternate Symphony startup:
+Symphony path. By default, the CLI randomly selects a catalog Plan to check the production lifecycle
+and PR delivery path. Use `--plan` and/or `--workflow` to supply targeted scenario inputs through
+this same production E2E path. The skip option only omits external readiness; it is not an
+E2E-specific runtime or alternate Symphony startup:
 
 ```bash
 node operator/e2e/cli.mjs run operator/e2e/project.json
