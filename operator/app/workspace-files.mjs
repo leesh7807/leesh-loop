@@ -1,5 +1,6 @@
 import { copyFile, lstat, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, relative, resolve } from 'node:path';
+import { resolveProjectPath } from '../local-path.mjs';
 
 const under = (path, root) => {
   const relation = relative(root, path);
@@ -12,13 +13,12 @@ async function regularFile(path, label) {
   if (!details.isFile()) throw new Error(`${label} is not a regular file: ${path}`);
 }
 
-function normalizeWorkspaceFiles(value) {
+function normalizeWorkspaceFiles(value, projectDirectory = process.cwd(), homeDirectory) {
   if (value === undefined) return [];
-  if (!Array.isArray(value)) throw new Error('workspace_files must be an array of absolute paths');
+  if (!Array.isArray(value)) throw new Error('workspace_files must be an array of paths');
   const normalized = value.map((source, index) => {
-    if (typeof source !== 'string' || !source) throw new Error(`workspace_files[${index}] must be an absolute path`);
-    if (!isAbsolute(source)) throw new Error(`workspace_files[${index}] must be an absolute path: ${source}`);
-    return resolve(source);
+    if (typeof source !== 'string' || !source) throw new Error(`workspace_files[${index}] must be a non-empty path`);
+    return resolveProjectPath(source, projectDirectory, homeDirectory);
   });
   const destinations = new Set();
   for (const source of normalized) {

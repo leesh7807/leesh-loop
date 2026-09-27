@@ -29,15 +29,15 @@ test('the publish surface exposes the configured external links without custom s
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-ui-'));
   const port = 43_500 + Math.floor(Math.random() * 500);
   const config = join(directory, 'project.json');
+  const bindingUrl = 'https://www.notion.so/example';
   await writeFile(config, JSON.stringify({
     workflow_path: join(root, 'WORKFLOW.md'),
-    notion_database_url: 'https://www.notion.so/example',
     symphony_workspace_root: join(directory, 'workspaces'),
     github_repository_url: 'https://github.com/example/repository.git',
     github_base_branch: 'main',
     ui_port: port
   }));
-  const child = spawn(process.execPath, [cli, 'serve', config], { stdio: 'ignore' });
+  const child = spawn(process.execPath, [cli, 'serve', config], { stdio: 'ignore', env: { ...process.env, LEESH_LOOP_NOTION_DATABASE_URL: bindingUrl } });
   t.after(() => child.kill('SIGTERM'));
   let response;
   for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -49,7 +49,7 @@ test('the publish surface exposes the configured external links without custom s
   assert.match(page, /<meta charset="utf-8">/i);
   assert.match(page, /<form accept-charset="UTF-8" method="post">/i);
   assert.match(response.headers.get('content-type') || '', /text\/html; charset=utf-8/i);
-  assert.match(page, /https:\/\/www.notion.so\/example/);
+  assert.ok(page.includes(bindingUrl));
   assert.match(page, /Symphony Dashboard/);
   assert.doesNotMatch(page, /<style|stylesheet/i);
 });
