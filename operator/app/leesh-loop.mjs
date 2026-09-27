@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
 import { chmod, mkdir, open, readFile, readlink, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { normalizeWorkspaceFiles, validateWorkspaceFiles } from './workspace-files.mjs';
@@ -179,27 +179,49 @@ function ensureOperatorUi() {
 }
 function uiUrl(config) { return `http://127.0.0.1:${uiPort(config)}`; }
 function projectWindowNeedsOpening(state) { return !state?.project_window_surfaces?.includes('operator-ui-v1'); }
+function uiRuntimeSourceFiles() {
+  const files = new Set();
+  const pending = [appScript];
+  const imports = /\b(?:import|export)\s+(?:[^'";]*?\sfrom\s*)?["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/g;
+  while (pending.length) {
+    const file = resolve(pending.pop());
+    if (files.has(file)) continue;
+    files.add(file);
+    const source = readFileSync(file, 'utf8');
+    for (const match of source.matchAll(imports)) {
+      const specifier = match[1] || match[2];
+      if (specifier.startsWith('.')) {
+        const dependency = resolve(dirname(file), specifier);
+        if (existsSync(dependency)) pending.push(dependency);
+      }
+    }
+  }
+  const addTree = directory => {
+    if (!existsSync(directory)) return;
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) addTree(path);
+      else if (entry.isFile()) files.add(path);
+    }
+  };
+  addTree(join(root, 'operator/notion_publisher/dist'));
+  addTree(join(root, 'operator/ui/dist'));
+  files.add(join(root, 'operator/notion_publisher/examples/publisher-config.json'));
+  return [...files].sort();
+}
 function uiIdentity(config) {
-  const sources = [
-    'operator/ui/dist/index.html',
-    'operator/app/operator-ui-server.mjs',
-    'operator/notion_publisher/src/cli.ts',
-    'operator/notion_publisher/src/config.ts',
-    'operator/notion_publisher/src/core.ts',
-    'operator/notion_publisher/src/notion.ts',
-    'operator/notion_publisher/src/publisher.ts',
-    'operator/notion_publisher/src/task-reader.ts',
-    'operator/notion_publisher/examples/publisher-config.json'
-  ];
   const revision = createHash('sha256');
-  for (const path of sources) revision.update(readFileSync(join(root, path)));
-  return { notion_database_url: config.notion_database_url, ui_port: uiPort(config), publisher: join(root, 'operator/notion_publisher/dist/cli.js'), revision: revision.digest('hex') };
+  for (const path of uiRuntimeSourceFiles()) {
+    revision.update(relative(root, path));
+    revision.update('\0');
+    revision.update(readFileSync(path));
+    revision.update('\0');
+  }
+  return { notion_database_url: config.notion_database_url, ui_port: uiPort(config), dashboard_port: Number(config.symphony_port || 4100), publisher: join(root, 'operator/notion_publisher/dist/src/cli.js'), revision: revision.digest('hex') };
 }
 function sameIdentity(first, second) { return JSON.stringify(first) === JSON.stringify(second); }
 async function stopUi(config) { const ui = await json(paths(config).ui); if (ui) await terminate(ui); await remove(paths(config).ui); }
 async function ensureUi(config) {
-  ensurePublisher();
-  ensureOperatorUi();
   const p = paths(config), identity = uiIdentity(config), ui = await json(p.ui);
   if (ui && await processStartTicks(ui.pid) === ui.process_start_ticks && sameIdentity(ui.identity, identity)) {
     try { await reachable(uiUrl(config)); return; } catch { await stopUi(config); }
@@ -207,7 +229,7 @@ async function ensureUi(config) {
   let unmanaged = false;
   try { await reachable(uiUrl(config)); unmanaged = true; } catch { /* start the project-local Operator UI */ }
   if (unmanaged) throw new Error(`Operator UI at ${uiUrl(config)} is not owned by this project`);
-  const child = spawn(process.execPath, [appScript, 'serve', config.configuration_path], { cwd: root, detached: true, stdio: 'ignore', env: process.env });
+  const child = spawn(process.execPath, [appScript, 'serve-prepared', config.configuration_path], { cwd: root, detached: true, stdio: 'ignore', env: process.env });
   child.unref();
   const process_start_ticks = processStartTicks(child.pid);
   if (!process_start_ticks) throw new Error(`could not record startup identity for publish UI PID ${child.pid}`);
@@ -218,6 +240,9 @@ async function ensureUi(config) {
 async function start(config) {
   return withLock(config, async () => {
     const port = Number(config.symphony_port || 4100); const p = paths(config); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
+    if (!existing) console.error('Operator: preparing Publisher and Symphony startup.');
+    ensurePublisher();
+    ensureOperatorUi();
     if (existing) {
       let window_error;
       try { await ensureUi(config); } catch (error) { window_error = String(error.message || error); }
@@ -230,9 +255,6 @@ async function start(config) {
       }
       return { reused: true, pid: existing.pid, dashboard: existing.effective.dashboard, ...(window_error ? { window_error } : {}) };
     }
-    console.error('Operator: preparing Publisher and Symphony startup.');
-    ensurePublisher();
-    ensureOperatorUi();
     const runtimeId = randomUUID(); const identity = effective(config, runtimeId, port);
     const starting = { status: 'starting', runtime_id: runtimeId, effective: identity, authorization_path: p.authorization, acknowledgement_path: p.acknowledgement, ownership_path: p.ownership, created_at: new Date().toISOString() };
     await atomicJson(p.state, starting); await remove(p.ownership); await remove(p.authorization); await remove(p.acknowledgement); await atomicText(p.startup_status, 'launching Operator readiness checks');
@@ -282,9 +304,11 @@ async function start(config) {
 }
 async function stop(config) { return withLock(config, async () => { const state = await json(paths(config).state); if (state) await terminate(state); await stopUi(config); await clear(config); return { stopped: Boolean(state) }; }); }
 
-async function serve(config) {
-  ensurePublisher();
-  ensureOperatorUi();
+async function serve(config, { prepared = false } = {}) {
+  if (!prepared) {
+    ensurePublisher();
+    ensureOperatorUi();
+  }
   const existing = await json(paths(config).ui), process_start_ticks = processStartTicks(process.pid);
   if (!process_start_ticks) throw new Error(`could not record startup identity for Operator UI PID ${process.pid}`);
   if (existing && (existing.pid !== process.pid || existing.process_start_ticks !== process_start_ticks) && processStartTicks(existing.pid) === existing.process_start_ticks) throw new Error(`Operator UI is already owned on ${uiUrl(config)}`);
@@ -298,7 +322,7 @@ async function serve(config) {
 const args = process.argv.slice(2);
 const locked = args[0] === '__locked';
 const [command, configFile = defaultConfig] = locked ? args.slice(1) : args;
-if (process.argv[1] && resolve(process.argv[1]) === appScript && !['start', 'stop', 'serve'].includes(command)) { console.error('Usage: leesh-loop <start|stop|serve> [project-config.json]'); process.exitCode = 2; }
+if (process.argv[1] && resolve(process.argv[1]) === appScript && !['start', 'stop', 'serve', 'serve-prepared'].includes(command)) { console.error('Usage: leesh-loop <start|stop|serve> [project-config.json]'); process.exitCode = 2; }
 else if (process.argv[1] && resolve(process.argv[1]) === appScript) {
   loadConfig(configFile, { validateWorkspaceFileSources: command === 'start', requireNotionDatabase: command !== 'stop' }).then(async config => {
     if (!locked && ['start', 'stop'].includes(command)) {
@@ -309,8 +333,8 @@ else if (process.argv[1] && resolve(process.argv[1]) === appScript) {
       process.exitCode = result.status ?? 1;
       return undefined;
     }
-    return command === 'start' ? start(config) : command === 'stop' ? stop(config) : serve(config);
+    return command === 'start' ? start(config) : command === 'stop' ? stop(config) : serve(config, { prepared: command === 'serve-prepared' });
   }).then(value => { if (value) console.log(JSON.stringify(value)); }).catch(error => { console.error(`Operator failed: ${error.message}`); process.exitCode = 1; });
 }
 
-export { acknowledgeBrowser, compatible, dispatchBrowser, effective, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, projectWindowNeedsOpening, readRequestBody };
+export { acknowledgeBrowser, compatible, dispatchBrowser, effective, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, projectWindowNeedsOpening, readRequestBody, uiIdentity, uiRuntimeSourceFiles };

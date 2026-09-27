@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { createOperatorUiServer, readRequestBody } from '../operator-ui-server.mjs';
-import { openProjectSurfaces, projectSurfaces, projectWindowNeedsOpening } from '../leesh-loop.mjs';
+import { openProjectSurfaces, projectSurfaces, projectWindowNeedsOpening, uiIdentity, uiRuntimeSourceFiles } from '../leesh-loop.mjs';
 
 const root = resolve(import.meta.dirname, '../../..');
 
@@ -126,4 +126,13 @@ test('the desktop browser path opens only the Operator UI', { concurrency: false
 test('a prior multi-surface startup marker does not suppress the new Operator UI surface', () => {
   assert.equal(projectWindowNeedsOpening({ project_window_opened_at: '2026-09-26T00:00:00.000Z' }), true);
   assert.equal(projectWindowNeedsOpening({ project_window_surfaces: ['operator-ui-v1'] }), false);
+});
+
+test('Operator UI reuse identity follows imported modules and served Publisher/UI artifacts', () => {
+  const sources = new Set(uiRuntimeSourceFiles().map(path => path.replaceAll('\\', '/')));
+  assert.ok(sources.has(`${root}/operator/local-environment.mjs`));
+  assert.ok(sources.has(`${root}/operator/app/operator-ui-server.mjs`));
+  assert.ok([...sources].some(path => path.endsWith('/operator/notion_publisher/dist/src/task-reader.js')));
+  assert.ok([...sources].some(path => path.endsWith('/operator/ui/dist/index.html')));
+  assert.equal(uiIdentity({ notion_database_url: 'https://notion.example/db', ui_port: 4310, symphony_port: 4101 }).dashboard_port, 4101);
 });

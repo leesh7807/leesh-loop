@@ -1,4 +1,4 @@
-import { PUBLISHER_PENDING_STATE, type Policy, PublicationError, resolvePublishDatabase } from "./core.js";
+import { PLAN_PROPERTY, PUBLISHER_PENDING_STATE, type Policy, PublicationError, resolvePublishDatabase } from "./core.js";
 import { NotionClient } from "./notion.js";
 
 export type BlockerSummary = { title: string; state: string; url: string };
@@ -127,7 +127,7 @@ export class NotionTaskReader {
       const title = titleOf(row, this.policy.title);
       if (typeof row.url !== "string" || !row.url) throw new PublicationError("provider/API failure: task page has no Notion URL");
       const blockedIds = await this.relationIds(row, this.policy.blockedBy);
-      const planIds = await this.relationIds(row, "Plan");
+      const planIds = await this.relationIds(row, PLAN_PROPERTY);
       const blockerRows: any[] = [];
       for (const id of blockedIds) blockerRows.push(byId.get(id) ?? await this.client.request("GET", `/pages/${id}`));
       const blockedBy = await Promise.all(blockerRows.map(page => this.pageSummary(page, binding, byId)));
