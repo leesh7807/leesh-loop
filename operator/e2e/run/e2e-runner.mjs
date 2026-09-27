@@ -110,6 +110,7 @@ export class E2ERunner {
           workspace_root_scope: 'current_repository',
           workflow_path: project.workflow_path,
           skip_external_readiness: project.skip_external_readiness,
+          open_project_surfaces: project.open_project_surfaces,
           codex_runtime: codexRuntimeEvidence(this.runInput.workflow)
         }
       };

@@ -67,6 +67,7 @@ test('bootstrap creates a same-revision Git runtime and derives Project paths an
   assert.equal(project.ui_port, 4310);
   assert.equal(project.startup_timeout_ms, 30 * 60_000);
   assert.equal(project.browser_acknowledgement_timeout_ms, 1_000);
+  assert.equal(project.open_project_surfaces, true);
   assert.equal(project.skip_external_readiness, false);
   assert.equal('codex_model' in project, false);
   assert.equal('codex_reasoning_effort' in project, false);

@@ -151,6 +151,30 @@ test('external readiness skip configuration is boolean and defaults to performin
   await assert.rejects(loadConfig(configPath), /skip_external_readiness must be a boolean/);
 });
 
+test('project surface opening defaults to enabled, is boolean, and does not affect runtime compatibility', async t => {
+  const { directory, workspaceRoot } = await fixture(t);
+  const configPath = await projectConfig(directory, workspaceRoot);
+  const omitted = await loadConfig(configPath);
+  assert.equal(omitted.open_project_surfaces, true);
+
+  const config = JSON.parse(await readFile(configPath, 'utf8'));
+  await writeFile(configPath, JSON.stringify({ ...config, open_project_surfaces: false }));
+  const disabled = await loadConfig(configPath);
+  assert.equal(disabled.open_project_surfaces, false);
+  assert.equal(disabled.skip_external_readiness, false);
+  assert.deepEqual(effective(omitted, 'same-runtime', 4100), effective(disabled, 'same-runtime', 4100));
+  assert.equal(compatible(effective(omitted, 'old-runtime', 4100), effective(disabled, 'new-runtime', 4100)), true);
+
+  await writeFile(configPath, JSON.stringify({ ...config, skip_external_readiness: true, open_project_surfaces: false }));
+  const independent = await loadConfig(configPath);
+  assert.equal(independent.skip_external_readiness, true);
+  assert.equal(independent.open_project_surfaces, false);
+  assert.notDeepEqual(effective(omitted, 'same-runtime', 4100), effective(independent, 'new-runtime', 4100));
+
+  await writeFile(configPath, JSON.stringify({ ...config, open_project_surfaces: 'false' }));
+  await assert.rejects(loadConfig(configPath), /open_project_surfaces must be a boolean/);
+});
+
 test('stop accepts an invalidated workspace-file source so a live runtime remains recoverable', async t => {
   const { directory, workspaceRoot } = await fixture(t);
   const missingSource = join(directory, '.env');
