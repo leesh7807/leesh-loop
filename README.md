@@ -8,66 +8,14 @@ It publishes plans written as plain text or Markdown to a Notion task surface, t
 Plan → Operator Publisher → Notion Tasks → Operator Symphony → Agent Work → State / Result
 ```
 
-Leesh Loop does not live inside the target repository or wrap it.
-
-Each repository has a separate loop directory dedicated to that repository.
-
-```text
-foo/
-    source repository
-    WORKFLOW.md
-    ...
-
-foo-loop/
-    operator/
-        app/
-        notion_publisher/
-        symphony/
-        external/chatgpt-shot/
-```
-
-`foo-loop` accesses and operates `foo` from outside the repository.
-
-A different repository uses a different loop.
-
-```text
-foo/       ← foo-loop
-bar/       ← bar-loop
-```
+Leesh Loop does not live inside the target repository or wrap it. The Operator uses the Git target
+configured in its Project file.
 
 There is no separate central project manager for coordinating multiple repositories.
 
-## Install the local CLI and bootstrap a Project
-
-Clone and set up Leesh Loop once, then link its root package into your PATH:
-
-```sh
-git clone https://github.com/leesh7807/leesh-loop.git
-cd leesh-loop
-(cd operator/symphony && mise trust && mise exec -- mix deps.get)
-npm link
-```
-
-Run the linked command from the root of a Git project that already has its own Leesh Loop
-`WORKFLOW.md`:
-
-```sh
-cd /path/to/target-project
-leesh-loop boot
-```
-
-`leesh-loop boot` clones the full linked Leesh Loop checkout into the sibling
-`<target-project>-loop` directory. It then creates a target-specific `operator/project.json` using
-exclusive file creation. The checked-in Leesh Loop revision contains that path, so boot fails at
-this step and removes the newly created runtime directory. The later `.env` creation and dependency
-preparation do not occur. The `--no-external` option does not bypass this file collision.
-
-Bootstrap uses the target checkout's upstream/tracking information to select its repository and
-base branch. It does not generate or modify the target's `WORKFLOW.md`.
-
 The root `WORKFLOW.md` in this repository is the concrete execution contract for Leesh Loop itself. It is not the generic workflow for every repository operated by a loop.
 
-When a separate loop is created for another source repository, that repository needs a workflow adapted to its own runtime and repository rules. [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md) is the reusable starting point and reference for defining that repository-specific workflow.
+For another repository, adapt its worker policy to that repository's rules. [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md) is the reusable starting point and reference.
 
 ## Operator readiness
 
@@ -93,8 +41,8 @@ npm run start
 The bundled development launcher uses `mise exec -- mix run`; install the pinned toolchain and
 run `mise exec -- mix deps.get` from `operator/symphony` before the first start.
 
-Before spawning Symphony, the bootstrap always validates the workspace, GitHub HTTPS network and
-credential path, and the configured base branch bootstrap/readback. By default it then performs
+Before spawning Symphony, Operator startup validates the workspace, GitHub HTTPS network and
+credential path, and the configured base branch initialization and readback. By default it then performs
 external readiness: it verifies the installed `chatgpt-shot` configuration and browser/session
 state, starts or recovers its Service, confirms the health endpoint is accepting requests, and
 performs one real `chatgpt-shot submit` smoke submission before launching Symphony. Missing or
@@ -103,7 +51,7 @@ interactive login.
 
 An Operator Project may set `skip_external_readiness` to `true` when its execution environment
 cannot access the Operator-owned state outside `$SYMPHONY_WORKSPACE_ROOT`. In that case only the
-external readiness boundary is skipped: the bootstrap does not read or prepare `chatgpt-shot`
+external readiness boundary is skipped: Operator startup does not read or prepare `chatgpt-shot`
 configuration, browser/session state, Service state, smoke Jobs, worker interface, or external
 readiness evidence. Core startup and dispatch readiness still run through the same
 `leesh-loop.mjs start` path. Omitted or `false` keeps the default external readiness behavior.
@@ -152,7 +100,7 @@ Symphony starts observable but dispatch-disabled. Only after the Operator publis
 
 `operator/project.json` may include `workspace_files`, an optional array of regular-file paths. Paths may be absolute, relative to the Project file, or start with `~` for the current user's home directory. Each configured file is copied by basename to the root of a newly created workspace after the repository clone and before dependency bootstrap; for example, `../.env` becomes `<workspace>/.env`. Empty or omitted arrays preserve the usual behavior. Missing, non-regular, and duplicate-basename sources reject Operator startup. Existing workspace destinations are never overwritten. The setting is part of runtime compatibility, but it is only applied for new workspaces: continuations preserve their existing files and do not apply a later configuration change.
 
-Configured base bootstrap/readback always runs, and the normal readiness evidence records the
+Configured base initialization/readback always runs, and the normal readiness evidence records the
 directly read-back `github_base_commit`. The same repository and branch values are passed to Symphony as
 `SYMPHONY_GITHUB_REPOSITORY_URL` and `SYMPHONY_GITHUB_BASE_BRANCH`; a missing value is a
 configuration/readiness failure, not an invitation to infer `origin`, a default branch, or `main`.
