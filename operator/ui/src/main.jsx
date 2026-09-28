@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { clearPublicationDraft, readPublicationDraft, writePublicationDraft } from './publication-draft.js';
 import './style.css';
 
 const REFRESH_INTERVAL_MS = 7500;
 const formatTime = value => new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' }).format(value);
+const draftKey = (plan, state, selectedBlockers) => JSON.stringify({ plan, state, blockedBy: selectedBlockers.map(task => task.taskId) });
 
 function TaskCard({ task, selected, selectionDisabled, onToggle }) {
   return (
@@ -89,16 +91,21 @@ function TaskSurface({ tasks, selectedBlockers, selectionDisabled, loading, erro
   );
 }
 
-function PublicationSurface({ config, selectedBlockers, publishing, setPublishing, onRemoveBlocker, onReset }) {
-  const [plan, setPlan] = useState('');
-  const [state, setState] = useState('');
+function PublicationSurface({ config, plan, state, selectedBlockers, publishing, setPublishing, onDraftChange, onRemoveBlocker, onReset }) {
   const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    const currentKey = draftKey(plan, state, selectedBlockers);
+    if (result?.kind === 'success' && result.draftKey === currentKey) clearPublicationDraft();
+    else writePublicationDraft({ plan, state, selectedBlockers });
+  }, [plan, state, selectedBlockers, result]);
 
   async function submit(event) {
     event.preventDefault();
     setPublishing(true);
     setResult(null);
     const submittedBlockers = [...selectedBlockers];
+    writePublicationDraft({ plan, state, selectedBlockers: submittedBlockers });
     try {
       const response = await fetch('/api/v1/publish', {
         method: 'POST',
@@ -107,7 +114,8 @@ function PublicationSurface({ config, selectedBlockers, publishing, setPublishin
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || 'Publishing failed.');
-      setResult({ kind: 'success', ...body, blockers: submittedBlockers });
+      setResult({ kind: 'success', ...body, blockers: submittedBlockers, draftKey: draftKey(plan, state, submittedBlockers) });
+      clearPublicationDraft();
     } catch (error) {
       setResult({ kind: 'failure', message: error.message || 'Publishing failed.' });
     } finally {
@@ -116,8 +124,6 @@ function PublicationSurface({ config, selectedBlockers, publishing, setPublishin
   }
 
   function reset() {
-    setPlan('');
-    setState('');
     setResult(null);
     onReset();
   }
@@ -134,7 +140,7 @@ function PublicationSurface({ config, selectedBlockers, publishing, setPublishin
         <div className="plan-field">
           <label htmlFor="plan">1. Review the Plan</label>
           <p className="field-help">The Publisher keeps the accepted Plan and task details in Notion.</p>
-          <textarea id="plan" name="plan" value={plan} onChange={event => setPlan(event.target.value)} spellCheck="false" aria-label="Plan Markdown" disabled={publishing} />
+          <textarea id="plan" name="plan" value={plan} onChange={event => onDraftChange({ plan: event.target.value })} spellCheck="false" aria-label="Plan Markdown" disabled={publishing} />
         </div>
         <section className="publication-blockers" aria-labelledby="publication-blockers-heading">
           <div className="context-heading">
@@ -156,7 +162,7 @@ function PublicationSurface({ config, selectedBlockers, publishing, setPublishin
         <div className="publish-decision">
           <div>
             <label htmlFor="state">3. Choose publication State</label>
-            <select id="state" name="state" value={state} onChange={event => setState(event.target.value)} disabled={publishing}>
+            <select id="state" name="state" value={state} onChange={event => onDraftChange({ state: event.target.value })} disabled={publishing}>
               <option value="">Publisher default ({config.defaultState})</option>
               {config.states.map(value => <option value={value} key={value}>{value}</option>)}
             </select>
@@ -197,13 +203,14 @@ function PublicationSurface({ config, selectedBlockers, publishing, setPublishin
 function App() {
   const [config, setConfig] = useState(null);
   const [tasks, setTasks] = useState([]);
-  const [selectedBlockers, setSelectedBlockers] = useState([]);
+  const [draft, setDraft] = useState(() => readPublicationDraft());
   const [publishing, setPublishing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState(null);
   const requestInFlight = useRef(false);
   const hasReadTasks = useRef(false);
+  const { plan, state, selectedBlockers } = draft;
 
   const refresh = useCallback(async () => {
     if (requestInFlight.current) return;
@@ -214,6 +221,19 @@ function App() {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || 'Could not refresh tasks.');
       setTasks(body.tasks);
+      setDraft(current => {
+        const available = new Map(body.tasks.map(task => [task.taskId, task]));
+        const refreshed = current.selectedBlockers.map(selected => {
+          const task = available.get(selected.taskId);
+          return task ? { taskId: task.taskId, title: task.title, state: task.state, identifier: task.identifier } : selected;
+        });
+        const unchanged = refreshed.every((task, index) => task.taskId === current.selectedBlockers[index].taskId
+          && task.title === current.selectedBlockers[index].title
+          && task.state === current.selectedBlockers[index].state
+          && task.identifier === current.selectedBlockers[index].identifier);
+        if (unchanged) return current;
+        return { ...current, selectedBlockers: refreshed };
+      });
       setError(false);
       setRefreshedAt(new Date());
       hasReadTasks.current = true;
@@ -234,13 +254,30 @@ function App() {
   }, [refresh]);
 
   function toggleBlocker(task) {
-    setSelectedBlockers(current => current.some(selected => selected.taskId === task.taskId)
-      ? current.filter(selected => selected.taskId !== task.taskId)
-      : [...current, task]);
+    setDraft(current => {
+      const selectedBlockers = current.selectedBlockers.some(selected => selected.taskId === task.taskId)
+        ? current.selectedBlockers.filter(selected => selected.taskId !== task.taskId)
+        : [...current.selectedBlockers, { taskId: task.taskId, title: task.title, state: task.state, identifier: task.identifier }];
+      return { ...current, selectedBlockers };
+    });
   }
 
   function removeBlocker(taskId) {
-    setSelectedBlockers(current => current.filter(task => task.taskId !== taskId));
+    setDraft(current => {
+      return { ...current, selectedBlockers: current.selectedBlockers.filter(task => task.taskId !== taskId) };
+    });
+  }
+
+  function updateDraft(values) {
+    setDraft(current => {
+      return { ...current, ...values };
+    });
+  }
+
+  function resetDraft() {
+    const emptyDraft = { plan: '', state: '', selectedBlockers: [] };
+    clearPublicationDraft();
+    setDraft(emptyDraft);
   }
 
   return (
@@ -261,11 +298,14 @@ function App() {
         {config ? (
           <PublicationSurface
             config={config}
+            plan={plan}
+            state={state}
             selectedBlockers={selectedBlockers}
             publishing={publishing}
             setPublishing={setPublishing}
+            onDraftChange={updateDraft}
             onRemoveBlocker={removeBlocker}
-            onReset={() => setSelectedBlockers([])}
+            onReset={resetDraft}
           />
         ) : <section className="surface"><p className="empty-state">Loading Publisher configuration…</p></section>}
       </main>
