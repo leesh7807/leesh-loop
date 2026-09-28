@@ -250,12 +250,19 @@ export class RunFinalizer {
         return record.evidence.owned_branch_cleanup;
       });
       if (branchCleanup) {
-        for (const ref of branchCleanup.refs.filter(item => item.status === 'identity_changed')) {
+        for (const ref of branchCleanup.refs.filter(item => item.status === 'absent' || item.status === 'identity_changed')) {
           const branchAction = branchesToCheck.find(item => item.branch === ref.branch)?.action;
           if (branchAction) {
+            const wasUnresolved = record.finalization.unresolved.includes(branchAction) || record.cleanup.unresolved.includes(branchAction);
             record.finalization.unresolved = record.finalization.unresolved.filter(action => action !== branchAction);
             record.cleanup.unresolved = record.cleanup.unresolved.filter(action => action !== branchAction);
-            recordFinalizationAction(record, `preserve_replaced_run_branch:${ref.branch}`, { status: 'completed', expected_commit: ref.expected_commit, observed_commit: ref.commit, reason: 'the exact recorded ref generation is no longer present; preserve the replacement ref' });
+            if (wasUnresolved) {
+              if (ref.status === 'absent') {
+                recordFinalizationAction(record, `confirm_run_owned_branch_absent:${ref.branch}`, { status: 'completed', expected_commit: ref.expected_commit, reason: 'the final exact-ref readback confirmed the run-owned branch is absent' });
+              } else {
+                recordFinalizationAction(record, `preserve_replaced_run_branch:${ref.branch}`, { status: 'completed', expected_commit: ref.expected_commit, observed_commit: ref.commit, reason: 'the exact recorded ref generation is no longer present; preserve the replacement ref' });
+              }
+            }
           }
         }
         record.finalization.incomplete = record.finalization.unresolved.length > 0;

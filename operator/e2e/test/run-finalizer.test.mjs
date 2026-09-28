@@ -138,6 +138,31 @@ test('finalization records and blocks admission on a run-owned branch that remai
   assert.equal(result.failures.at(-1).phase, 'finalization');
 });
 
+test('final absence readback clears a branch deletion failure after the ref was removed', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-absence-retry-'));
+  const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
+  const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
+  const record = createRunRecord({ config, runId: 'run-delete-readback-retry', workload, paths: createRunPaths(config, 'run-delete-readback-retry') });
+  record.binding.base_branch = 'base/run-delete-readback-retry';
+  record.binding.base_commit = 'a'.repeat(40);
+  let branchPresent = true;
+  const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
+  const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { state: 'Cancelled', workpad: '' }, github: { delivery_prs: [] }, symphony: {}, errors: [] }; } };
+  const git = {
+    async readRemoteBranchCommit(branch) { return branch === record.binding.base_branch && branchPresent ? record.binding.base_commit : null; },
+    async deleteRemoteBranch(branch, { expectedCommit }) { assert.equal(branch, record.binding.base_branch); assert.equal(expectedCommit, record.binding.base_commit); branchPresent = false; throw new Error('post-delete branch readback failed transiently'); }
+  };
+  const finalizer = new RunFinalizer({ config, runRecordStore: { async save() {} }, notionClient: notion, operatorClient: {}, gitClient: git, githubClient: {}, runEvidenceCollector: evidence });
+
+  const result = await finalizer.finalizeRun({ record, reason: 'admission_reconciliation', task: await notion.readTask(), baseBranch: record.binding.base_branch });
+  assert.equal(result.finalization.complete, true);
+  assert.deepEqual(result.finalization.unresolved, []);
+  assert.deepEqual(result.cleanup.unresolved, []);
+  assert.deepEqual(result.evidence.owned_branch_cleanup.refs.map(ref => [ref.branch, ref.status]), [[record.binding.base_branch, 'absent']]);
+  assert.ok(result.finalization.actions.some(action => action.action === `delete_run_scoped_base:${record.binding.base_branch}` && action.status === 'failed'));
+  assert.ok(result.finalization.actions.some(action => action.action === `confirm_run_owned_branch_absent:${record.binding.base_branch}` && action.status === 'completed'));
+});
+
 test('finalization keeps a changed delivery ref unresolved when current GitHub evidence is unavailable', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-reused-ref-'));
   const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
