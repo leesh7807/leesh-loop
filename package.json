@@ -2,9 +2,6 @@
   "name": "leesh-loop",
   "version": "0.1.0",
   "private": true,
-  "bin": {
-    "leesh-loop": "operator/app/leesh-loop.mjs"
-  },
   "scripts": {
     "start": "node operator/app/leesh-loop.mjs start operator/project.json",
     "stop": "node operator/app/leesh-loop.mjs stop operator/project.json",

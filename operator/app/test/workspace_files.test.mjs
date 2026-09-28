@@ -337,7 +337,7 @@ test('materializer rejects outside workspaces and sources invalidated after star
   await assert.rejects(materializeWorkspaceFiles(workspace, [source], workspaceRoot), /not a regular file/);
 });
 
-test('the actual after_create materialization command runs after clone and before bootstrap consumption', async t => {
+test('the actual after_create materialization command copies files into the cloned workspace', async t => {
   const { directory, workspaceRoot, workspace } = await fixture(t);
   const source = join(directory, '.env');
   const seed = join(directory, 'seed');

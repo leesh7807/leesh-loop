@@ -10,7 +10,6 @@ import { validateBaseBranch } from './git-target.mjs';
 import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
 import { resolveProjectPath } from '../local-path.mjs';
 import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
-import { bootSuccessMessage, bootstrapProject } from './project-bootstrap.mjs';
 import { defaultOperatorUiDependencies, readRequestBody, startOperatorUiServer } from './operator-ui-server.mjs';
 
 const appScript = fileURLToPath(import.meta.url);
@@ -341,21 +340,10 @@ const [command, ...commandArgs] = locked ? args.slice(1) : args;
 const configFile = commandArgs[0] || defaultConfig;
 let directExecution = false;
 try { directExecution = Boolean(process.argv[1] && realpathSync(process.argv[1]) === appScript); } catch { /* Node may be importing this module from another entry point. */ }
-if (directExecution && !['boot', 'start', 'stop', 'serve', 'serve-prepared'].includes(command)) {
-  const usage = 'Usage: leesh-loop <boot [--no-external]|start|stop|serve> [project-config.json]';
+if (directExecution && !['start', 'stop', 'serve', 'serve-prepared'].includes(command)) {
+  const usage = 'Usage: node operator/app/leesh-loop.mjs <start|stop|serve> [project-config.json]';
   if (command === '--help' || command === '-h') console.log(usage);
   else { console.error(usage); process.exitCode = 2; }
-} else if (directExecution && command === 'boot') {
-  const noExternal = commandArgs.includes('--no-external');
-  const invalid = commandArgs.find(argument => argument !== '--no-external');
-  if (invalid) {
-    console.error(`leesh-loop boot does not accept argument: ${invalid}`);
-    process.exitCode = 2;
-  } else {
-    bootstrapProject({ targetDirectory: process.cwd(), sourceDirectory: root, noExternal })
-      .then(result => console.log(bootSuccessMessage(result)))
-      .catch(error => { console.error(`Leesh Loop boot failed: ${error.message}`); process.exitCode = 1; });
-  }
 } else if (directExecution) {
   loadConfig(configFile, { validateWorkspaceFileSources: command === 'start', requireNotionDatabase: command !== 'stop' }).then(async config => {
     if (!locked && ['start', 'stop'].includes(command)) {

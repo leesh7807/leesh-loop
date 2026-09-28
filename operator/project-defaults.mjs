@@ -1,5 +1,4 @@
-// Shared production Project defaults used by both generated Projects and the
-// Operator's runtime fallbacks.
+// Shared Project defaults used by the Operator's runtime fallbacks.
 export const PROJECT_DEFAULTS = Object.freeze({
   symphony_port: 4100,
   ui_port: 4310,

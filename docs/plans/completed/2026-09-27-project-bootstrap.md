@@ -1,5 +1,7 @@
 # 2026-09-27-project-bootstrap
 
+> Historical record only. The clone-based Project bootstrap described here was removed by [2026-09-28-remove-project-bootstrap](../2026-09-28-remove-project-bootstrap.md). The requirements and decisions below do not describe the current supported CLI or Project setup contract.
+
 ## Objective
 
 Leesh Loop 저장소를 한 번 local setup한 사용자가 어느 Git 프로젝트에서든 `leesh-loop boot`를 실행해 해당 프로젝트용 sibling Leesh Loop runtime을 준비할 수 있게 한다.
