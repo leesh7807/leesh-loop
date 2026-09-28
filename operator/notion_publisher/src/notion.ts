@@ -22,7 +22,7 @@ const planText = (blocks: any[]): string => blocks.map((block) => block?.type ==
 const propertyText = (property: any, type: string): string | null => property?.type === type && Array.isArray(property[type]) ? richText(property[type]) : null;
 const selectText = (property: any): string | null => property?.type === "select" && (property.select === null || typeof property.select?.name === "string") ? property.select?.name ?? "" : null;
 const relationTarget = (property: any): string | null => property?.type === "relation" && typeof property.relation?.data_source_id === "string" ? property.relation.data_source_id : null;
-const relationIds = (property: any): string[] | null => {
+const inlineRelationIds = (property: any): string[] | null => {
   if (property?.type !== "relation" || !Array.isArray(property.relation)) return null;
   const ids = property.relation.map((item: any) => item?.id);
   return ids.every((id: any): id is string => typeof id === "string") ? ids : null;
@@ -265,21 +265,19 @@ export class NotionClient {
     }
   }
 
-  async taskBlockerIds(pageId: string, dataSource: string, propertyName: string): Promise<string[]> {
-    const page = await this.request("GET", `/pages/${encodeURIComponent(pageId)}`);
-    if (page?.parent?.type !== "data_source_id" || page.parent.data_source_id !== dataSource) {
-      throw new PublicationError("pending task is outside the expected task data source");
-    }
-    const property = page.properties?.[propertyName];
-    const ids = relationIds(property);
-    if (ids === null) throw new PublicationError(`provider/API failure: task relation ${propertyName} was malformed`);
+  async readRelationIds(page: any, propertyName: string): Promise<string[]> {
+    const property = page?.properties?.[propertyName];
+    if (property?.type !== "relation" || !Array.isArray(property.relation)) throw new PublicationError(`provider/API failure: task relation ${propertyName} was malformed`);
+    const rawIds: unknown[] = property.relation.map((item: any) => item?.id);
+    if (rawIds.some(id => typeof id !== "string")) throw new PublicationError(`provider/API failure: task relation ${propertyName} contained a malformed page`);
+    const ids = rawIds as string[];
     if (property.has_more !== true) return [...new Set(ids)];
-    if (typeof property.id !== "string") throw new PublicationError(`provider/API failure: task relation ${propertyName} omitted its pagination identity`);
+    if (typeof page?.id !== "string" || typeof property.id !== "string") throw new PublicationError(`provider/API failure: task relation ${propertyName} omitted its pagination identity`);
 
     let cursor: string | undefined;
     do {
       const suffix = cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : "";
-      const result = await this.request("GET", `/pages/${encodeURIComponent(pageId)}/properties/${encodeURIComponent(property.id)}?page_size=100${suffix}`);
+      const result = await this.request("GET", `/pages/${encodeURIComponent(page.id)}/properties/${encodeURIComponent(property.id)}?page_size=100${suffix}`);
       if (!Array.isArray(result?.results) || typeof result.has_more !== "boolean") throw new PublicationError(`provider/API failure: paginated task relation ${propertyName} was malformed`);
       for (const item of result.results) {
         const id = item?.relation?.id ?? item?.id;
@@ -290,6 +288,14 @@ export class NotionClient {
       cursor = result.has_more ? result.next_cursor : undefined;
     } while (cursor);
     return [...new Set(ids)];
+  }
+
+  async taskBlockerIds(pageId: string, dataSource: string, propertyName: string): Promise<string[]> {
+    const page = await this.request("GET", `/pages/${encodeURIComponent(pageId)}`);
+    if (page?.parent?.type !== "data_source_id" || page.parent.data_source_id !== dataSource) {
+      throw new PublicationError("pending task is outside the expected task data source");
+    }
+    return this.readRelationIds(page, propertyName);
   }
 
   async setTaskBlockers(pageId: string, propertyName: string, blockerIds: string[]): Promise<void> {
@@ -354,7 +360,7 @@ export class NotionClient {
 
   private async relationPlanPage(taskPage: any, binding: DatabaseBinding, identifier: string, title: string): Promise<string | null> {
     const property = taskPage?.properties?.[PLAN_PROPERTY];
-    const ids = relationIds(property);
+    const ids = inlineRelationIds(property);
     if (ids === null || ids.length > 1) throw new PublicationError("canonical task Plan property must be a relation containing exactly one page");
     if (!ids.length) return null;
     await this.assertPlanIdentity(ids[0], binding, identifier, title);
