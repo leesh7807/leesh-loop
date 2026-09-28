@@ -49,18 +49,19 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
   };
   const startedDatabaseUrls = [];
   const runtime = { async startConfiguredOperatorProject(_projectPath, _timeout, databaseUrl) { startedDatabaseUrls.push(databaseUrl); return { dashboard: 'http://127.0.0.1:4410' }; }, async stopConfiguredOperatorProject() { return { stopped: true }; } };
+  const remoteBranches = new Map();
   const git = {
-    async listRemoteBranchRefs() { return {}; },
     async resolveSeedCommit() { return '0123456789012345678901234567890123456789'; },
-    async createRunScopedBaseBranch(_branch, commit) { return commit; },
-    async readRemoteBranchCommit() { return mergeCommit; },
+    async createRunScopedBaseBranch(branch, commit) { remoteBranches.set(branch, mergeCommit); remoteBranches.set('feature', deliveryHead); return commit; },
+    async readRemoteBranchCommit(branch) { return remoteBranches.get(branch) || null; },
     async verifyCommitOnRemoteBranch() { return true; },
-    async deleteRemoteBranch() {}
+    async deleteRemoteBranch(branch) { remoteBranches.delete(branch); }
   };
   const publisher = { async publishAcceptedPlan({ plan: acceptedPlan }) { publishedPlan = acceptedPlan; publishedPlans.push(acceptedPlan); return { page_id: 'page-1', url: 'https://notion/page-1', identifier: taskIdentifier, plan_identifier: derivePlanIdentifier(acceptedPlan) }; }, async prepareProductionPublisher() {} };
   const github = {
+    repository: 'owner/repo',
     async pullRequestsForBase(baseBranch) {
-      return [{ number: 4, url: deliveryUrl, baseRefName: baseBranch, headRefName: 'feature', headRefOid: deliveryHead, mergedAt: observedState === 'Done' ? new Date(clock()).toISOString() : null, mergeCommit: observedState === 'Done' ? { oid: mergeCommit } : null }];
+      return [{ number: 4, url: deliveryUrl, baseRefName: baseBranch, headRefName: 'feature', headRefOid: deliveryHead, isCrossRepository: false, headRepository: { nameWithOwner: 'owner/repo' }, mergedAt: observedState === 'Done' ? new Date(clock()).toISOString() : null, mergeCommit: observedState === 'Done' ? { oid: mergeCommit } : null }];
     },
     findRunOwnedDeliveryBranches() { return ['feature']; },
     findDeliveryPullRequest(prs, deliveredPr) { return prs.find(pr => pr.url === deliveredPr || String(pr.number) === String(deliveredPr).split('/').at(-1)); }
@@ -68,7 +69,7 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
   const evidence = {
     async collectSnapshot({ baseBranch }) {
       observedState = states[Math.min(snapshotIndex++, states.length - 1)];
-      return { observed_at: new Date(clock()).toISOString(), notion: { id: 'page-1', url: 'https://notion/page-1', identifier: taskIdentifier, state: observedState, accepted_plan: publishedPlan, workpad: observedState === 'Human Review' ? humanReviewWorkpad : '' }, symphony: { runtime: {}, state: {}, issue: null, tracker_input: includeTrackerInput ? { description: publishedPlan } : null }, github: { delivery_prs: await github.pullRequestsForBase(baseBranch) }, git: { remote_refs: {} }, chatgpt_shot: observedState === 'Human Review' ? humanReviewEvidence : null, errors: [] };
+      return { observed_at: new Date(clock()).toISOString(), notion: { id: 'page-1', url: 'https://notion/page-1', identifier: taskIdentifier, state: observedState, accepted_plan: publishedPlan, workpad: observedState === 'Human Review' ? humanReviewWorkpad : '' }, symphony: { runtime: {}, state: {}, issue: null, tracker_input: includeTrackerInput ? { description: publishedPlan } : null }, github: { delivery_prs: await github.pullRequestsForBase(baseBranch) }, chatgpt_shot: observedState === 'Human Review' ? humanReviewEvidence : null, errors: [] };
     }
   };
   const store = new RunRecordStore(config);
@@ -398,7 +399,7 @@ test('Done rejects a configured base advanced after the approved merge', async (
   assert.match(result.reason, /contains changes after/);
 });
 
-test('admission does not treat unrelated branch changes as run-owned residue', async () => {
+test('admission ignores legacy unrelated branch changes and deletions', async () => {
   const harness = fixture({ states: ['Ready'], clock: () => 0 });
   const previous = {
     run_id: 'run-previous',
@@ -406,7 +407,7 @@ test('admission does not treat unrelated branch changes as run-owned residue', a
     failures: [],
     finalization: { complete: true },
     cleanup: { unresolved: [], runtime_stopped: true },
-    evidence: { branch_isolation: { unrelated_changes: ['refs/heads/main'], remaining_run_owned_refs: [] } },
+    evidence: { branch_isolation: { unrelated_changes: ['refs/heads/main'], unrelated_deletions: ['refs/heads/operator-branch'], remaining_run_owned_refs: [] } },
     timing: { symphony: { start_requested_at: null, started_at: null } },
     paths: {}
   };
@@ -426,7 +427,7 @@ test('admission keeps catalog workloads eligible when prior task instances are t
   assert.equal(result.workload[0].plan_identifier, harness.catalog[0].plan_identifier);
 });
 
-test('admission blocks an unresolved new remote ref', async () => {
+test('admission ignores legacy unresolved_new_refs without rewriting history', async () => {
   const harness = fixture({ states: ['Ready'], clock: () => 0 });
   const previous = {
     run_id: 'run-previous',
@@ -439,8 +440,32 @@ test('admission blocks an unresolved new remote ref', async () => {
     paths: {}
   };
   harness.runRecordStore = { async listRecords() { return [previous]; } };
-  harness.runFinalizer = { async finalizeRun({ record }) { return record; } };
-  await assert.rejects(() => new E2ERunner({ ...harness, random: () => 0 }).admission.checkRunAdmission(), /remains unresolved/);
+  const result = await new E2ERunner({ ...harness, random: () => 0 }).admission.checkRunAdmission();
+  assert.equal(result.workload.length, 1);
+  assert.deepEqual(previous.evidence.branch_isolation.unresolved_new_refs, ['refs/heads/worker-leftover']);
+});
+
+test('admission reconciles and blocks an actually present run-owned delivery branch', async () => {
+  const harness = fixture({ states: ['Ready'], clock: () => 0 });
+  let reconciliations = 0;
+  const previous = {
+    run_id: 'run-owned-residue',
+    status: 'finished',
+    failures: [],
+    finalization: { complete: true },
+    cleanup: { unresolved: [], runtime_stopped: true },
+    binding: {},
+    artifacts: { delivery_branch: 'task/owned-residue', delivery_branches: ['task/owned-residue'] },
+    evidence: {},
+    timing: { symphony: { start_requested_at: null, started_at: null } },
+    paths: {}
+  };
+  const remainingBranches = new Set(['task/owned-residue']);
+  harness.gitClient.readRemoteBranchCommit = async branch => remainingBranches.has(branch) ? 'a'.repeat(40) : null;
+  harness.runRecordStore = { async listRecords() { return [previous]; } };
+  harness.runFinalizer = { async finalizeRun({ record }) { reconciliations += 1; return record; } };
+  await assert.rejects(() => new E2ERunner({ ...harness, random: () => 0 }).admission.checkRunAdmission(), /run-owned branch remains/);
+  assert.equal(reconciliations, 1);
 });
 
 test('reconciliation rebinds a published task from its workload identity after a crash', async () => {
@@ -479,6 +504,10 @@ test('reconciliation accepts Done with the same plan binding and delivery proof'
   const workload = harness.catalog[0];
   const record = createRunRecord({ config: harness.config, runId: 'run-done-recovery', workload, paths: createRunPaths(harness.config, 'run-done-recovery') });
   record.status = 'observing';
+  record.binding.base_branch = 'e2e-base';
+  record.artifacts.delivery_pr_url = 'https://github.com/owner/repo/pull/4';
+  record.artifacts.delivery_branch = 'feature';
+  harness.gitClient.readRemoteBranchCommit = async branch => branch === 'e2e-base' ? 'abcdefabcdefabcdefabcdefabcdefabcdefabcd' : null;
   const runner = new E2ERunner({ ...harness, random: () => 0 });
   await runner.admission.reconcileInterruptedRun(record);
 

@@ -34,7 +34,7 @@ async function createProductionRunDependencies(config, catalog) {
   const gitClient = new GitClient({ repositoryUrl: config.repository_url });
   const githubClient = new GitHubClient({ repositoryUrl: config.repository_url });
   const chatgptShotClient = new ChatgptShotClient();
-  const runEvidenceCollector = new RunEvidenceCollector({ notionClient, operatorClient, githubClient, gitClient, chatgptShotClient });
+  const runEvidenceCollector = new RunEvidenceCollector({ notionClient, operatorClient, githubClient, chatgptShotClient });
   const runTimingRecorder = new RunTimingRecorder();
   const runFinalizer = new RunFinalizer({ config, runRecordStore, notionClient, operatorClient, gitClient, githubClient, runEvidenceCollector, runTimingRecorder });
   const runCompletionVerifier = new RunCompletionVerifier({ gitClient, githubClient });
@@ -85,7 +85,7 @@ async function main() {
   }
   if (command === 'admit') {
     const admission = await dependencies.runAdmission.checkRunAdmission();
-    console.log(JSON.stringify({ workload_source: runInput.workload ? 'provided' : 'catalog_random', candidates: admission.workload.map(candidate => candidate.id), task_count: admission.tasks.length, remote_ref_count: Object.keys(admission.refs).length }, null, 2));
+    console.log(JSON.stringify({ workload_source: runInput.workload ? 'provided' : 'catalog_random', candidates: admission.workload.map(candidate => candidate.id), task_count: admission.tasks.length }, null, 2));
     return;
   }
   throw new Error('Usage: node operator/e2e/cli.mjs <run|admit> [project.json]');

@@ -101,36 +101,80 @@ export class RunFinalizer {
       record.cleanup.unresolved = record.cleanup.unresolved.filter(action => action !== skippedCleanupAction);
       record.finalization.incomplete = record.finalization.unresolved.length > 0;
       const prs = record.evidence.snapshots.flatMap(snapshot => snapshot.github?.delivery_prs || []);
-      const ownedBranches = this.githubClient.findRunOwnedDeliveryBranches?.(prs, record) || [];
-      const branches = new Set(ownedBranches);
+      const ownedBranches = new Set(this.githubClient.findRunOwnedDeliveryBranches?.(prs, record) || []);
+      const deliveryPrs = this.githubClient.deliveryPrIdentities?.(record) || [];
+      for (const identity of deliveryPrs) {
+        const recordedDelivery = (record.artifacts.owned_deliveries || []).find(delivery => delivery.pr_url === identity)
+          || (identity === record.artifacts.delivery_pr_url && record.artifacts.delivery_branch ? { pr_url: identity, branch: record.artifacts.delivery_branch } : null);
+        if (recordedDelivery?.branch) {
+          ownedBranches.add(recordedDelivery.branch);
+          continue;
+        }
+        let pr = this.githubClient.findDeliveryPullRequest?.(prs, identity) || null;
+        if (!pr) {
+          const readback = await this.runFinalizationAction(record, `read_run_owned_delivery_pr:${identity}`, async signal => {
+            const observed = await this.githubClient.readPullRequest(identity, signal);
+            if (!observed?.headRefName || observed.isCrossRepository !== false || observed.headRepository?.nameWithOwner !== this.githubClient.repository) {
+              throw new Error(`delivery PR ${identity} does not identify a same-repository run-owned head`);
+            }
+            record.artifacts.delivery_pr_url = observed.url || identity;
+            record.artifacts.delivery_branch = observed.headRefName;
+            record.artifacts.delivery_branches ||= [];
+            if (!record.artifacts.delivery_branches.includes(observed.headRefName)) record.artifacts.delivery_branches.push(observed.headRefName);
+            record.artifacts.owned_deliveries ||= [];
+            if (!record.artifacts.owned_deliveries.some(delivery => delivery.pr_url === record.artifacts.delivery_pr_url)) record.artifacts.owned_deliveries.push({ pr_url: record.artifacts.delivery_pr_url, branch: observed.headRefName, head: observed.headRefOid || null, observed_at: currentTimeIso() });
+            return { url: record.artifacts.delivery_pr_url, branch: observed.headRefName };
+          });
+          if (readback?.branch) ownedBranches.add(readback.branch);
+          continue;
+        }
+        if (pr.isCrossRepository !== false || pr.headRepository?.nameWithOwner !== this.githubClient.repository || !pr.headRefName) {
+          await this.runFinalizationAction(record, `read_run_owned_delivery_pr:${identity}`, async () => {
+            throw new Error(`delivery PR ${identity} does not identify a same-repository run-owned head`);
+          });
+          continue;
+        }
+        record.artifacts.delivery_pr_url = pr.url || identity;
+        record.artifacts.delivery_branch = pr.headRefName;
+        record.artifacts.delivery_branches ||= [];
+        if (!record.artifacts.delivery_branches.includes(pr.headRefName)) record.artifacts.delivery_branches.push(pr.headRefName);
+        record.artifacts.owned_deliveries ||= [];
+        if (!record.artifacts.owned_deliveries.some(delivery => delivery.pr_url === record.artifacts.delivery_pr_url)) record.artifacts.owned_deliveries.push({ pr_url: record.artifacts.delivery_pr_url, branch: pr.headRefName, head: pr.headRefOid || null, observed_at: currentTimeIso() });
+        ownedBranches.add(pr.headRefName);
+      }
+      const legacyOwnedBranches = (record.evidence.branch_isolation?.remaining_run_owned_refs || [])
+        .map(ref => /^refs\/heads\/(.+)$/.exec(ref)?.[1])
+        .filter(Boolean);
+      const branches = new Set([...ownedBranches, ...(record.artifacts.delivery_branches || []), ...legacyOwnedBranches, record.artifacts.delivery_branch, baseBranch].filter(Boolean));
       for (const branch of branches) {
-        await this.runFinalizationAction(record, `delete_delivery_branch:${branch}`, async signal => {
+        await this.runFinalizationAction(record, branch === baseBranch ? `delete_run_scoped_base:${branch}` : `delete_delivery_branch:${branch}`, async signal => {
           await this.gitClient.deleteRemoteBranch(branch, { timeout: this.config.finalization_timeout_ms, signal });
-          record.cleanup.branches_deleted.push(branch);
+          if (!record.cleanup.branches_deleted.includes(branch)) record.cleanup.branches_deleted.push(branch);
           return { branch };
         });
       }
-      if (baseBranch) {
-        await this.runFinalizationAction(record, `delete_run_scoped_base:${baseBranch}`, async signal => {
-          await this.gitClient.deleteRemoteBranch(baseBranch, { timeout: this.config.finalization_timeout_ms, signal });
-          record.cleanup.branches_deleted.push(baseBranch);
-          return { branch: baseBranch };
-        });
-      }
-      await this.runFinalizationAction(record, 'verify_remote_branch_isolation', async signal => {
-        const after = await this.gitClient.listRemoteBranchRefs({ timeout: this.config.finalization_timeout_ms, signal });
-        record.evidence.branch_refs_after = after;
-        const before = record.evidence.branch_refs_before || {};
-        const knownDeliveryBranches = this.githubClient.findRunOwnedDeliveryBranches?.(record.evidence.snapshots.flatMap(snapshot => snapshot.github?.delivery_prs || []), record) || [];
-        const runBranches = new Set([baseBranch, ...knownDeliveryBranches, ...record.cleanup.branches_deleted].filter(Boolean).map(branch => `refs/heads/${branch}`));
-        const changedRefs = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(ref => !runBranches.has(ref)).filter(ref => before[ref] !== after[ref]);
-        const unrelatedChanges = changedRefs.filter(ref => before[ref] !== undefined && after[ref] !== undefined);
-        const unrelatedDeletions = changedRefs.filter(ref => before[ref] !== undefined && after[ref] === undefined);
-        const unresolvedNewRefs = changedRefs.filter(ref => before[ref] === undefined && after[ref] !== undefined);
-        const remainingRunBranches = Object.keys(after).filter(ref => runBranches.has(ref));
-        record.evidence.branch_isolation = { unrelated_changes: unrelatedChanges, unrelated_deletions: unrelatedDeletions, unresolved_new_refs: unresolvedNewRefs, remaining_run_owned_refs: remainingRunBranches, transient_mutations_unobservable: true };
-        return record.evidence.branch_isolation;
+      const branchCleanup = await this.runFinalizationAction(record, 'verify_run_owned_branch_cleanup', async signal => {
+        const checkedAt = currentTimeIso();
+        const refs = [];
+        for (const branch of branches) {
+          try {
+            const commit = await this.gitClient.readRemoteBranchCommit(branch, { timeout: this.config.finalization_timeout_ms, signal });
+            refs.push({ branch, status: commit ? 'present' : 'absent', commit });
+          } catch (error) {
+            refs.push({ branch, status: 'unconfirmed', commit: null, error: String(error?.message || error) });
+          }
+        }
+        const remaining = refs.filter(ref => ref.status !== 'absent');
+        record.evidence.owned_branch_cleanup = { checked_at: checkedAt, refs, remaining_refs: remaining.map(ref => ref.branch) };
+        if (remaining.length) throw new Error(`run-owned branch cleanup unresolved: ${remaining.map(ref => ref.status === 'unconfirmed' ? `${ref.branch} could not be read (${ref.error})` : `${ref.branch} remains at ${ref.commit}`).join('; ')}`);
+        return record.evidence.owned_branch_cleanup;
       });
+      if (branchCleanup && record.finalization.unresolved.includes('verify_remote_branch_isolation')) {
+        record.finalization.unresolved = record.finalization.unresolved.filter(action => action !== 'verify_remote_branch_isolation');
+        record.cleanup.unresolved = record.cleanup.unresolved.filter(action => action !== 'verify_remote_branch_isolation');
+        recordFinalizationAction(record, 'retire_legacy_repository_wide_branch_isolation', { status: 'completed', reason: 'replaced by authoritative readback of run-owned branches only' });
+        await this.runRecordStore.save(record);
+      }
       if (workspaceRoot) {
         await this.runFinalizationAction(record, `delete_workspace_root:${workspaceRoot}`, async signal => {
           const result = await this.operatorClient.removeWorkspaceRoot(workspaceRoot, this.config.workspace_root, { timeout: this.config.finalization_timeout_ms, signal });

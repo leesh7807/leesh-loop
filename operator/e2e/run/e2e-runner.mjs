@@ -85,7 +85,6 @@ export class E2ERunner {
     const record = createRunRecord({ config: this.config, runId, workload, paths, runInput: resolvedRunInput });
     record.binding.base_branch = branch;
     record.binding.seed_commit = seedCommit;
-    record.evidence.branch_refs_before = admission.refs;
     record.status = 'preparing';
     await this.runRecordStore.save(record);
 

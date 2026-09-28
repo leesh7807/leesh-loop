@@ -5,6 +5,10 @@ import { RunCompletionVerifier } from './run-completion-verifier.mjs';
 import { RunDoneVerifier } from './run-done-verifier.mjs';
 import { RunFinalizer } from '../finalization/run-finalizer.mjs';
 
+function latestWorkpadValue(workpad, name) {
+  return [...String(workpad || '').matchAll(new RegExp(`^[ \\t]*${name}:[ \\t]*(.*?)[ \\t]*$`, 'gm'))].at(-1)?.[1] || null;
+}
+
 export class RunLifecycleObserver {
   constructor({ config, notionClient, githubClient, runEvidenceCollector, runRecordStore, lifecycleInterpreter, runCompletionVerifier, runDoneVerifier, runFinalizer, runTimingRecorder, clock = () => Date.now(), waitForPoll = waitForNextPoll } = {}) {
     this.config = config;
@@ -47,8 +51,21 @@ export class RunLifecycleObserver {
         record.artifacts.delivery_prs = snapshot.github.delivery_prs || [];
         const mechanicalTransition = record.lifecycle.mechanical_human_review_transition;
         if (state === 'Human Review' && !mechanicalTransition?.performed) {
-          const observedDeliveryHead = record.artifacts.delivery_prs.find(pr => pr.headRefOid)?.headRefOid;
-          record.artifacts.delivered_head = observedDeliveryHead || null;
+          const deliveryPrUrl = latestWorkpadValue(task.workpad, 'delivered_pr');
+          const deliveryPr = deliveryPrUrl && deliveryPrUrl !== 'none'
+            ? this.githubClient.findDeliveryPullRequest(record.artifacts.delivery_prs, deliveryPrUrl)
+            : null;
+          const sameRepositoryDelivery = deliveryPr?.isCrossRepository === false
+            && deliveryPr.headRepository?.nameWithOwner === this.githubClient.repository;
+          record.artifacts.delivery_pr_url = deliveryPrUrl && deliveryPrUrl !== 'none' ? deliveryPrUrl : null;
+          record.artifacts.delivery_branch = sameRepositoryDelivery ? deliveryPr.headRefName : null;
+          record.artifacts.delivery_branches ||= [];
+          if (record.artifacts.delivery_branch && !record.artifacts.delivery_branches.includes(record.artifacts.delivery_branch)) record.artifacts.delivery_branches.push(record.artifacts.delivery_branch);
+          record.artifacts.owned_deliveries ||= [];
+          if (record.artifacts.delivery_pr_url && sameRepositoryDelivery && !record.artifacts.owned_deliveries.some(delivery => delivery.pr_url === record.artifacts.delivery_pr_url)) {
+            record.artifacts.owned_deliveries.push({ pr_url: record.artifacts.delivery_pr_url, branch: deliveryPr.headRefName, head: deliveryPr.headRefOid || null, observed_at: snapshot.observed_at });
+          }
+          record.artifacts.delivered_head = sameRepositoryDelivery ? deliveryPr.headRefOid || null : null;
           record.artifacts.delivered_head_locked = true;
         }
         const planBinding = state === 'Done' ? null : this.doneVerifier.observeTrackerInput(record, task, snapshot);
