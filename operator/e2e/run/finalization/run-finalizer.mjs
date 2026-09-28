@@ -24,8 +24,12 @@ function authorizedMergeTarget(record, identities, branch, prs, githubClient) {
         if (target) mergeTargetHead = target[1];
       }
       if (!approvedPr || !identities.includes(approvedPr) || !COMMIT_SHA.test(mergeTargetHead || '')) continue;
+      const recordedDelivery = [...(record.artifacts?.owned_deliveries || [])].reverse().find(delivery => delivery.pr_url === approvedPr && delivery.branch);
+      const recordedBranch = recordedDelivery?.branch
+        || (approvedPr === record.artifacts?.delivery_pr_url ? record.artifacts?.delivery_branch : null);
+      if (recordedBranch === branch) return mergeTargetHead;
       const pr = githubClient.findDeliveryPullRequest?.(prs, approvedPr);
-      if (pr?.headRefName === branch && pr.headRefOid?.toLowerCase() === mergeTargetHead.toLowerCase()) return mergeTargetHead;
+      if (pr?.headRefName === branch) return mergeTargetHead;
     }
   }
   return null;
@@ -201,7 +205,10 @@ export class RunFinalizer {
       for (const [branch, expectedCommit] of branchCommits) {
         const action = branch === baseBranch ? `delete_run_scoped_base:${branch}` : `delete_delivery_branch:${branch}`;
         if (completedBranchDeletion(record, action, branch)) continue;
-        branchesToCheck.push({ branch, expected_commit: expectedCommit, action });
+        const deliveryIdentity = branch !== baseBranch && (record.artifacts.owned_deliveries || []).some(delivery => delivery.branch === branch && delivery.pr_url)
+          || branch === record.artifacts.delivery_branch && Boolean(record.artifacts.delivery_pr_url)
+          || deliveryPrs.some(identity => this.githubClient.findDeliveryPullRequest?.(prs, identity)?.headRefName === branch);
+        branchesToCheck.push({ branch, expected_commit: expectedCommit, action, requires_github_evidence: Boolean(deliveryIdentity) });
         await this.runFinalizationAction(record, action, async signal => {
           const result = await this.gitClient.deleteRemoteBranch(branch, { expectedCommit, timeout: this.config.finalization_timeout_ms, signal });
           if (!record.cleanup.branches_deleted.includes(branch)) record.cleanup.branches_deleted.push(branch);
@@ -211,11 +218,28 @@ export class RunFinalizer {
       const branchCleanup = await this.runFinalizationAction(record, 'verify_run_owned_branch_cleanup', async signal => {
         const checkedAt = currentTimeIso();
         const refs = [];
-        for (const { branch, expected_commit: expectedCommit } of branchesToCheck) {
+        const currentSnapshot = record.evidence.snapshots.at(-1);
+        const currentDeliveryPrs = Array.isArray(currentSnapshot?.github?.delivery_prs) ? currentSnapshot.github.delivery_prs : null;
+        const currentNotionReadbackAvailable = typeof currentSnapshot?.notion?.workpad === 'string';
+        for (const { branch, expected_commit: expectedCommit, requires_github_evidence: requiresGitHubEvidence } of branchesToCheck) {
           try {
             const commit = await this.gitClient.readRemoteBranchCommit(branch, { timeout: this.config.finalization_timeout_ms, signal });
-            const status = !commit ? 'absent' : !expectedCommit ? 'unconfirmed' : commit.toLowerCase() === expectedCommit.toLowerCase() ? 'present' : 'identity_changed';
-            refs.push({ branch, expected_commit: expectedCommit, status, commit });
+            const currentDeliveryObserved = !requiresGitHubEvidence || Boolean(currentDeliveryPrs && deliveryPrs.some(identity => {
+              const pr = this.githubClient.findDeliveryPullRequest?.(currentDeliveryPrs, identity);
+              return pr?.headRefName === branch && pr.isCrossRepository === false && pr.headRepository?.nameWithOwner === this.githubClient.repository;
+            }));
+            const deliveryEvidenceUnavailable = requiresGitHubEvidence && (!currentDeliveryObserved || !currentNotionReadbackAvailable);
+            const status = !commit
+              ? 'absent'
+              : !expectedCommit
+                ? 'unconfirmed'
+                : commit.toLowerCase() === expectedCommit.toLowerCase()
+                  ? 'present'
+                  : deliveryEvidenceUnavailable ? 'unconfirmed' : 'identity_changed';
+            const error = status === 'unconfirmed' && commit && requiresGitHubEvidence && deliveryEvidenceUnavailable
+              ? 'current Notion/GitHub delivery evidence is unavailable; ref identity cannot be confirmed'
+              : null;
+            refs.push({ branch, expected_commit: expectedCommit, status, commit, ...(error ? { error } : {}) });
           } catch (error) {
             refs.push({ branch, expected_commit: expectedCommit, status: 'unconfirmed', commit: null, error: String(error?.message || error) });
           }

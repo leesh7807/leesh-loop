@@ -138,7 +138,7 @@ test('finalization records and blocks admission on a run-owned branch that remai
   assert.equal(result.failures.at(-1).phase, 'finalization');
 });
 
-test('finalization preserves a delivery ref whose commit no longer matches the recorded run-owned generation', async () => {
+test('finalization keeps a changed delivery ref unresolved when current GitHub evidence is unavailable', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-reused-ref-'));
   const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
   const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
@@ -148,22 +148,26 @@ test('finalization preserves a delivery ref whose commit no longer matches the r
   record.artifacts.delivery_branches = ['feature'];
   record.artifacts.delivered_head = 'a'.repeat(40);
   record.artifacts.owned_deliveries = [{ pr_url: record.artifacts.delivery_pr_url, branch: 'feature', head: 'a'.repeat(40) }];
-  const currentOtherTaskHead = 'b'.repeat(40);
+  const mergeTargetHead = 'b'.repeat(40);
+  const currentOtherTaskHead = 'c'.repeat(40);
+  const workpad = `Merging\ncycle: 1\napproved_pr: ${record.artifacts.delivery_pr_url}\napproved_head: ${'a'.repeat(40)}\nmerge_target_head: ${mergeTargetHead}\nattempt: merged\n`;
   let deleteCalls = 0;
+  const deleteCommits = [];
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
-  const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { state: 'Cancelled' }, github: { delivery_prs: [] }, symphony: {}, errors: [] }; } };
+  const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { state: 'Cancelled', workpad }, github: { delivery_prs: null }, symphony: {}, errors: ['GitHub PR inspection unavailable'] }; } };
   const git = {
     async readRemoteBranchCommit(branch) { return branch === 'feature' ? currentOtherTaskHead : null; },
-    async deleteRemoteBranch() { deleteCalls += 1; throw new Error('run-owned branch feature changed before deletion'); }
+    async deleteRemoteBranch(_branch, { expectedCommit }) { deleteCalls += 1; deleteCommits.push(expectedCommit); throw new Error(`run-owned branch feature changed before deletion (expected ${expectedCommit})`); }
   };
   const finalizer = new RunFinalizer({ config, runRecordStore: { async save() {} }, notionClient: notion, operatorClient: { async stopConfiguredOperatorProject() { return { stopped: true }; } }, gitClient: git, githubClient: new GitHubClient({ repositoryUrl: 'https://github.com/owner/repo.git' }), runEvidenceCollector: evidence });
 
   const result = await finalizer.finalizeRun({ record, reason: 'admission_reconciliation', task: await notion.readTask() });
   assert.equal(deleteCalls, 1);
-  assert.equal(result.finalization.complete, true);
-  assert.deepEqual(result.cleanup.unresolved, []);
-  assert.deepEqual(result.evidence.owned_branch_cleanup.refs.map(ref => [ref.branch, ref.status, ref.commit]), [['feature', 'identity_changed', currentOtherTaskHead]]);
-  assert.deepEqual(result.evidence.owned_branch_cleanup.remaining_refs, []);
+  assert.deepEqual(deleteCommits, [mergeTargetHead]);
+  assert.equal(result.finalization.complete, false);
+  assert.ok(result.cleanup.unresolved.includes('delete_delivery_branch:feature'));
+  assert.deepEqual(result.evidence.owned_branch_cleanup.refs.map(ref => [ref.branch, ref.status, ref.commit]), [['feature', 'unconfirmed', currentOtherTaskHead]]);
+  assert.deepEqual(result.evidence.owned_branch_cleanup.remaining_refs, ['feature']);
 });
 
 test('finalization cleans the same delivery branch at its recorded authorized Merging target head', async () => {
@@ -180,11 +184,10 @@ test('finalization cleans the same delivery branch at its recorded authorized Me
   record.artifacts.delivered_head = approvedHead;
   record.artifacts.owned_deliveries = [{ pr_url: deliveryUrl, branch: 'feature', head: approvedHead }];
   const workpad = `Merging\ncycle: 1\napproved_pr: ${deliveryUrl}\napproved_head: ${approvedHead}\nmerge_target_head: ${mergeTargetHead}\nattempt: merged\n`;
-  const deliveryPr = { number: 7, url: deliveryUrl, headRefName: 'feature', headRefOid: mergeTargetHead, isCrossRepository: false, headRepository: { nameWithOwner: 'owner/repo' } };
   let remoteHead = mergeTargetHead;
   const deleteCommits = [];
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad }; } };
-  const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { state: 'Cancelled', workpad }, github: { delivery_prs: [deliveryPr] }, symphony: {}, errors: [] }; } };
+  const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { state: 'Cancelled', workpad }, github: { delivery_prs: null }, symphony: {}, errors: ['GitHub PR inspection unavailable'] }; } };
   const git = {
     async readRemoteBranchCommit(branch) { return branch === 'feature' ? remoteHead : null; },
     async deleteRemoteBranch(branch, { expectedCommit }) { deleteCommits.push([branch, expectedCommit]); remoteHead = null; return { branch, deleted: true, expected_commit: expectedCommit }; }
