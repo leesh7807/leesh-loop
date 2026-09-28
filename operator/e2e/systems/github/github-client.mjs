@@ -8,12 +8,6 @@ function repositorySlug(repositoryUrl) {
 
 const PULL_REQUEST_FIELDS = 'number,url,state,isDraft,headRefName,headRefOid,baseRefName,mergedAt,mergeCommit,createdAt,headRepository,headRepositoryOwner,isCrossRepository';
 
-function workpadDeliveryPrs(workpad) {
-  return [...String(workpad || '').matchAll(/^[ \t]*delivered_pr:[ \t]*(\S+)[ \t]*$/gm)]
-    .map(match => match[1])
-    .filter(value => value !== 'none');
-}
-
 export class GitHubClient {
   constructor({ repositoryUrl, ghCommand = command } = {}) {
     this.repository = repositorySlug(repositoryUrl);
@@ -47,9 +41,7 @@ export class GitHubClient {
     const identities = new Set();
     if (record.artifacts?.delivery_pr_url) identities.add(record.artifacts.delivery_pr_url);
     for (const delivery of record.artifacts?.owned_deliveries || []) if (delivery.pr_url) identities.add(delivery.pr_url);
-    for (const snapshot of record.evidence?.snapshots || []) {
-      for (const identity of workpadDeliveryPrs(snapshot.notion?.workpad)) identities.add(identity);
-    }
+    for (const identity of record.artifacts?.workpad_delivery_prs || []) identities.add(identity);
     return [...identities];
   }
 

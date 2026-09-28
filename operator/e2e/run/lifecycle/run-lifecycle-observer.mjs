@@ -4,10 +4,7 @@ import { RunTimingRecorder, runWithTimeout, currentTimeIso, waitForNextPoll } fr
 import { RunCompletionVerifier } from './run-completion-verifier.mjs';
 import { RunDoneVerifier } from './run-done-verifier.mjs';
 import { RunFinalizer } from '../finalization/run-finalizer.mjs';
-
-function latestWorkpadValue(workpad, name) {
-  return [...String(workpad || '').matchAll(new RegExp(`^[ \\t]*${name}:[ \\t]*(.*?)[ \\t]*$`, 'gm'))].at(-1)?.[1] || null;
-}
+import { recordRunWorkpadEvidence } from '../../model/run-workpad-evidence.mjs';
 
 export class RunLifecycleObserver {
   constructor({ config, notionClient, githubClient, runEvidenceCollector, runRecordStore, lifecycleInterpreter, runCompletionVerifier, runDoneVerifier, runFinalizer, runTimingRecorder, clock = () => Date.now(), waitForPoll = waitForNextPoll } = {}) {
@@ -49,9 +46,10 @@ export class RunLifecycleObserver {
         const state = task.state;
         this.recordLifecycleObservation(record, state, snapshot.observed_at);
         record.artifacts.delivery_prs = snapshot.github.delivery_prs || [];
+        recordRunWorkpadEvidence(record, task.workpad);
         const mechanicalTransition = record.lifecycle.mechanical_human_review_transition;
         if (state === 'Human Review' && !mechanicalTransition?.performed) {
-          const deliveryPrUrl = latestWorkpadValue(task.workpad, 'delivered_pr');
+          const deliveryPrUrl = record.artifacts.workpad_latest_delivery_pr;
           const deliveryPr = deliveryPrUrl && deliveryPrUrl !== 'none'
             ? this.githubClient.findDeliveryPullRequest(record.artifacts.delivery_prs, deliveryPrUrl)
             : null;

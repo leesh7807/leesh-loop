@@ -1,6 +1,7 @@
 import { RunTimingRecorder, runWithTimeout, currentTimeIso } from '../run-timing.mjs';
 import { TERMINAL_STATES } from '../lifecycle/lifecycle-interpreter.mjs';
 import { addFailure, recordFinalizationAction } from '../../model/run-record-store.mjs';
+import { recordSnapshotWorkpadEvidence, recordRunWorkpadEvidence } from '../../model/run-workpad-evidence.mjs';
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/i;
 
@@ -10,27 +11,14 @@ function completedBranchDeletion(record, action, branch) {
 }
 
 function authorizedMergeTarget(record, identities, branch, prs, githubClient) {
-  const snapshots = [...(record.evidence?.snapshots || [])].reverse();
-  for (const snapshot of snapshots) {
-    const lines = String(snapshot.notion?.workpad || '').split(/\r?\n/);
-    for (let index = 0; index < lines.length; index += 1) {
-      if (lines[index].trim() !== 'Merging') continue;
-      let approvedPr = null;
-      let mergeTargetHead = null;
-      for (let cursor = index + 1; cursor < lines.length && !['Human Review', 'Review Input', 'Merging', 'Rework Reset Complete'].includes(lines[cursor].trim()); cursor += 1) {
-        const approved = /^\s*approved_pr:\s*(\S+)\s*$/.exec(lines[cursor]);
-        const target = /^\s*merge_target_head:\s*([0-9a-f]{40})\s*$/i.exec(lines[cursor]);
-        if (approved) approvedPr = approved[1];
-        if (target) mergeTargetHead = target[1];
-      }
-      if (!approvedPr || !identities.includes(approvedPr) || !COMMIT_SHA.test(mergeTargetHead || '')) continue;
-      const recordedDelivery = [...(record.artifacts?.owned_deliveries || [])].reverse().find(delivery => delivery.pr_url === approvedPr && delivery.branch);
-      const recordedBranch = recordedDelivery?.branch
-        || (approvedPr === record.artifacts?.delivery_pr_url ? record.artifacts?.delivery_branch : null);
-      if (recordedBranch === branch) return mergeTargetHead;
-      const pr = githubClient.findDeliveryPullRequest?.(prs, approvedPr);
-      if (pr?.headRefName === branch) return mergeTargetHead;
-    }
+  for (const target of [...(record.artifacts?.workpad_merge_targets || [])].reverse()) {
+    if (!identities.includes(target.approved_pr) || !COMMIT_SHA.test(target.merge_target_head || '')) continue;
+    const recordedDelivery = [...(record.artifacts?.owned_deliveries || [])].reverse().find(delivery => delivery.pr_url === target.approved_pr && delivery.branch);
+    const recordedBranch = recordedDelivery?.branch
+      || (target.approved_pr === record.artifacts?.delivery_pr_url ? record.artifacts?.delivery_branch : null);
+    if (recordedBranch === branch) return target.merge_target_head;
+    const pr = githubClient.findDeliveryPullRequest?.(prs, target.approved_pr);
+    if (pr?.headRefName === branch) return target.merge_target_head;
   }
   return null;
 }
@@ -113,9 +101,12 @@ export class RunFinalizer {
       });
     }
 
+    recordSnapshotWorkpadEvidence(record);
+
     await this.runFinalizationAction(record, 'final_evidence_snapshot', async signal => {
       const snapshot = await this.runEvidenceCollector.collectSnapshot({ databaseUrl: this.config.notion_database_url, identifier: record.artifacts.task_identifier, dashboard, baseBranch, workspaceRoot, signal });
       record.evidence.snapshots.push(snapshot);
+      recordRunWorkpadEvidence(record, snapshot.notion?.workpad);
       this.runTimingRecorder.recordEvidenceSnapshot(record, snapshot);
       return { observed_at: snapshot.observed_at, errors: snapshot.errors };
     });
