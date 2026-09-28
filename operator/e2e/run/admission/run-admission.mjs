@@ -19,46 +19,25 @@ export class RunAdmission {
 
   async checkRunAdmission() {
     const records = await this.runRecordStore.listRecords();
-    const legacyOwnedRefs = record => (record.evidence?.branch_isolation?.remaining_run_owned_refs || [])
-      .map(ref => /^refs\/heads\/(.+)$/.exec(ref)?.[1])
-      .filter(Boolean);
-    const ownedBranches = record => [...new Set([
-      record.binding?.base_branch,
-      record.artifacts?.delivery_branch,
-      ...(record.artifacts?.delivery_branches || []),
-      ...legacyOwnedRefs(record),
-      ...(record.evidence?.owned_branch_cleanup?.remaining_refs || [])
-    ].filter(Boolean))];
+    const hasRecordedOwnedBranches = record => Boolean(record.binding?.base_branch
+      || record.artifacts?.delivery_branch
+      || record.artifacts?.delivery_branches?.length
+      || record.evidence?.branch_isolation?.remaining_run_owned_refs?.length);
     const needsReconciliation = record => record.status !== 'finished'
       || record.finalization?.complete !== true
       || (record.finalization?.unresolved?.length ?? 0) > 0
       || (record.cleanup?.unresolved?.length ?? 0) > 0
       || (record.timing?.symphony?.start_requested_at && record.cleanup?.runtime_stopped !== true)
       || (record.timing?.symphony?.started_at && record.cleanup?.runtime_stopped !== true)
-      || ((record.evidence?.branch_isolation?.remaining_run_owned_refs?.length ?? 0) > 0 && !record.evidence?.owned_branch_cleanup?.checked_at)
+      || (hasRecordedOwnedBranches(record) && !record.evidence?.owned_branch_cleanup?.checked_at)
       || (record.evidence?.owned_branch_cleanup?.remaining_refs?.length ?? 0) > 0;
     for (const previous of records.filter(needsReconciliation)) {
       await this.reconcileInterruptedRun(previous);
       if (previous.finalization?.complete !== true
         || previous.finalization?.unresolved?.length
         || previous.cleanup?.unresolved?.length
-        || ((previous.evidence?.branch_isolation?.remaining_run_owned_refs?.length ?? 0) > 0 && !previous.evidence?.owned_branch_cleanup?.checked_at)
+        || (hasRecordedOwnedBranches(previous) && !previous.evidence?.owned_branch_cleanup?.checked_at)
         || previous.evidence?.owned_branch_cleanup?.remaining_refs?.length) throw new Error(`previous E2E run ${previous.run_id} remains unresolved; refusing a new dispatch`);
-    }
-    for (const previous of records) {
-      for (const branch of ownedBranches(previous)) {
-        let commit;
-        try { commit = await this.gitClient.readRemoteBranchCommit(branch); }
-        catch (error) { throw new Error(`could not confirm previous E2E run-owned branch ${branch}: ${error.message}`); }
-        if (commit) {
-          await this.reconcileInterruptedRun(previous);
-          let remaining;
-          try { remaining = await this.gitClient.readRemoteBranchCommit(branch); }
-          catch (error) { throw new Error(`could not confirm previous E2E run-owned branch ${branch} after reconciliation: ${error.message}`); }
-          if (remaining) throw new Error(`previous E2E run ${previous.run_id} run-owned branch remains: ${branch}`);
-          if (previous.finalization?.complete !== true || previous.finalization?.unresolved?.length || previous.cleanup?.unresolved?.length) throw new Error(`previous E2E run ${previous.run_id} remains unresolved; refusing a new dispatch`);
-        }
-      }
     }
     for (const previous of records) {
       const workspace = previous.paths?.workspace_root;

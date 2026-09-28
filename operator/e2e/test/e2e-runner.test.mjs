@@ -445,6 +445,28 @@ test('admission ignores legacy unresolved_new_refs without rewriting history', a
   assert.deepEqual(previous.evidence.branch_isolation.unresolved_new_refs, ['refs/heads/worker-leftover']);
 });
 
+test('admission does not revisit a delivery branch after its completed cleanup generation', async () => {
+  const harness = fixture({ states: ['Ready'], clock: () => 0 });
+  const previous = {
+    run_id: 'run-cleaned-branch',
+    status: 'finished',
+    finalization: { complete: true, unresolved: [] },
+    cleanup: { unresolved: [], runtime_stopped: true, branches_deleted: ['feature'] },
+    binding: {},
+    artifacts: { delivery_branch: 'feature', delivery_branches: ['feature'] },
+    evidence: { owned_branch_cleanup: { checked_at: '2026-09-28T00:00:00.000Z', refs: [{ branch: 'feature', status: 'absent', commit: null }], remaining_refs: [] } },
+    timing: { symphony: { start_requested_at: null, started_at: null } },
+    paths: {}
+  };
+  const reads = [];
+  harness.gitClient.readRemoteBranchCommit = async branch => { reads.push(branch); return branch === 'feature' ? 'b'.repeat(40) : null; };
+  harness.runRecordStore = { async listRecords() { return [previous]; } };
+
+  const result = await new E2ERunner({ ...harness, random: () => 0 }).admission.checkRunAdmission();
+  assert.equal(result.workload.length, 1);
+  assert.deepEqual(reads, []);
+});
+
 test('admission reconciles and blocks an actually present run-owned delivery branch', async () => {
   const harness = fixture({ states: ['Ready'], clock: () => 0 });
   let reconciliations = 0;
@@ -463,8 +485,8 @@ test('admission reconciles and blocks an actually present run-owned delivery bra
   const remainingBranches = new Set(['task/owned-residue']);
   harness.gitClient.readRemoteBranchCommit = async branch => remainingBranches.has(branch) ? 'a'.repeat(40) : null;
   harness.runRecordStore = { async listRecords() { return [previous]; } };
-  harness.runFinalizer = { async finalizeRun({ record }) { reconciliations += 1; return record; } };
-  await assert.rejects(() => new E2ERunner({ ...harness, random: () => 0 }).admission.checkRunAdmission(), /run-owned branch remains/);
+  harness.runFinalizer = { async finalizeRun({ record }) { reconciliations += 1; record.finalization.unresolved = ['verify_run_owned_branch_cleanup']; record.finalization.complete = false; record.cleanup.unresolved = ['verify_run_owned_branch_cleanup']; record.evidence.owned_branch_cleanup = { checked_at: '2026-09-28T00:00:00.000Z', refs: [{ branch: 'task/owned-residue', expected_commit: 'a'.repeat(40), status: 'present', commit: 'a'.repeat(40) }], remaining_refs: ['task/owned-residue'] }; return record; } };
+  await assert.rejects(() => new E2ERunner({ ...harness, random: () => 0 }).admission.checkRunAdmission(), /remains unresolved/);
   assert.equal(reconciliations, 1);
 });
 

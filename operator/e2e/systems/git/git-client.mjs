@@ -45,13 +45,18 @@ export class GitClient {
     return resolved;
   }
 
-  async deleteRemoteBranch(branch, { timeout = 60_000, signal } = {}) {
+  async deleteRemoteBranch(branch, { expectedCommit, timeout = 60_000, signal } = {}) {
     assertBranch(branch);
-    if (!await this.readRemoteBranchCommit(branch, { timeout, signal })) return { branch, already_absent: true };
-    await this.gitCommand('git', ['push', this.repositoryUrl, '--delete', `refs/heads/${branch}`], { timeout, signal });
+    const ref = `refs/heads/${branch}`;
+    const existing = await this.readRemoteBranchCommit(branch, { timeout, signal });
+    if (!existing) return { branch, already_absent: true };
+    if (!/^[0-9a-f]{40}$/i.test(expectedCommit || '')) throw new Error(`cannot confirm run-owned branch identity for ${branch}; expected commit is missing`);
+    if (existing.toLowerCase() !== expectedCommit.toLowerCase()) throw new Error(`run-owned branch ${branch} changed before deletion (expected ${expectedCommit}, found ${existing})`);
+    await this.gitCommand('git', ['push', `--force-with-lease=${ref}:${expectedCommit}`, this.repositoryUrl, '--delete', ref], { timeout, signal });
     const remaining = await this.readRemoteBranchCommit(branch, { timeout, signal });
-    if (remaining) throw new Error(`run-owned branch ${branch} remained after deletion at ${remaining}`);
-    return { branch, deleted: true };
+    if (remaining === expectedCommit) throw new Error(`run-owned branch ${branch} remained after deletion at ${remaining}`);
+    if (remaining) return { branch, deleted: true, replaced_commit: remaining };
+    return { branch, deleted: true, expected_commit: expectedCommit };
   }
 
   async readRemoteBranchCommit(branch, { timeout = 30_000, signal } = {}) {

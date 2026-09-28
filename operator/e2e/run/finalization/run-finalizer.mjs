@@ -2,6 +2,35 @@ import { RunTimingRecorder, runWithTimeout, currentTimeIso } from '../run-timing
 import { TERMINAL_STATES } from '../lifecycle/lifecycle-interpreter.mjs';
 import { addFailure, recordFinalizationAction } from '../../model/run-record-store.mjs';
 
+const COMMIT_SHA = /^[0-9a-f]{40}$/i;
+
+function completedBranchDeletion(record, action, branch) {
+  return (record.finalization?.actions || []).some(item => item.action === action && item.status === 'completed')
+    || (record.cleanup?.branches_deleted || []).includes(branch);
+}
+
+function authorizedMergeTarget(record, identities, branch, prs, githubClient) {
+  const snapshots = [...(record.evidence?.snapshots || [])].reverse();
+  for (const snapshot of snapshots) {
+    const lines = String(snapshot.notion?.workpad || '').split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      if (lines[index].trim() !== 'Merging') continue;
+      let approvedPr = null;
+      let mergeTargetHead = null;
+      for (let cursor = index + 1; cursor < lines.length && !['Human Review', 'Review Input', 'Merging', 'Rework Reset Complete'].includes(lines[cursor].trim()); cursor += 1) {
+        const approved = /^\s*approved_pr:\s*(\S+)\s*$/.exec(lines[cursor]);
+        const target = /^\s*merge_target_head:\s*([0-9a-f]{40})\s*$/i.exec(lines[cursor]);
+        if (approved) approvedPr = approved[1];
+        if (target) mergeTargetHead = target[1];
+      }
+      if (!approvedPr || !identities.includes(approvedPr) || !COMMIT_SHA.test(mergeTargetHead || '')) continue;
+      const pr = githubClient.findDeliveryPullRequest?.(prs, approvedPr);
+      if (pr?.headRefName === branch && pr.headRefOid?.toLowerCase() === mergeTargetHead.toLowerCase()) return mergeTargetHead;
+    }
+  }
+  return null;
+}
+
 export class RunFinalizer {
   constructor({ config, runRecordStore, notionClient, operatorClient, gitClient, githubClient, runEvidenceCollector, runTimingRecorder }) {
     this.config = config;
@@ -146,29 +175,68 @@ export class RunFinalizer {
         .map(ref => /^refs\/heads\/(.+)$/.exec(ref)?.[1])
         .filter(Boolean);
       const branches = new Set([...ownedBranches, ...(record.artifacts.delivery_branches || []), ...legacyOwnedBranches, record.artifacts.delivery_branch, baseBranch].filter(Boolean));
+      const branchCommits = new Map();
+      const addBranch = (branch, commit) => {
+        if (!branch) return;
+        branchCommits.set(branch, COMMIT_SHA.test(commit || '') ? commit : null);
+      };
+      const latestRecordedDelivery = branch => [...(record.artifacts.owned_deliveries || [])].reverse().find(delivery => delivery.branch === branch && COMMIT_SHA.test(delivery.head || ''));
+      const mergingTarget = branch => authorizedMergeTarget(record, deliveryPrs, branch, prs, this.githubClient);
+      const historicalDeliveryCommit = branch => {
+        for (const identity of deliveryPrs) {
+          const pullRequest = this.githubClient.findDeliveryPullRequest?.(prs, identity);
+          if (pullRequest?.headRefName === branch && COMMIT_SHA.test(pullRequest.headRefOid || '')) return pullRequest.headRefOid;
+        }
+        return null;
+      };
       for (const branch of branches) {
-        await this.runFinalizationAction(record, branch === baseBranch ? `delete_run_scoped_base:${branch}` : `delete_delivery_branch:${branch}`, async signal => {
-          await this.gitClient.deleteRemoteBranch(branch, { timeout: this.config.finalization_timeout_ms, signal });
+        const baseBranchCommit = branch === baseBranch ? record.binding?.base_commit : null;
+        const authorizedTarget = mergingTarget(branch);
+        const ownedDelivery = latestRecordedDelivery(branch);
+        const legacyRefCommit = record.evidence.branch_refs_after?.[`refs/heads/${branch}`];
+        const currentDeliveryCommit = branch === record.artifacts.delivery_branch ? record.artifacts.delivered_head : null;
+        addBranch(branch, baseBranchCommit || authorizedTarget || currentDeliveryCommit || ownedDelivery?.head || legacyRefCommit || historicalDeliveryCommit(branch));
+      }
+      const branchesToCheck = [];
+      for (const [branch, expectedCommit] of branchCommits) {
+        const action = branch === baseBranch ? `delete_run_scoped_base:${branch}` : `delete_delivery_branch:${branch}`;
+        if (completedBranchDeletion(record, action, branch)) continue;
+        branchesToCheck.push({ branch, expected_commit: expectedCommit, action });
+        await this.runFinalizationAction(record, action, async signal => {
+          const result = await this.gitClient.deleteRemoteBranch(branch, { expectedCommit, timeout: this.config.finalization_timeout_ms, signal });
           if (!record.cleanup.branches_deleted.includes(branch)) record.cleanup.branches_deleted.push(branch);
-          return { branch };
+          return { branch, expected_commit: expectedCommit, ...result };
         });
       }
       const branchCleanup = await this.runFinalizationAction(record, 'verify_run_owned_branch_cleanup', async signal => {
         const checkedAt = currentTimeIso();
         const refs = [];
-        for (const branch of branches) {
+        for (const { branch, expected_commit: expectedCommit } of branchesToCheck) {
           try {
             const commit = await this.gitClient.readRemoteBranchCommit(branch, { timeout: this.config.finalization_timeout_ms, signal });
-            refs.push({ branch, status: commit ? 'present' : 'absent', commit });
+            const status = !commit ? 'absent' : !expectedCommit ? 'unconfirmed' : commit.toLowerCase() === expectedCommit.toLowerCase() ? 'present' : 'identity_changed';
+            refs.push({ branch, expected_commit: expectedCommit, status, commit });
           } catch (error) {
-            refs.push({ branch, status: 'unconfirmed', commit: null, error: String(error?.message || error) });
+            refs.push({ branch, expected_commit: expectedCommit, status: 'unconfirmed', commit: null, error: String(error?.message || error) });
           }
         }
-        const remaining = refs.filter(ref => ref.status !== 'absent');
+        const remaining = refs.filter(ref => ref.status === 'present' || ref.status === 'unconfirmed');
         record.evidence.owned_branch_cleanup = { checked_at: checkedAt, refs, remaining_refs: remaining.map(ref => ref.branch) };
-        if (remaining.length) throw new Error(`run-owned branch cleanup unresolved: ${remaining.map(ref => ref.status === 'unconfirmed' ? `${ref.branch} could not be read (${ref.error})` : `${ref.branch} remains at ${ref.commit}`).join('; ')}`);
+        if (remaining.length) throw new Error(`run-owned branch cleanup unresolved: ${remaining.map(ref => ref.status === 'unconfirmed' ? `${ref.branch} could not be confirmed (${ref.error || 'recorded commit identity is missing'})` : `${ref.branch} remains at recorded commit ${ref.commit}`).join('; ')}`);
         return record.evidence.owned_branch_cleanup;
       });
+      if (branchCleanup) {
+        for (const ref of branchCleanup.refs.filter(item => item.status === 'identity_changed')) {
+          const branchAction = branchesToCheck.find(item => item.branch === ref.branch)?.action;
+          if (branchAction) {
+            record.finalization.unresolved = record.finalization.unresolved.filter(action => action !== branchAction);
+            record.cleanup.unresolved = record.cleanup.unresolved.filter(action => action !== branchAction);
+            recordFinalizationAction(record, `preserve_replaced_run_branch:${ref.branch}`, { status: 'completed', expected_commit: ref.expected_commit, observed_commit: ref.commit, reason: 'the exact recorded ref generation is no longer present; preserve the replacement ref' });
+          }
+        }
+        record.finalization.incomplete = record.finalization.unresolved.length > 0;
+        await this.runRecordStore.save(record);
+      }
       if (branchCleanup && record.finalization.unresolved.includes('verify_remote_branch_isolation')) {
         record.finalization.unresolved = record.finalization.unresolved.filter(action => action !== 'verify_remote_branch_isolation');
         record.cleanup.unresolved = record.cleanup.unresolved.filter(action => action !== 'verify_remote_branch_isolation');
