@@ -1,8 +1,15 @@
 # Operator Project configuration
 
-Copy `operator/project.example.json` to `operator/project.json` and set the required absolute paths,
-Notion database, and Git target for the Project. The example shows sample Codex override selections;
-remove either or both fields when the Project should use Codex's own model or reasoning setting.
+The checked-in `operator/project.json` configures this repository. Local paths may be absolute,
+relative to the Project file, or start with `~` for the current user's home directory. Operator reads
+`LEESH_LOOP_NOTION_DATABASE_URL` from its process environment or repository-root `.env`; it does not
+read a database URL from Project JSON. This repository's Project sets the Git target with
+`github_repository_url` and `github_base_branch`; Operator uses those values together.
+
+The optional `workspace_files` list uses the same path rules. A configured file is copied by basename
+to each newly created Symphony workspace. In particular, `../.env` refers to the repository-root
+`.env` when the Project file is under `operator/`; the file contents are copied into new worker
+workspaces. The repository `.gitignore` excludes `.env` and `.env.*`, except `.env.example`.
 
 Projects may set either or both of these optional values:
 

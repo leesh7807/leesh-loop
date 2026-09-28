@@ -1,12 +1,11 @@
 # Production E2E harness
 
-`project.json` is the optional local E2E Project binding and is ignored by Git. When present it
-overrides the tracked `project.example.json`; without it, `npm run e2e` uses the example defaults.
-The example contains the seed source ref. The E2E CLI needs
-`NOTION_TOKEN` and `LEESH_LOOP_E2E_NOTION_DATABASE_URL` in its process environment or in the
-repository root's `.env`; it also uses the normal GitHub CLI authentication. When a Project lists
-`.env` in `workspace_files`, the file is materialized into the Symphony workspace so a worker can
-run nested E2E. The nested E2E and Operator processes use the token; Symphony's existing environment
+`project.json` is the tracked default E2E Project binding. It uses paths relative to this directory,
+so a checkout can run it without embedding a user's home directory. The E2E CLI reads `NOTION_TOKEN`
+and `LEESH_LOOP_E2E_NOTION_DATABASE_URL` from its process environment or the repository root's
+`.env`; it also uses the normal GitHub CLI authentication. The E2E run passes the E2E database URL to
+its Operator process. The run-local Operator Project does not list `.env` in `workspace_files`, so
+the root `.env` is not copied into the nested Symphony workspace. Symphony's existing environment
 filtering for Codex worker processes is unchanged. The default workflow is the repository-owned
 [`WORKFLOW.md`](WORKFLOW.md), not the production root workflow. Each run creates a run-local
 Operator Project with `skip_external_readiness: true` and a nested Symphony workspace under the
@@ -14,10 +13,11 @@ current checkout, without requiring a host-global workspace.
 Optional `codex_model` and `codex_reasoning_effort` fields are copied independently to the
 run-local Project when present; omitted fields leave Codex defaults in control.
 
-Create a local configuration only when the seed or paths need customization:
+The default configuration is ready to use once credentials are available. For a separate custom
+configuration, create another JSON file under this directory and pass its path to the CLI:
 
 ```sh
-cp operator/e2e/project.example.json operator/e2e/project.json
+node operator/e2e/cli.mjs run operator/e2e/project.local.json
 ```
 
 Run the admission check first:
