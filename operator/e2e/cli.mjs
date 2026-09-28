@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { dirname, join, resolve } from 'node:path';
-import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { loadWorkloadCatalog } from './model/workload-catalog.mjs';
 import { loadE2EProjectConfig } from './model/e2e-project-config.mjs';
@@ -72,11 +71,7 @@ function parseArguments(argv) {
 
 async function main() {
   const { command, configArgument, planPath, workflowPath, hardCapMs } = parseArguments(process.argv.slice(2));
-  const requestedConfigPath = resolve(configArgument);
-  const defaultProject = join(here, 'project.json');
-  const configPath = requestedConfigPath === defaultProject && !existsSync(defaultProject)
-    ? join(here, 'project.example.json')
-    : requestedConfigPath;
+  const configPath = resolve(configArgument);
   const config = await loadE2EProjectConfig(configPath);
   const runInput = await resolveE2ERunInput({ config, planPath, workflowPath, hardCapMs });
   const catalog = runInput.workload ? [] : await loadWorkloadCatalog(join(dirname(configPath), 'catalog.json'));

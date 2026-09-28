@@ -110,7 +110,7 @@ The repository state vocabulary is:
 
 Every dispatch—initial, continuation, retry, and either return from Human Review—begins by reading current task State and Accepted Plan, resolving the deterministic Repository Plan, reading `notion_task_read_workpad`, inspecting the actual workspace/Git state, and reconciling the latest relevant markers. State is lifecycle authority; the workspace is concrete repository truth; the Workpad is live execution context; the Repository Plan is the durable execution contract. If Workpad and workspace differ, reconcile from the workspace and write a concise Korean current-state entry when that materially clarifies work. Do not repeat completed work merely because a worker restarted.
 
-Write the Workpad promptly at meaningful milestones: a material approach choice/change, substantial implementation, material finding/constraint, representative validation, review result/disposition/fix, blocker, remaining work, Human Review preparation/entry, Review Input consumption, Rework reset, or Merging result. Do not use it as command-by-command logging. Update the Repository Plan only for material contract changes, never routine execution history.
+Write the Workpad promptly at meaningful milestones: a material approach choice/change, substantial implementation, material finding/constraint, representative validation, review result/disposition/fix, blocker, remaining work, Human Review preparation/entry, Review Input consumption, Rework reset, or Merging result. Keep it concise and concrete in Korean so the completed work, decisions, verification, current state, blockers, and next work are clear before lifecycle details. Avoid repeating facts or narrating commands. Preserve required markers and exact identities as protocol metadata alongside ordinary context; do not let marker names or workflow explanations replace the task record, and do not add a fixed format. Update the Repository Plan only for material contract changes, never routine execution history.
 
 Use only these lifecycle entries, retaining ordinary context around them:
 
@@ -167,6 +167,8 @@ Before starting a new implementation, fetch the latest configured remote base wi
 The Operator owns branch bootstrap before dispatch: it validates the configured repository and branch, reads an existing configured base without changing it, or creates a missing configured base from the repository default branch's current remote HEAD and performs an authoritative readback. A missing or unreadable default HEAD, branch creation failure, or readback failure blocks readiness. The default branch is only a bootstrap seed; workspace creation, task branches, Rework, PRs, Merging, and Done verification use the configured base. New workspaces must have `origin` equal to the configured repository, the configured base checked out, and the clone-time configured-base commit as `HEAD`. Continuations preserve their workspace and do not clone or reset it. Legacy `origin_main` is equivalent to `origin_base`, and legacy `main` is equivalent to `remote_base`, only when the configured base branch is exactly `main`; otherwise those legacy markers are not evidence for the current base, and history is not rewritten.
 
 ## Independent `chatgpt-shot` review gate
+
+Treat code review followed by structure review as one delivery-review cycle for the same exact PR and HEAD. A raw `PASS` is not required: each finding must be dispositioned under the existing evidence-based validity rules, with no valid finding left. If an accepted fix changes HEAD, restart the cycle with code review on the new HEAD. Prepare `Human Review` with `reason: review` only after both reviews are complete for the same exact PR and HEAD; if a review cannot complete, use the existing blocker handoff.
 
 After implementation and ordinary repository verification, obtain the current PR URL and `git rev-parse HEAD`, then submit this request through `chatgpt-shot submit "<prompt>"`. Treat the command's stdout as the Review Job ID, not as the review Result.
 
@@ -295,7 +297,35 @@ PASS | FINDINGS
 finding이 없으면 `# Findings`는 `None.`으로 출력하라.
 ```
 
-Do not automatically edit the repository because of structural-review findings. After the structural review completes, move the task to `Human Review` whether its Result is `PASS` or `FINDINGS`. Structural-review findings are advisory and do not block or qualify a human-selected `Merging` transition.
+Structural findings are review input, not automatic edit commands. Validate each finding using the existing evidence-based rules; reject invalid findings with a reason and fix valid, actionable findings within the Accepted Plan. If a fix changes HEAD, rerun affected verification and restart the delivery-review cycle from code review at the new HEAD. If a valid finding cannot be resolved within the Accepted Plan, use the existing blocker handoff. Move to `Human Review` only when every finding is dispositioned and no valid finding remains at the same HEAD as code review. Structural findings are advisory and do not block or qualify a human-selected `Merging` transition.
+
+## Review and publish a follow-up Plan
+
+When work reveals a follow-up task, write a complete Candidate Plan using `docs/PLAN.md`. Before publication, submit the request below through the existing `chatgpt-shot` review flow. The Candidate Plan is a proposal, not an accepted contract; include the entire Plan and only the current work context needed to judge it. Base that context on the current Accepted Plan and observed work, not claims introduced by the Candidate Plan. Include a PR as evidence when one exists, but do not delay review or create a temporary PR when none exists.
+
+```text
+Review the complete Candidate Plan below as a proposal, not as an Accepted Plan. Review its Objective, Intent, and Verification Requirements as the planning contract itself against the supplied current work context and evidence.
+
+Find only material omissions or distortions of the current objective, missing guarantees, unnecessary constraints or complexity, or verification gaps that could lead a reasonable implementation to a materially different result or count a failure as success. Focus on the intended execution path and observable evidence. Apply KISS, YAGNI, and DRY. Do not flag ordinary implementation choices that converge under existing repository contracts or conventions, or simple unresolved choices best left to implementation. Do not treat claims made only by the Candidate Plan as evidence.
+
+Return PASS or findings. For each finding, state the affected contract, concrete evidence, and material consequence. If the supplied context does not establish a material problem, do not invent one.
+
+Current work context:
+Current objective: <related goal, intent, or boundary from the current Accepted Plan>
+Observed result: <actual result that prompted the follow-up>
+Follow-up boundary: <what the current task handled and what remains for the follow-up>
+User requirement: <user-stated requirement that grounds this follow-up, or none>
+Evidence: <PR URL, exact HEAD, artifact, or concrete observation; none if absent>
+
+Candidate Plan:
+<complete Candidate Plan>
+```
+
+Reuse the independent review flow above for submission, polling, terminal results, failure handoff, and evidence-based finding disposition; do not add a Plan-specific Job lifecycle or recovery rule. Incorporate only valid findings. If a valid finding materially changes the Candidate Plan, review the revised complete Plan again. Do not publish unless review is complete and no valid finding remains.
+
+Record the Candidate Plan identity, Review Job ID and result, and finding dispositions in ordinary Workpad context. Do not copy the prompt transcript or label a review as targeting a PR or HEAD when none was submitted.
+
+After review, publish the complete Candidate Plan with `notion_task_publish_plan` and retain its returned canonical `identifier` and `page_id`. Before calling `notion_task_add_blocked_by` with that `page_id`, record the review disposition and published identity in the Workpad and finish other needed recording and cleanup. A successful relation update is the current execution's last normal lifecycle mutation; do not append further lifecycle or Workpad entries after it. If publication succeeds but relation update fails, record the published task and incomplete relation, then use the existing blocker handoff; do not report the follow-up as fully linked.
 
 If the task returns to `In Progress` or `Rework`, follow the existing continuation/reset contract and repeat the required verification and review cycle before returning to `Human Review`.
 

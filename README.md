@@ -19,7 +19,7 @@ For another repository, adapt its worker policy to that repository's rules. [`do
 
 ## Operator readiness
 
-The Operator owns project configuration, lifecycle state, readiness, Symphony startup, and the project browser workspace. Copy `operator/project.example.json` to `operator/project.json`, set absolute paths, and configure the Project's required Git target binding:
+The Operator owns project configuration, lifecycle state, readiness, Symphony startup, and the project browser workspace. The checked-in `operator/project.json` configures this repository and uses paths relative to the config file. Local paths may also be absolute or begin with `~`. The Notion database URL comes from `LEESH_LOOP_NOTION_DATABASE_URL` in the process environment or repository-root `.env`. Git target settings use these paired fields:
 
 ```json
 {
@@ -30,7 +30,7 @@ The Operator owns project configuration, lifecycle state, readiness, Symphony st
 
 `github_repository_url` and `github_base_branch` are always used together. `main` is only an example; it has no special meaning in the workflow. Existing configured base branches are used unchanged. If the configured base is missing, Operator readiness creates it from the configured repository's current default-branch HEAD and verifies the remote branch and commit before dispatch. Workspace creation, task branches, Rework, PRs, Merging, and Done verification then all use that same configured base branch.
 
-`codex_model` and `codex_reasoning_effort` are independent optional Project overrides. The example Project shows sample selections; remove either field to let Codex use its own setting. See [Project configuration](docs/PROJECT_CONFIGURATION.md).
+`codex_model` and `codex_reasoning_effort` are independent optional Project overrides. The checked-in Project sets both; remove either field to let Codex use its own setting. See [Project configuration](docs/PROJECT_CONFIGURATION.md).
 
 From the repository root, start the Operator with:
 
@@ -98,7 +98,7 @@ state while a task is being constructed.
 
 Symphony starts observable but dispatch-disabled. Only after the Operator publishes durable `running` authorization and Symphony writes its dispatch acknowledgement can it find runnable tasks in Notion and run agents in isolated workspaces. Repeated `start` reuses only a compatible acknowledged running runtime; use `npm run stop` before replacing a live incompatible runtime. Stopping never stops the external `chatgpt-shot` Service.
 
-`operator/project.json` may include `workspace_files`, an optional array of absolute host-local regular-file paths. Each configured file is copied by basename to the root of a newly created workspace after the repository clone and before dependency bootstrap; for example `/home/user/leesh-loop/.env` becomes `<workspace>/.env`. Empty or omitted arrays preserve the usual behavior. Relative, missing, non-regular, and duplicate-basename sources reject Operator startup. Existing workspace destinations are never overwritten. The setting is part of runtime compatibility, but it is only applied for new workspaces: continuations preserve their existing files and do not apply a later configuration change.
+`operator/project.json` may include `workspace_files`, an optional array of regular-file paths. Paths may be absolute, relative to the Project file, or start with `~` for the current user's home directory. Each configured file is copied by basename to the root of a newly created workspace after the repository clone and before dependency bootstrap; for example, `../.env` becomes `<workspace>/.env`. Empty or omitted arrays preserve the usual behavior. Missing, non-regular, and duplicate-basename sources reject Operator startup. Existing workspace destinations are never overwritten. The setting is part of runtime compatibility, but it is only applied for new workspaces: continuations preserve their existing files and do not apply a later configuration change.
 
 Configured base initialization/readback always runs, and the normal readiness evidence records the
 directly read-back `github_base_commit`. The same repository and branch values are passed to Symphony as
@@ -113,19 +113,16 @@ Agents work against the target repository according to its `WORKFLOW.md`, then w
 
 ## Production E2E harness
 
-The production E2E harness lives under [`operator/e2e`](operator/e2e). Its local Project
-configuration is Git-ignored. Before the first run, copy the tracked example:
-
-```sh
-cp operator/e2e/project.example.json operator/e2e/project.json
-```
-
-Then run `npm run e2e` from the repository root in a credentialed host shell.
+The production E2E harness lives under [`operator/e2e`](operator/e2e). Its tracked
+[`project.json`](operator/e2e/project.json) uses paths relative to that directory, so no
+machine-specific home path is needed. Run `npm run e2e` from the repository root in a
+credentialed host shell.
 The E2E CLI reads `NOTION_TOKEN` from its process environment or the repository root `.env`, and
 uses the normal GitHub CLI authentication. The token stays in the host-side E2E and Operator
 processes; Symphony removes tracker secrets from the Codex worker process and the E2E harness does
-not copy `.env` into the nested workspace. The example carries the dedicated Notion database
-binding, seed source ref, and Codex selections. The harness resolves the repository-owned E2E
+not copy `.env` into the nested workspace. The E2E database URL comes from
+`LEESH_LOOP_E2E_NOTION_DATABASE_URL`; the Project file carries the seed source ref and Codex
+selections. The harness resolves the repository-owned E2E
 workflow, creates an opaque run-scoped base and a nested run-local Symphony workspace inside the
 current checkout, and uses the existing Publisher → `leesh-loop.mjs start` → Operator → Symphony
 production path. It does not introduce a separate E2E runtime or Symphony launcher, and stores
