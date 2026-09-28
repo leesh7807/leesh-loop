@@ -256,6 +256,48 @@ export class NotionClient {
     return this.request("POST", "/pages", { parent: { type: "data_source_id", data_source_id: dataSource }, properties });
   }
 
+  async validateTaskReferences(dataSource: string, pageIds: string[]): Promise<void> {
+    for (const pageId of pageIds) {
+      const page = await this.request("GET", `/pages/${encodeURIComponent(pageId)}`);
+      if (page?.id !== pageId || page?.parent?.type !== "data_source_id" || page.parent.data_source_id !== dataSource) {
+        throw new PublicationError("Blocked By target is not a task in the canonical task source");
+      }
+    }
+  }
+
+  async taskBlockerIds(pageId: string, dataSource: string, propertyName: string): Promise<string[]> {
+    const page = await this.request("GET", `/pages/${encodeURIComponent(pageId)}`);
+    if (page?.parent?.type !== "data_source_id" || page.parent.data_source_id !== dataSource) {
+      throw new PublicationError("pending task is outside the expected task data source");
+    }
+    const property = page.properties?.[propertyName];
+    const ids = relationIds(property);
+    if (ids === null) throw new PublicationError(`provider/API failure: task relation ${propertyName} was malformed`);
+    if (property.has_more !== true) return [...new Set(ids)];
+    if (typeof property.id !== "string") throw new PublicationError(`provider/API failure: task relation ${propertyName} omitted its pagination identity`);
+
+    let cursor: string | undefined;
+    do {
+      const suffix = cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : "";
+      const result = await this.request("GET", `/pages/${encodeURIComponent(pageId)}/properties/${encodeURIComponent(property.id)}?page_size=100${suffix}`);
+      if (!Array.isArray(result?.results) || typeof result.has_more !== "boolean") throw new PublicationError(`provider/API failure: paginated task relation ${propertyName} was malformed`);
+      for (const item of result.results) {
+        const id = item?.relation?.id ?? item?.id;
+        if (typeof id !== "string") throw new PublicationError(`provider/API failure: task relation ${propertyName} contained a malformed page`);
+        ids.push(id);
+      }
+      if (result.has_more && typeof result.next_cursor !== "string") throw new PublicationError(`provider/API failure: paginated task relation ${propertyName} omitted next_cursor`);
+      cursor = result.has_more ? result.next_cursor : undefined;
+    } while (cursor);
+    return [...new Set(ids)];
+  }
+
+  async setTaskBlockers(pageId: string, propertyName: string, blockerIds: string[]): Promise<void> {
+    await this.request("PATCH", `/pages/${encodeURIComponent(pageId)}`, {
+      properties: { [propertyName]: { relation: blockerIds.map(id => ({ id })) } }
+    });
+  }
+
   private async createPlanPage(dataSource: string, identifier: string, title: string): Promise<string> {
     const page = await this.request("POST", "/pages", {
       parent: { type: "data_source_id", data_source_id: dataSource },

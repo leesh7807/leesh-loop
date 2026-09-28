@@ -18,8 +18,10 @@ class PublicationFake extends NotionClient {
   calls: { method: string; path: string; body?: any }[] = [];
   nextTask = 1;
   nextPlan = 1;
+  createdTaskIds: string[] = [];
   failNextLock = false;
   failNextRelation = false;
+  failNextBlockerRelation = false;
   mutateTaskIdentifierAfterRelation = false;
   normalizeAppendedPlanLineEndings = false;
 
@@ -36,6 +38,28 @@ class PublicationFake extends NotionClient {
     return id;
   }
 
+  addBlockerPage(id: string, title: string, state = "Backlog"): string {
+    const page = {
+      id,
+      url: `https://notion.so/${id}`,
+      parent: { type: "data_source_id", data_source_id: "task-source" },
+      properties: {
+        Identifier: { type: "rich_text", rich_text: [{ type: "text", text: { content: id.toUpperCase() } }] },
+        Title: { type: "title", title: [{ type: "text", text: { content: title } }] },
+        State: { type: "select", select: { name: state } },
+        Priority: { type: "number", number: 3 },
+        Labels: { type: "multi_select", multi_select: [] },
+        "Blocked By": { type: "relation", relation: [] },
+        Plan: { type: "relation", relation: [] }
+      },
+      is_locked: false,
+      children: []
+    };
+    this.pages.set(id, page);
+    this.sources.get("task-source")?.pages.set(id, page);
+    return id;
+  }
+
   async request(method: string, path: string, body?: any): Promise<any> {
     this.calls.push({ method, path, body });
     if (method === "PATCH" && path.startsWith("/pages/plan-") && body?.is_locked === true && this.failNextLock) {
@@ -45,6 +69,10 @@ class PublicationFake extends NotionClient {
     if (method === "PATCH" && body?.properties?.[PLAN_PROPERTY] && this.failNextRelation) {
       this.failNextRelation = false;
       throw new PublicationError("injected task relation failure");
+    }
+    if (method === "PATCH" && body?.properties?.[DEFAULT_POLICY.blockedBy] && this.failNextBlockerRelation) {
+      this.failNextBlockerRelation = false;
+      throw new PublicationError("injected Blocked By relation failure");
     }
     if (method === "PATCH" && path.startsWith("/pages/") && body?.properties?.[PLAN_PROPERTY] && this.mutateTaskIdentifierAfterRelation) {
       this.mutateTaskIdentifierAfterRelation = false;
@@ -85,6 +113,7 @@ class PublicationFake extends NotionClient {
       const page = { id, url: `https://notion.so/${id}`, parent: { type: "data_source_id", data_source_id: sourceId }, properties, is_locked: false, children: [] };
       this.pages.set(id, page);
       source.pages.set(id, page);
+      if (sourceId === "task-source") this.createdTaskIds.push(id);
       return page;
     }
     const pageMatch = path.match(/^\/pages\/([^/]+)$/);
@@ -113,7 +142,7 @@ class PublicationFake extends NotionClient {
   }
 
   taskPage(): any {
-    return [...this.sources.get("task-source")!.pages.values()][0];
+    return this.pages.get(this.createdTaskIds[0]);
   }
 
   planPages(): any[] {
@@ -142,9 +171,57 @@ test("normal publisher entry point creates the two-source canonical representati
   assert.deepEqual(planPage.children.map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "# Ship it\naccepted plan");
   assert.deepEqual(task.children, []);
   assert.equal(task.properties.State.select.name, PUBLISHER_READY_STATE);
+  assert.deepEqual(task.properties[DEFAULT_POLICY.blockedBy].relation, []);
+  assert.equal(client.calls.some(call => call.method === "PATCH" && call.path === `/pages/${task.id}` && call.body?.properties?.[DEFAULT_POLICY.blockedBy]), false);
   assert.equal(client.calls.some((call) => call.method === "POST" && call.path === "/pages" && call.body.parent.type === "page_id"), false);
   assert.ok(client.calls.findIndex((call) => call.method === "PATCH" && call.path === `/pages/${planPage.id}` && call.body.is_locked === true) < client.calls.findIndex((call) => call.method === "PATCH" && call.path === `/pages/${task.id}` && call.body.properties?.[PLAN_PROPERTY]));
   assert.ok(client.calls.findIndex((call) => call.path === `/pages/${task.id}` && call.body?.properties?.State) > client.calls.findIndex((call) => call.path === `/pages/${task.id}` && call.body?.properties?.[PLAN_PROPERTY]));
+});
+
+test("publication validates and records multiple Blocked By tasks before final State", async () => {
+  const { plan, config } = await inputs("# Multiple blockers\naccepted");
+  const client = new PublicationFake();
+  await client.ensureDatabase("fake-database", DEFAULT_POLICY);
+  const blockers = [client.addBlockerPage("blocker-one", "First blocker"), client.addBlockerPage("blocker-two", "Second blocker", "In Progress")];
+
+  await publishPlanFile(plan, config, DATABASE_URL, client, undefined, blockers);
+
+  const task = client.taskPage();
+  assert.deepEqual(task.properties[DEFAULT_POLICY.blockedBy].relation, blockers.map(id => ({ id })));
+  const relationWrite = client.calls.findIndex(call => call.method === "PATCH" && call.path === `/pages/${task.id}` && call.body?.properties?.[DEFAULT_POLICY.blockedBy]);
+  const finalStateWrite = client.calls.findIndex(call => call.method === "PATCH" && call.path === `/pages/${task.id}` && call.body?.properties?.State);
+  assert.ok(relationWrite >= 0);
+  assert.ok(relationWrite < finalStateWrite);
+  assert.equal(task.properties.State.select.name, PUBLISHER_READY_STATE);
+});
+
+test("requested blockers must be real tasks in the canonical task source", async () => {
+  const { plan, config } = await inputs("# Reject non-task blocker");
+  const client = new PublicationFake();
+  await client.ensureDatabase("fake-database", DEFAULT_POLICY);
+  const planPageId = client.addPlanPage("PLAN-OTHER");
+
+  await assert.rejects(publishPlanFile(plan, config, DATABASE_URL, client, undefined, [planPageId]), /not a task in the canonical task source/);
+  assert.equal(client.createdTaskIds.length, 0);
+});
+
+test("Publisher Pending recovery keeps blocker context persisted on the pending task", async () => {
+  const { plan, config } = await inputs("# Recover Blocked By\naccepted");
+  const client = new PublicationFake();
+  await client.ensureDatabase("fake-database", DEFAULT_POLICY);
+  const blockerId = client.addBlockerPage("blocker-retry", "Retry blocker");
+  client.failNextBlockerRelation = true;
+
+  await assert.rejects(publishPlanFile(plan, config, DATABASE_URL, client, undefined, [blockerId]), /Blocked By relation failure/);
+  const task = client.taskPage();
+  assert.equal(task.properties.State.select.name, PUBLISHER_PENDING_STATE);
+  assert.deepEqual(task.properties[DEFAULT_POLICY.blockedBy].relation, [{ id: blockerId }]);
+
+  await publishPlanFile(plan, config, DATABASE_URL, client);
+
+  assert.equal(client.taskPage().id, task.id);
+  assert.equal(client.taskPage().properties.State.select.name, PUBLISHER_READY_STATE);
+  assert.deepEqual(client.taskPage().properties[DEFAULT_POLICY.blockedBy].relation, [{ id: blockerId }]);
 });
 
 test("publisher can select Backlog without changing canonical publication", async () => {

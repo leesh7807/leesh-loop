@@ -3,6 +3,7 @@ import { NotionClient } from "./notion.js";
 
 export type BlockerSummary = { title: string; state: string; url: string };
 export type TaskSummary = {
+  taskId: string;
   title: string;
   state: string;
   blockedBy: BlockerSummary[];
@@ -136,6 +137,7 @@ export class NotionTaskReader {
       const labels = row.properties?.[this.policy.labels];
       const identifier = row.properties?.[this.policy.identifier];
       result.push({
+        taskId: row.id,
         title,
         state: stateOf(row, this.policy.state),
         blockedBy,

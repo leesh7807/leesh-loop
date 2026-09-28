@@ -50,6 +50,7 @@ test("task reader follows Notion cursors and only excludes Cancelled and Publish
   const tasks = await reader.listTasks();
 
   assert.equal(tasks.length, 100);
+  assert.equal(tasks[0].taskId, "task-1");
   assert.equal(tasks.some(item => item.state === "Cancelled" || item.state === "Publisher Pending"), false);
   assert.equal(tasks.some(item => item.state === "Human Review"), true);
   assert.equal(tasks.some(item => item.state === "Merging"), true);
