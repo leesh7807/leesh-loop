@@ -74,17 +74,41 @@
               "child_process_state": "dead"
             }
           }
+        },
+        {
+          "at": "2026-09-29T14:22:59.445Z",
+          "attempt_id": "7d1354e6-a512-48ba-8325-4d1d75fbd62d",
+          "result": "still unavailable",
+          "evidence": {
+            "reason": "previous E2E run or child runtime is active or unverified",
+            "lifecycle": {
+              "lifecycle_status": "active",
+              "run_process_state": "unknown",
+              "child_runtime_status": "not_started",
+              "child_process_state": "dead"
+            }
+          }
         }
       ]
     },
     "last_transition": {
-      "type": "recovery_started",
-      "at": "2026-09-29T14:22:50.490Z",
+      "type": "recovery_attempt_failed",
+      "at": "2026-09-29T14:22:59.445Z",
       "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
-      "recovery_attempt_id": "7d1354e6-a512-48ba-8325-4d1d75fbd62d"
+      "recovery_attempt_id": "7d1354e6-a512-48ba-8325-4d1d75fbd62d",
+      "result": "still unavailable",
+      "evidence": {
+        "reason": "previous E2E run or child runtime is active or unverified",
+        "lifecycle": {
+          "lifecycle_status": "active",
+          "run_process_state": "unknown",
+          "child_runtime_status": "not_started",
+          "child_process_state": "dead"
+        }
+      }
     }
   },
-  "event_sequence": 7,
-  "previous_event_sha": "438dded8e864d0133093912a2f207d9a030c35c3",
-  "recorded_at": "2026-09-29T14:22:52.836Z"
+  "event_sequence": 8,
+  "previous_event_sha": "01f9beee8911c1f6e9f6be548f31edcbbfe26441",
+  "recorded_at": "2026-09-29T14:23:02.079Z"
 }
