@@ -5,120 +5,283 @@
     "schema_version": 1,
     "kind": "database_reservation",
     "database_id": "3e08a265-8625-805c-ad23-fe1137be4a1e",
-    "status": "unavailable",
-    "reservation": {
-      "run_id": "6e7752ed-37d1-49c8-bfbb-a6fe3396cd3e",
-      "acquired_at": "2026-09-29T13:38:56.530Z",
-      "origin": "worker-originated",
-      "run_process": {
-        "pid": 13,
-        "process_start_ticks": "2773872",
-        "boot_id": "43f4e705-39f8-4dee-b528-e3c113adbd88",
-        "host": "lees"
-      },
-      "outer_execution_provenance": {
-        "operator_runtime_id": "e0dc553a-0c05-40a7-a8ee-35a7a478c536",
-        "issue_identifier": null,
-        "execution_id": null,
-        "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9"
-      },
-      "run_lifecycle": "active",
-      "child_runtime": {
-        "status": "not_started"
-      }
-    },
-    "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
-    "unavailable": {
-      "marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
-      "at": "2026-09-29T13:39:03.784Z",
-      "reason": "database-specific admission found task residue",
-      "evidence": {
-        "tasks": [
-          {
-            "id": "3ea8a265-8625-81e2-b388-e9dff586d114",
-            "identifier": "PLAN-2C2488942CD2",
-            "state": "Ready"
-          }
-        ],
-        "recovery_pass": {
-          "database_id": "3e08a265-8625-805c-ad23-fe1137be4a1e",
-          "status": "available",
-          "result": "available"
-        }
-      },
-      "recovery_attempts": [
-        {
-          "at": "2026-09-29T13:52:43.610Z",
-          "attempt_id": "35ccc053-aed2-40cd-bdd5-be06d11a4582",
-          "result": "still unavailable",
-          "evidence": {
-            "reason": "previous E2E run or child runtime is active or unverified",
-            "lifecycle": {
-              "lifecycle_status": "active",
-              "run_process_state": "unknown",
-              "child_runtime_status": "not_started",
-              "child_process_state": "dead"
-            }
-          }
-        },
-        {
-          "at": "2026-09-29T14:04:00.127Z",
-          "attempt_id": "c4eb1c5e-5b16-41e3-8c7a-6276b5948ca8",
-          "result": "still unavailable",
-          "evidence": {
-            "reason": "previous E2E run or child runtime is active or unverified",
-            "lifecycle": {
-              "lifecycle_status": "active",
-              "run_process_state": "unknown",
-              "child_runtime_status": "not_started",
-              "child_process_state": "dead"
-            }
-          }
-        },
-        {
-          "at": "2026-09-29T14:22:59.445Z",
-          "attempt_id": "7d1354e6-a512-48ba-8325-4d1d75fbd62d",
-          "result": "still unavailable",
-          "evidence": {
-            "reason": "previous E2E run or child runtime is active or unverified",
-            "lifecycle": {
-              "lifecycle_status": "active",
-              "run_process_state": "unknown",
-              "child_runtime_status": "not_started",
-              "child_process_state": "dead"
-            }
-          }
-        },
-        {
-          "at": "2026-09-29T14:29:50.410Z",
-          "attempt_id": "3582f61f-812c-4de9-87aa-e8d60bf552bf",
-          "result": "still unavailable",
-          "evidence": {
-            "stable_database_id": "3e08a265-8625-805c-ad23-fe1137be4a1e",
-            "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
-            "error": "Notion GET /blocks/3e38a265-8625-81e5-9c31-cdb7a6655c92/children?page_size=100 failed with HTTP 429: {\"object\":\"error\",\"status\":429,\"code\":\"rate_limited\",\"message\":\"You have been rate limited. Please try again later.\",\"additional_data\":{\"rate_limit_reason\":\"public_api_request_rate_limit\",\"retry_after\":\"30\"},\"request_id\":\"bcf1164d-4e14-4cd8-b588-a07ed6ae39bf\"}"
-          }
-        },
-        {
-          "at": "2026-09-29T14:42:05.837Z",
-          "attempt_id": "ed4178ee-f4b7-4baa-9bac-adcab47aed3e",
-          "result": "still unavailable",
-          "evidence": {
-            "stable_database_id": "3e08a265-8625-805c-ad23-fe1137be4a1e",
-            "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
-            "error": "Notion GET /blocks/3e38a265-8625-812f-b3b3-d0f82a7ebd17/children?page_size=100 rate-limit retry aborted: The operation was aborted due to timeout"
-          }
-        }
-      ]
-    },
+    "status": "available",
+    "reservation": null,
+    "recovery_marker": null,
+    "unavailable": null,
     "last_transition": {
-      "type": "recovery_started",
-      "at": "2026-09-29T18:50:07.890Z",
+      "type": "unavailable_to_available",
+      "at": "2026-09-29T18:51:03.098Z",
       "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
-      "recovery_attempt_id": "dc935a20-ab02-47bb-b385-12ff4d23eba3"
+      "recovery_attempt_id": "dc935a20-ab02-47bb-b385-12ff4d23eba3",
+      "result": "recovered",
+      "evidence": {
+        "stable_database_id": "3e08a265-8625-805c-ad23-fe1137be4a1e",
+        "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
+        "run_id": "6e7752ed-37d1-49c8-bfbb-a6fe3396cd3e",
+        "child_runtime_id": null,
+        "lifecycle": "run and child runtime are not active; process identity readback completed",
+        "cleanup": {
+          "listed_task_count": 50,
+          "cleaned": [],
+          "preserved": [
+            {
+              "id": "3ea8a265-8625-8127-83ec-d2ff7c7fcfe0",
+              "identifier": "PLAN-8F7D86D00B21",
+              "state": "Done"
+            },
+            {
+              "id": "3ea8a265-8625-816d-91bd-c8b14abe6b6a",
+              "identifier": "PLAN-CE00242709F5",
+              "state": "Done"
+            },
+            {
+              "id": "3ea8a265-8625-810d-bc48-d08adc80c92a",
+              "identifier": "PLAN-6C11B9245E2D",
+              "state": "Done"
+            },
+            {
+              "id": "3ea8a265-8625-81d2-befe-def8c4e9a12e",
+              "identifier": "PLAN-BC99332DC905",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3ea8a265-8625-819c-ba59-e5545d1c7e3c",
+              "identifier": "PLAN-064BF1A29614",
+              "state": "Done"
+            },
+            {
+              "id": "3ea8a265-8625-812c-b16f-e69b1fcb5d33",
+              "identifier": "PLAN-021995E8875C",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3ea8a265-8625-81e2-b388-e9dff586d114",
+              "identifier": "PLAN-2C2488942CD2",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3ea8a265-8625-81a7-84a6-da6bd1b4004e",
+              "identifier": "PLAN-520DDCDF0781",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3ea8a265-8625-812e-b292-eddaad796913",
+              "identifier": "PLAN-96552EF480EA",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3ea8a265-8625-815a-9956-ca6e05af5951",
+              "identifier": "PLAN-5380B49EAF6D",
+              "state": "Done"
+            },
+            {
+              "id": "3ea8a265-8625-81e9-9196-c63bc9407817",
+              "identifier": "PLAN-0F27C97280B1",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e98a265-8625-819b-a909-f1abe4a80f9f",
+              "identifier": "PLAN-4B2F6957318A",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e98a265-8625-8172-83ba-d16a517ef16f",
+              "identifier": "PLAN-78373636F1B7",
+              "state": "Done"
+            },
+            {
+              "id": "3e88a265-8625-8151-b3f5-ec3d0cba61d4",
+              "identifier": "PLAN-2DE5F4B1AF96",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e88a265-8625-8135-9116-d1400bcf43b7",
+              "identifier": "PLAN-6F72B5BA1635",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e88a265-8625-81be-9854-e4c2f2c4686a",
+              "identifier": "PLAN-0FDFA87C2FFF",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e88a265-8625-815c-b0de-e4bb0c39eb94",
+              "identifier": "PLAN-269055136788",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e88a265-8625-81ff-bb63-ea6e9639cfda",
+              "identifier": "PLAN-A3A5A026A2F0",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e88a265-8625-815f-880e-fe02da739074",
+              "identifier": "PLAN-9B40ED663D70",
+              "state": "Done"
+            },
+            {
+              "id": "3e88a265-8625-8140-a8f1-fce7ba41a535",
+              "identifier": "PLAN-4DDD954ADB6C",
+              "state": "Done"
+            },
+            {
+              "id": "3e88a265-8625-818e-a265-d4feb91cd62f",
+              "identifier": "PLAN-37C66AABA088",
+              "state": "Done"
+            },
+            {
+              "id": "3e88a265-8625-81bf-946e-e782aa804186",
+              "identifier": "PLAN-797087C87AB5",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e78a265-8625-813d-848b-e435272bb2ad",
+              "identifier": "PLAN-B1C37F1F3DD4",
+              "state": "Done"
+            },
+            {
+              "id": "3e68a265-8625-81e6-b922-c52571f6e059",
+              "identifier": "PLAN-EAB98C119786",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e68a265-8625-8153-ad02-db1d475a27d4",
+              "identifier": "PLAN-47A9C0B08A43",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e68a265-8625-81a1-a0cb-f4d68ee406ae",
+              "identifier": "PLAN-957E53CA811B",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e48a265-8625-81a0-a0d5-fd0319f70305",
+              "identifier": "PLAN-0DB11DDF12CF",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e48a265-8625-81bc-88b2-fd66e2b2707a",
+              "identifier": "PLAN-F997EA0E67A6",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e48a265-8625-81fb-ba5a-f41e37e632c9",
+              "identifier": "PLAN-891DA6A7E5EC",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e38a265-8625-8109-ab67-d88f40d500c3",
+              "identifier": "PLAN-214A92937E7A",
+              "state": "Done"
+            },
+            {
+              "id": "3e38a265-8625-81cd-909a-d0aaca8a54bc",
+              "identifier": "PLAN-54E35864DC20",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e38a265-8625-8148-a171-c15f8eeb460d",
+              "identifier": "PLAN-99FE7A12D5E8",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e38a265-8625-81b7-b538-e61692cab332",
+              "identifier": "PLAN-8D528A6C7A28",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e38a265-8625-8181-9f3c-e61315af48e3",
+              "identifier": "PLAN-6566C5F21968",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e38a265-8625-81e3-a9c9-c7381c24b0f9",
+              "identifier": "PLAN-0F317F70B8CD",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e38a265-8625-81b1-be2e-cce1c5b3fd3a",
+              "identifier": "PLAN-2809B0EB1F33",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e28a265-8625-817f-8c05-eeb87bdacfe1",
+              "identifier": "PLAN-CA6B5A79FB6F",
+              "state": "Done"
+            },
+            {
+              "id": "3e18a265-8625-8154-8c08-c1b0e8dab409",
+              "identifier": "PLAN-845433D8FB22",
+              "state": "Done"
+            },
+            {
+              "id": "3e18a265-8625-81c3-862d-d0cf6ac1ed2b",
+              "identifier": "PLAN-DCA534E507EE",
+              "state": "Done"
+            },
+            {
+              "id": "3e18a265-8625-812e-b8bb-cf10582255d0",
+              "identifier": "PLAN-74650B73EE08",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e18a265-8625-8132-ad70-e4367d307cbf",
+              "identifier": "PLAN-E2662AEC73F8",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e18a265-8625-8148-b501-c4ffd88fed06",
+              "identifier": "PLAN-15DDD07F39B7",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e18a265-8625-81b1-94cd-fa784c9a2620",
+              "identifier": "TASK-F4776B7D-F913-4D5A-9EA2-EC06C651F202",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e18a265-8625-819c-bda4-d796ac148172",
+              "identifier": "TASK-6BE86279-B1BF-44CF-98C7-BCF144DD45A0",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e18a265-8625-81ff-a572-f48b58e31db0",
+              "identifier": "PLAN-0AF1A7EC8C8A",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e08a265-8625-819f-b4c5-c3442cec8d26",
+              "identifier": "PLAN-AF88BCFBC657",
+              "state": "Done"
+            },
+            {
+              "id": "3e08a265-8625-81dc-98ef-d7d5409ecb36",
+              "identifier": "PLAN-24406B469F47",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e08a265-8625-81b5-9aea-fbe2401934b0",
+              "identifier": "PLAN-F305ECA46B37",
+              "state": "Done"
+            },
+            {
+              "id": "3e08a265-8625-8103-8311-d18230f30582",
+              "identifier": "PLAN-83314D35D539",
+              "state": "Cancelled"
+            },
+            {
+              "id": "3e08a265-8625-816a-9042-f6de82d7475c",
+              "identifier": "PLAN-ECBF23A0F3F8",
+              "state": "Cancelled"
+            }
+          ],
+          "readback_complete": true
+        }
+      }
     }
   },
-  "event_sequence": 13,
-  "previous_event_sha": "2e7a8ba48a8672253ef654ea11beb992277e4e22",
-  "recorded_at": "2026-09-29T18:50:10.212Z"
+  "event_sequence": 14,
+  "previous_event_sha": "678634d17e7114a93c0390a5cd643d92aa568234",
+  "recorded_at": "2026-09-29T18:51:05.416Z"
 }
