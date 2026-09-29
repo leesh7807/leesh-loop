@@ -5,47 +5,34 @@
     "schema_version": 1,
     "kind": "database_reservation",
     "database_id": "3ea8a265-8625-8047-81e0-ead9c231fc10",
-    "status": "available",
-    "reservation": null,
+    "status": "in use",
+    "reservation": {
+      "run_id": "900ec8d2-202f-4ae5-ac4c-f361d5c9d215",
+      "acquired_at": "2026-09-29T14:43:18.411Z",
+      "origin": "direct",
+      "run_process": {
+        "pid": 24,
+        "process_start_ticks": "3147982",
+        "boot_id": "43f4e705-39f8-4dee-b528-e3c113adbd88",
+        "pid_namespace": "pid:[4026532926]",
+        "host": "lees"
+      },
+      "outer_execution_provenance": null,
+      "run_lifecycle": "active",
+      "child_runtime": {
+        "status": "not_started"
+      }
+    },
     "recovery_marker": null,
     "unavailable": null,
     "last_transition": {
-      "type": "unavailable_to_available",
-      "at": "2026-09-29T14:42:43.179Z",
-      "recovery_marker": "330155e0-f412-4c5f-bf9d-093006a6e00c",
-      "recovery_attempt_id": "4ea5b332-64b7-4315-85a1-da0389dedb7f",
-      "result": "recovered",
-      "evidence": {
-        "stable_database_id": "3ea8a265-8625-8047-81e0-ead9c231fc10",
-        "recovery_marker": "330155e0-f412-4c5f-bf9d-093006a6e00c",
-        "run_id": "a7062a84-1960-4c5a-b9d3-863cdd154089",
-        "child_runtime_id": "adbbcfe9-289d-4850-ae94-8a90f9bb090a",
-        "lifecycle": "run and child runtime are not active; process identity readback completed",
-        "cleanup": {
-          "listed_task_count": 2,
-          "cleaned": [
-            {
-              "id": "3ea8a265-8625-8136-b261-dcfbb0ee1585",
-              "identifier": "PLAN-E9C256AE9348",
-              "previous_state": "Merging",
-              "state": "Cancelled",
-              "provenance": "[E2E reconciliation]\nprevious_state: Merging\naction: stale task cancelled by E2E database recovery\ncleanup_time: 2026-09-29T14:34:51.192Z\nrecovery_identity: 330155e0-f412-4c5f-bf9d-093006a6e00c\nprevious_run_id: a7062a84-1960-4c5a-b9d3-863cdd154089\nprevious_child_runtime_id: adbbcfe9-289d-4850-ae94-8a90f9bb090a",
-              "verified_at": "2026-09-29T14:42:40.166Z"
-            }
-          ],
-          "preserved": [
-            {
-              "id": "3ea8a265-8625-8121-aa3e-c59fdc87b815",
-              "identifier": "PLAN-604DA4BEC2EE",
-              "state": "Cancelled"
-            }
-          ],
-          "readback_complete": true
-        }
-      }
+      "type": "available_to_in_use",
+      "at": "2026-09-29T14:43:18.411Z",
+      "run_id": "900ec8d2-202f-4ae5-ac4c-f361d5c9d215",
+      "origin": "direct"
     }
   },
-  "event_sequence": 20,
-  "previous_event_sha": "ed618c71137a0118aa0c05fc5105cd99fde7007f",
-  "recorded_at": "2026-09-29T14:42:45.568Z"
+  "event_sequence": 21,
+  "previous_event_sha": "2d05d8faabc0cd19fbc29871f6899dc4742196dc",
+  "recorded_at": "2026-09-29T14:43:20.685Z"
 }
