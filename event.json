@@ -62,27 +62,13 @@
       }
     },
     "last_transition": {
-      "type": "in_use_to_unavailable",
-      "at": "2026-09-29T14:34:51.192Z",
-      "run_id": "a7062a84-1960-4c5a-b9d3-863cdd154089",
+      "type": "recovery_started",
+      "at": "2026-09-29T14:42:25.865Z",
       "recovery_marker": "330155e0-f412-4c5f-bf9d-093006a6e00c",
-      "reason": "current E2E run finalization or required cleanup did not complete",
-      "evidence": {
-        "lifecycle_status": "failed",
-        "child_runtime_id": "adbbcfe9-289d-4850-ae94-8a90f9bb090a",
-        "child_runtime_status": "stopped",
-        "finalization_complete": false,
-        "unresolved": [
-          "reread_task_after_runtime_stop"
-        ],
-        "cleanup_unresolved": [
-          "reread_task_after_runtime_stop"
-        ],
-        "ended_at": "2026-09-29T14:34:26.348Z"
-      }
+      "recovery_attempt_id": "4ea5b332-64b7-4315-85a1-da0389dedb7f"
     }
   },
-  "event_sequence": 18,
-  "previous_event_sha": "a95343db30a07e89bcaab7ec531ae8e9933b21b7",
-  "recorded_at": "2026-09-29T14:34:53.656Z"
+  "event_sequence": 19,
+  "previous_event_sha": "8af086e54e9819ee3e8d221420079f7bf431af10",
+  "recorded_at": "2026-09-29T14:42:28.214Z"
 }
