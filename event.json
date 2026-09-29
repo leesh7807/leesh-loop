@@ -19,9 +19,11 @@
       "execution_id": null,
       "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9"
     },
-    "updated_at": "2026-09-29T13:52:28.670Z"
+    "updated_at": "2026-09-29T13:53:13.961Z",
+    "selected_database_id": "3ea8a265-8625-8047-81e0-ead9c231fc10",
+    "database_url": "https://app.notion.com/p/studyleesh/3ea8a2658625804781e0ead9c231fc10?v=d3a8a26586258361bab908ea713fdf9b"
   },
-  "event_sequence": 1,
-  "previous_event_sha": null,
-  "recorded_at": "2026-09-29T13:52:29.205Z"
+  "event_sequence": 2,
+  "previous_event_sha": "8edc6a61190d86acc0b4cad511c4cdf619511c44",
+  "recorded_at": "2026-09-29T13:53:16.141Z"
 }
