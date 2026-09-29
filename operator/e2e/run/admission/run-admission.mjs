@@ -3,6 +3,15 @@ import { ACTIVE_STATES } from '../lifecycle/lifecycle-interpreter.mjs';
 import { addFailure } from '../../model/run-record-store.mjs';
 import { RunDoneVerifier } from '../lifecycle/run-done-verifier.mjs';
 
+function hasVerifiedMergedBaseResidue(record) {
+  const baseBranch = record.binding?.base_branch;
+  const verifiedBaseCommit = record.artifacts?.remote_base_commit;
+  if (!baseBranch || !/^[0-9a-f]{40}$/i.test(verifiedBaseCommit || '')) return false;
+  return (record.evidence?.owned_branch_cleanup?.refs || []).some(ref => ref.branch === baseBranch
+    && ref.status === 'identity_changed'
+    && ref.commit?.toLowerCase() === verifiedBaseCommit.toLowerCase());
+}
+
 export class RunAdmission {
   constructor({ config, catalog, runRecordStore, notionClient, gitClient, operatorClient, runFinalizer, runEvidenceCollector, runCompletionVerifier, runDoneVerifier, runTimingRecorder }) {
     this.config = config;
@@ -30,14 +39,16 @@ export class RunAdmission {
       || (record.timing?.symphony?.start_requested_at && record.cleanup?.runtime_stopped !== true)
       || (record.timing?.symphony?.started_at && record.cleanup?.runtime_stopped !== true)
       || (hasRecordedOwnedBranches(record) && !record.evidence?.owned_branch_cleanup?.checked_at)
-      || (record.evidence?.owned_branch_cleanup?.remaining_refs?.length ?? 0) > 0;
+      || (record.evidence?.owned_branch_cleanup?.remaining_refs?.length ?? 0) > 0
+      || hasVerifiedMergedBaseResidue(record);
     for (const previous of records.filter(needsReconciliation)) {
       await this.reconcileInterruptedRun(previous);
       if (previous.finalization?.complete !== true
         || previous.finalization?.unresolved?.length
         || previous.cleanup?.unresolved?.length
         || (hasRecordedOwnedBranches(previous) && !previous.evidence?.owned_branch_cleanup?.checked_at)
-        || previous.evidence?.owned_branch_cleanup?.remaining_refs?.length) throw new Error(`previous E2E run ${previous.run_id} remains unresolved; refusing a new dispatch`);
+        || previous.evidence?.owned_branch_cleanup?.remaining_refs?.length
+        || hasVerifiedMergedBaseResidue(previous)) throw new Error(`previous E2E run ${previous.run_id} remains unresolved; refusing a new dispatch`);
     }
     for (const previous of records) {
       const workspace = previous.paths?.workspace_root;

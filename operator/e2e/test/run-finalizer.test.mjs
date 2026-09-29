@@ -138,6 +138,40 @@ test('finalization records and blocks admission on a run-owned branch that remai
   assert.equal(result.failures.at(-1).phase, 'finalization');
 });
 
+test('finalization deletes a run-scoped base at its verified post-merge commit', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-merged-base-'));
+  const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
+  const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
+  const record = createRunRecord({ config, runId: 'run-merged-base', workload, paths: createRunPaths(config, 'run-merged-base') });
+  const baseBranch = 'base/run-merged-base';
+  const seedCommit = 'd'.repeat(40);
+  const mergeCommit = 'e'.repeat(40);
+  record.binding.base_branch = baseBranch;
+  record.binding.base_commit = seedCommit;
+  record.artifacts.remote_base_commit = mergeCommit;
+  record.cleanup.runtime_stopped = true;
+  let remoteBase = mergeCommit;
+  const deleteCalls = [];
+  const git = {
+    async readRemoteBranchCommit(branch) { return branch === baseBranch ? remoteBase : null; },
+    async deleteRemoteBranch(branch, { expectedCommit }) {
+      deleteCalls.push({ branch, expectedCommit });
+      assert.equal(branch, baseBranch);
+      remoteBase = null;
+      return { branch, deleted: true, expected_commit: expectedCommit };
+    }
+  };
+  const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { state: 'Done', workpad: '' }, github: { delivery_prs: [] }, symphony: {}, errors: [] }; } };
+  const finalizer = new RunFinalizer({ config, runRecordStore: { async save() {} }, notionClient: {}, operatorClient: {}, gitClient: git, githubClient: {}, runEvidenceCollector: evidence });
+
+  const result = await finalizer.finalizeRun({ record, reason: 'production_done', task: { state: 'Done' }, baseBranch, normalDone: true });
+
+  assert.deepEqual(deleteCalls, [{ branch: baseBranch, expectedCommit: mergeCommit }]);
+  assert.equal(remoteBase, null);
+  assert.equal(result.finalization.complete, true);
+  assert.deepEqual(result.evidence.owned_branch_cleanup.refs.map(ref => [ref.branch, ref.expected_commit, ref.status]), [[baseBranch, mergeCommit, 'absent']]);
+});
+
 test('final absence readback clears a branch deletion failure after the ref was removed', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-absence-retry-'));
   const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };

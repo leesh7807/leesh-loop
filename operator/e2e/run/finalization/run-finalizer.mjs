@@ -185,7 +185,9 @@ export class RunFinalizer {
         return null;
       };
       for (const branch of branches) {
-        const baseBranchCommit = branch === baseBranch ? record.binding?.base_commit : null;
+        const baseBranchCommit = branch === baseBranch
+          ? record.artifacts?.remote_base_commit || record.binding?.base_commit
+          : null;
         const authorizedTarget = mergingTarget(branch);
         const ownedDelivery = latestRecordedDelivery(branch);
         const legacyRefCommit = record.evidence.branch_refs_after?.[`refs/heads/${branch}`];
