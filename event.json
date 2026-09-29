@@ -92,23 +92,13 @@
       ]
     },
     "last_transition": {
-      "type": "recovery_attempt_failed",
-      "at": "2026-09-29T14:22:59.445Z",
+      "type": "recovery_started",
+      "at": "2026-09-29T14:29:09.476Z",
       "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
-      "recovery_attempt_id": "7d1354e6-a512-48ba-8325-4d1d75fbd62d",
-      "result": "still unavailable",
-      "evidence": {
-        "reason": "previous E2E run or child runtime is active or unverified",
-        "lifecycle": {
-          "lifecycle_status": "active",
-          "run_process_state": "unknown",
-          "child_runtime_status": "not_started",
-          "child_process_state": "dead"
-        }
-      }
+      "recovery_attempt_id": "3582f61f-812c-4de9-87aa-e8d60bf552bf"
     }
   },
-  "event_sequence": 8,
-  "previous_event_sha": "01f9beee8911c1f6e9f6be548f31edcbbfe26441",
-  "recorded_at": "2026-09-29T14:23:02.079Z"
+  "event_sequence": 9,
+  "previous_event_sha": "1623d91023be491cb9f0f9b0e88fb99b2a20cf20",
+  "recorded_at": "2026-09-29T14:29:11.733Z"
 }
