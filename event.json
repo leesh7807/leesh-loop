@@ -25,15 +25,17 @@
       },
       "run_lifecycle": "active",
       "child_runtime": {
-        "runtime_id": null,
-        "status": "starting",
-        "state_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/77e09127-94b9-43c8-9156-cc25dca6a9f7/operator-state",
-        "process_identity": null,
-        "requested_at": "2026-09-29T14:05:02.596Z",
-        "ports": {
-          "symphony_port": 40419,
-          "ui_port": 36653
-        }
+        "runtime_id": "145db36e-b2a5-4fe1-8116-5164e4033092",
+        "status": "active",
+        "dashboard": "http://127.0.0.1:40419",
+        "process_identity": {
+          "pid": 1216,
+          "process_start_ticks": "2932307",
+          "boot_id": "43f4e705-39f8-4dee-b528-e3c113adbd88",
+          "pid_namespace": "pid:[4026532928]",
+          "host": "lees"
+        },
+        "state_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/77e09127-94b9-43c8-9156-cc25dca6a9f7/operator-state/runtime.json"
       },
       "base_branch": "base/77e09127-94b9-43c8-9156-cc25dca6a9f7",
       "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/workspaces/77e09127-94b9-43c8-9156-cc25dca6a9f7",
@@ -44,13 +46,13 @@
     "unavailable": null,
     "last_transition": {
       "type": "child_runtime_updated",
-      "at": "2026-09-29T14:05:04.085Z",
+      "at": "2026-09-29T14:05:19.131Z",
       "run_id": "77e09127-94b9-43c8-9156-cc25dca6a9f7",
-      "child_runtime_id": null,
-      "child_runtime_status": "starting"
+      "child_runtime_id": "145db36e-b2a5-4fe1-8116-5164e4033092",
+      "child_runtime_status": "active"
     }
   },
-  "event_sequence": 3,
-  "previous_event_sha": "bb5e97552019811856183f74e2b56ab4ed453549",
-  "recorded_at": "2026-09-29T14:05:06.429Z"
+  "event_sequence": 4,
+  "previous_event_sha": "27f6571387063049771f4fcae34992760b34154c",
+  "recorded_at": "2026-09-29T14:05:21.722Z"
 }
