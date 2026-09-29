@@ -23,7 +23,7 @@
         "execution_id": null,
         "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9"
       },
-      "run_lifecycle": "active",
+      "run_lifecycle": "failed",
       "child_runtime": {
         "runtime_id": "adbbcfe9-289d-4850-ae94-8a90f9bb090a",
         "status": "stopped",
@@ -45,14 +45,24 @@
     "recovery_marker": null,
     "unavailable": null,
     "last_transition": {
-      "type": "child_runtime_updated",
-      "at": "2026-09-29T14:34:27.890Z",
+      "type": "run_lifecycle_updated",
+      "at": "2026-09-29T14:34:35.125Z",
       "run_id": "a7062a84-1960-4c5a-b9d3-863cdd154089",
+      "run_lifecycle": "failed",
+      "lifecycle_status": "failed",
       "child_runtime_id": "adbbcfe9-289d-4850-ae94-8a90f9bb090a",
-      "child_runtime_status": "stopped"
+      "child_runtime_status": "stopped",
+      "finalization_complete": false,
+      "unresolved": [
+        "reread_task_after_runtime_stop"
+      ],
+      "cleanup_unresolved": [
+        "reread_task_after_runtime_stop"
+      ],
+      "ended_at": "2026-09-29T14:34:26.348Z"
     }
   },
-  "event_sequence": 16,
-  "previous_event_sha": "81226608c4b4b1c89c0e8908fe1e40ee4c78c459",
-  "recorded_at": "2026-09-29T14:34:30.100Z"
+  "event_sequence": 17,
+  "previous_event_sha": "b747d311bd8677d34c302897a4cb9a9d5066b353",
+  "recorded_at": "2026-09-29T14:34:37.378Z"
 }
