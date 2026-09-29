@@ -170,134 +170,7 @@ The Operator owns branch bootstrap before dispatch: it validates the configured 
 
 ## Independent `chatgpt-shot` review gate
 
-Treat code review followed by structure review as one delivery-review cycle for the same exact PR and HEAD. A raw `PASS` is not required: each finding must be dispositioned under the existing evidence-based validity rules, with no valid finding left. If an accepted fix changes HEAD, restart the cycle with code review on the new HEAD. Prepare `Human Review` with `reason: review` only after both reviews are complete for the same exact PR and HEAD; if a review cannot complete, use the existing blocker handoff.
-
-After implementation and ordinary repository verification, obtain the current PR URL and `git rev-parse HEAD`, then run `chatgpt-shot submit "<prompt>"`. The command may take up to 3 minutes while waiting for acceptance; let it complete and use an execution timeout longer than 3 minutes. On success, stdout is the Review Job ID, not the review Result.
-
-```text
-PR <PR_URL>의 HEAD <HEAD_SHA>를 코드 리뷰하라.
-
-지정 HEAD의 실제 원문과 diff를 확인한 뒤에만 finding을 확정하라. 영향도와 재현 가능성을 기준으로 실제 결함만 보고하라. 개선 가능성, 스타일, 추측, 더 안전한 설계 제안, 의도된 동작은 finding이 아니다.
-
-Finding은 현재 Accepted Plan 또는 기존 운영 계약이 요구하는 동작을 실제로 도달 가능한 실행 경로에서 위반하는 경우에만 인정한다.
-
-다음은 그 자체로 finding이 아니다.
-
-* 현재 계약보다 더 강한 안전성이나 새로운 불변조건을 요구하는 경우
-* 증거가 완전하지 않지만 실제로 잘못된 동작이 허용된다는 근거는 없는 경우
-* 정상 운영 경로가 만들지 않는 인위적인 상태를 전제로 한 경우
-* 해당 실행이나 구성요소가 소유한다는 근거가 없는 외부 변화까지 방어하려는 경우
-* 드문 실패 가능성을 막기 위해 새로운 영구 상태, 조정 규칙, 소유권 규칙, 진입 차단 조건 또는 생명주기 분기를 추가해야 하지만 그 필요성이 실제 재현 경로로 입증되지 않은 경우
-
-가능한 실패와 현재 구현이 반드시 막아야 하는 실패를 구분하라. 어떤 상태가 이론적으로 가능하다는 이유만으로 운영 계약을 확장하지 마라. 증거 부족과 실제 동작 결함도 구분하라. 관측이나 증명이 불완전한 경우, 그것이 잘못된 동작으로 이어지는 구체적인 경로가 확인될 때만 finding으로 보고하라.
-
-수정이 현재 계약을 넓히거나 상태 공간을 늘려야만 가능한 경우에는 특히 엄격하게 판단하라. 실제 계약 위반이라는 근거가 불충분하면 finding을 만들지 마라.
-
-[Additional review criteria: <criteria explicitly specified by the Accepted Plan>]
-
-각 finding에는 severity, 제목, 파일:줄, 실제 코드 근거, 재현 경로, 영향, 결함인 이유, confidence를 포함하라.
-
-`Why defect`에서는 단순히 위험하거나 더 안전하게 만들 수 있다는 설명이 아니라, 어떤 Accepted Plan 또는 기존 운영 계약을 어떻게 위반하는지 설명하라. 명시적 계약 근거를 찾을 수 없다면 finding으로 확정하지 마라.
-
-모든 결과는 하나의 Markdown 문서로 출력하라.
-
-형식:
-
-# Verdict
-
-PASS | FINDINGS
-
-# Findings
-
-* [severity] 제목
-
-  * Location:
-  * Evidence:
-  * Reproduction:
-  * Impact:
-  * Why defect:
-  * Confidence:
-
-finding이 없으면 `# Findings`는 `None.`으로 출력하라.
-```
-
-The bracketed block is optional. Include it only when the Accepted Plan explicitly specifies additional review criteria. Do not invent or infer criteria; otherwise omit the block.
-
-After submission succeeds, poll `chatgpt-shot jobs <job-id>` every 30 seconds until the Review Job reaches a terminal State.
-
-Before recording the Review Job result, record the exact request binding in the Workpad immediately before its Job ID so lifecycle automation can distinguish a review of the delivered artifact from a stale or different review. Use these ordinary review fields, with no E2E-specific values:
-
-```text
-review target: <PR URL>
-review head: <exact HEAD SHA>
-Job ID: <UUID>
-```
-
-* `pending`: wait 30 seconds and poll the same Job again.
-* `in_progress`: wait 30 seconds and poll the same Job again.
-* `completed`: use the Job's `result` as the independent review Result.
-* `failed`: record the Job Error and current implementation/verification state in the Korean Workpad, move the task to `Human Review` with `reason: blocker`, confirm authoritative readback, and stop.
-
-Do not submit another Review Job for the same review target while the current Job is `pending` or `in_progress`.
-
-Give the request enough Accepted Plan and changed-result context to judge the objective, as well as the PR and HEAD identity. Record each review target, Review Job ID, completed Result, finding, evidence-based acceptance or rejection, fix, post-fix verification, and re-review result in the Korean Workpad. Do not copy the full transcript into the Repository Plan.
-
-Treat findings as review input, not automatic edit commands. Independently validate each finding against the current HEAD and its execution path. Fix only a material actionable finding with concrete evidence and observable impact; rerun affected verification, commit/push, and submit a new Review Job for the new HEAD. Record a rejection reason without editing for findings that are not valid. If a completed Review Job targeted the wrong PR, HEAD, or other review identity, correct the review target and submit a new Review Job. Treat this as a new review request, not as retry or recovery of the completed Job. Repeat until the Result is `PASS`, or all findings are resolved/rejected and no accepted fix produced a new HEAD.
-
-If `chatgpt-shot submit` fails before returning a Job ID, record the failure and current implementation/verification state in the Korean Workpad, move the task to `Human Review` with `reason: blocker`, confirm authoritative readback, and stop.
-
-After the independent code review gate is settled, run one structural review against the same delivered PR and exact HEAD before moving the task to `Human Review`. Use the same `chatgpt-shot` submission, polling, result-recording, and failure-handling contract defined above.
-
-Use this request:
-
-```text
-PR <PR_URL>의 HEAD <HEAD_SHA>를 구조 리뷰하라.
-
-지정 HEAD의 실제 원문을 확인한 뒤에만 finding을 확정하라. Behavior correctness는 별도 리뷰에서 이미 검증되었다고 가정한다. 범위는 지정 HEAD의 PR 변경분과, 그 변경분의 구조적 역할·소유권·의존 관계를 판단하는 데 직접 필요한 surrounding code로 한정한다. 저장소 전체의 기존 구조를 독립적으로 감사하지 마라. 구조가 다르게 설계될 수 있다는 사실, 일반적인 개선 가능성, 스타일 선호, 미래 확장 가능성만으로는 finding을 만들지 마라.
-
-다음 관점에서 현재 구조 때문에 실제로 발생하는 구체적인 변경 비용, 탐색 비용, 책임 중복, 상태 소유권 혼선, 검증 어려움만 보고하라.
-
-* Responsibility separation: 서로 다른 이유로 변하는 책임이 하나의 변경 단위에 결합되어 있는가.
-* Ownership / authority: 하나의 규칙, 결정, 상태에 대한 소유권이나 판단 권한이 둘 이상의 위치에 중복되어 있는가.
-* Change locality: 하나의 개념적 변경을 이해하거나 수정하기 위해 불필요하게 넓은 코드 영역이나 여러 간접 계층을 따라가야 하는가.
-* State / data ownership: mutable state나 핵심 데이터의 생성, 변경, 해석 책임이 여러 위치에 분산되어 있는가.
-* Abstraction quality: abstraction이 관련 정보를 압축하고 경계를 명확히 하는 대신 의미를 숨기거나 불필요한 indirection을 추가하는가.
-* Verification boundary: 하나의 책임이나 규칙을 검증하기 위해 unrelated setup, state, integration context까지 함께 구성해야 하는 구조인가.
-
-각 finding에는 severity, 제목, 파일:줄, 실제 코드 근거, 문제를 드러내는 구체적인 변경 또는 reasoning path, 구조적 비용 또는 위험, 추측성 개선이 아니라 현재 구조의 finding인 이유, confidence를 포함하라.
-
-다음은 finding이 아니다.
-
-* 파일이나 함수가 길다는 사실 자체
-* 코드를 더 나눌 수 있다는 사실
-* 일반적인 SOLID, DRY, clean-code 선호
-* 재사용 가능성
-* 미래 구현체나 확장 가능성만을 근거로 한 abstraction 제안
-* 개인적인 naming 또는 스타일 선호
-* 현재 구조에서 구체적인 비용이 확인되지 않는 개선 제안
-
-모든 결과는 하나의 Markdown 문서로 출력하라.
-
-형식:
-
-# Verdict
-
-PASS | FINDINGS
-
-# Findings
-
-* [severity] 제목
-  * Location:
-  * Evidence:
-  * Reproduction / Reasoning path:
-  * Structural cost:
-  * Why current finding:
-  * Confidence:
-
-finding이 없으면 `# Findings`는 `None.`으로 출력하라.
-```
-
-Structural findings are review input, not automatic edit commands. Validate each finding using the existing evidence-based rules; reject invalid findings with a reason and fix valid, actionable findings within the Accepted Plan. If a fix changes HEAD, rerun affected verification and restart the delivery-review cycle from code review at the new HEAD. If a valid finding cannot be resolved within the Accepted Plan, use the existing blocker handoff. Move to `Human Review` only when every finding is dispositioned and no valid finding remains at the same HEAD as code review. Structural findings are advisory and do not block or qualify a human-selected `Merging` transition.
+Apply the common code and structure review contract in `docs/WORKFLOW_TEMPLATE.md`, including exact PR/HEAD binding, Job polling, failure handoff, finding disposition, and restarting review after a fix changes HEAD. Add review criteria only when the Accepted Plan explicitly specifies them. This workflow keeps repository-specific State, Human Review, Rework, and Merging rules in their sections above.
 
 ## Review and publish a follow-up Plan
 
@@ -321,7 +194,7 @@ Candidate Plan:
 <complete Candidate Plan>
 ```
 
-Reuse the independent review flow above for submission, polling, terminal results, failure handoff, and evidence-based finding disposition; do not add a Plan-specific Job lifecycle or recovery rule. Incorporate only valid findings. If a valid finding materially changes the Candidate Plan, review the revised complete Plan again. Do not publish unless review is complete and no valid finding remains.
+Reuse the independent review flow in `docs/WORKFLOW_TEMPLATE.md` for submission, polling, terminal results, failure handoff, and evidence-based finding disposition; do not add a Plan-specific Job lifecycle or recovery rule. Incorporate only valid findings. If a valid finding materially changes the Candidate Plan, review the revised complete Plan again. Do not publish unless review is complete and no valid finding remains.
 
 Record the Candidate Plan identity, Review Job ID and result, and finding dispositions in ordinary Workpad context. Do not copy the prompt transcript or label a review as targeting a PR or HEAD when none was submitted.
 
