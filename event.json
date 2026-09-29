@@ -5,45 +5,14 @@
     "schema_version": 1,
     "kind": "database_reservation",
     "database_id": "3ea8a265-8625-8047-81e0-ead9c231fc10",
-    "status": "in use",
-    "reservation": {
-      "run_id": "900ec8d2-202f-4ae5-ac4c-f361d5c9d215",
-      "acquired_at": "2026-09-29T14:43:18.411Z",
-      "origin": "direct",
-      "run_process": {
-        "pid": 24,
-        "process_start_ticks": "3147982",
-        "boot_id": "43f4e705-39f8-4dee-b528-e3c113adbd88",
-        "pid_namespace": "pid:[4026532926]",
-        "host": "lees"
-      },
-      "outer_execution_provenance": null,
-      "run_lifecycle": "completed",
-      "child_runtime": {
-        "runtime_id": "79017ce5-e726-428a-9179-c5a6100c7603",
-        "status": "stopped",
-        "dashboard": "http://127.0.0.1:36427",
-        "process_identity": {
-          "pid": 1634,
-          "process_start_ticks": "3165703",
-          "boot_id": "43f4e705-39f8-4dee-b528-e3c113adbd88",
-          "pid_namespace": "pid:[4026532926]",
-          "host": "lees"
-        },
-        "state_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/900ec8d2-202f-4ae5-ac4c-f361d5c9d215/operator-state/runtime.json"
-      },
-      "base_branch": "base/900ec8d2-202f-4ae5-ac4c-f361d5c9d215",
-      "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/workspaces/900ec8d2-202f-4ae5-ac4c-f361d5c9d215",
-      "run_record_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/900ec8d2-202f-4ae5-ac4c-f361d5c9d215/run.json",
-      "workflow_snapshot_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/900ec8d2-202f-4ae5-ac4c-f361d5c9d215/workflow.md"
-    },
+    "status": "available",
+    "reservation": null,
     "recovery_marker": null,
     "unavailable": null,
     "last_transition": {
-      "type": "run_lifecycle_updated",
-      "at": "2026-09-29T15:29:11.980Z",
+      "type": "in_use_to_available",
+      "at": "2026-09-29T15:29:28.375Z",
       "run_id": "900ec8d2-202f-4ae5-ac4c-f361d5c9d215",
-      "run_lifecycle": "completed",
       "lifecycle_status": "completed",
       "child_runtime_id": "79017ce5-e726-428a-9179-c5a6100c7603",
       "child_runtime_status": "stopped",
@@ -53,7 +22,7 @@
       "ended_at": "2026-09-29T15:29:01.430Z"
     }
   },
-  "event_sequence": 26,
-  "previous_event_sha": "02f2fe76471a0758e57de78be70d33c51476f88f",
-  "recorded_at": "2026-09-29T15:29:14.647Z"
+  "event_sequence": 27,
+  "previous_event_sha": "2711b614576c648b5666e256088273adc25e7918",
+  "recorded_at": "2026-09-29T15:29:30.927Z"
 }
