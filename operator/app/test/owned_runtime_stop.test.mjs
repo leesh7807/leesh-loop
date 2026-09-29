@@ -90,6 +90,28 @@ test('conditional runtime stop leaves a replacement runtime and its state untouc
   assert.equal(child.exitCode, null);
 });
 
+test('conditional runtime stop preserves ownership when the recorded PID identity no longer matches', async t => {
+  const { directory, stateDirectory, configPath } = await fixture();
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { child, pid, process_start_ticks } = await startOwnedProcess(t);
+  await mkdir(stateDirectory, { recursive: true });
+  const runtimeState = { runtime_id: 'recorded-run-runtime', pid, process_start_ticks: `${process_start_ticks}-replacement` };
+  const ownershipState = { runtime_id: 'recorded-run-runtime', pid, process_start_ticks: runtimeState.process_start_ticks };
+  await writeFile(join(stateDirectory, 'runtime.json'), JSON.stringify(runtimeState));
+  await writeFile(join(stateDirectory, 'ownership.json'), JSON.stringify(ownershipState));
+
+  const { stdout } = await execFileAsync(process.execPath, [cli, 'stop-owned', configPath, 'recorded-run-runtime'], { timeout: 10_000 });
+
+  assert.deepEqual(JSON.parse(stdout), {
+    stopped: false,
+    process_identity_mismatch: true,
+    expected_runtime_id: 'recorded-run-runtime'
+  });
+  assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'runtime.json'), 'utf8')), runtimeState);
+  assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'ownership.json'), 'utf8')), ownershipState);
+  assert.equal(child.exitCode, null);
+});
+
 test('conditional runtime stop cleans the state only for the matching runtime identity', async t => {
   const { directory, stateDirectory, configPath } = await fixture();
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -149,6 +171,50 @@ test('run-owned stop preserves runtime ownership when dashboard confirmation tim
   assert.equal(result.runtime_unconfirmed, true);
   assert.equal(result.expected_runtime_id, 'recorded-run-runtime');
   assert.ok(result.error);
+  assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'runtime.json'), 'utf8')), runtimeState);
+  assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'ownership.json'), 'utf8')), ownershipState);
+  if (child.exitCode === null && child.signalCode === null) await once(child, 'exit');
+});
+
+test('Operator start reconciliation retains ownership when the recorded runtime still responds', async t => {
+  const { directory, stateDirectory, configPath } = await fixture();
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { child, pid, process_start_ticks } = await startOwnedProcess(t);
+  const dashboard = await runtimeServer(t, 'runtime-to-reconcile');
+  const runtimeState = { status: 'running', runtime_id: 'runtime-to-reconcile', pid, process_start_ticks, effective: { dashboard } };
+  const ownershipState = { runtime_id: runtimeState.runtime_id, pid, process_start_ticks };
+  await mkdir(stateDirectory, { recursive: true });
+  await writeFile(join(stateDirectory, 'runtime.json'), JSON.stringify(runtimeState));
+  await writeFile(join(stateDirectory, 'ownership.json'), JSON.stringify(ownershipState));
+  const env = { ...process.env, LEESH_LOOP_NOTION_DATABASE_URL: 'https://notion.example/database' };
+
+  await assert.rejects(execFileAsync(process.execPath, [cli, 'start', configPath], { env, timeout: 10_000 }), error => {
+    assert.match(error.stderr, /run-owned Symphony runtime runtime-to-reconcile still responds after stop/);
+    return true;
+  });
+
+  assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'runtime.json'), 'utf8')), runtimeState);
+  assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'ownership.json'), 'utf8')), ownershipState);
+  if (child.exitCode === null && child.signalCode === null) await once(child, 'exit');
+});
+
+test('Operator stop retains ownership when the recorded runtime still responds', async t => {
+  const { directory, stateDirectory, configPath } = await fixture();
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { child, pid, process_start_ticks } = await startOwnedProcess(t);
+  const dashboard = await runtimeServer(t, 'runtime-to-stop');
+  const runtimeState = { status: 'running', runtime_id: 'runtime-to-stop', pid, process_start_ticks, effective: { dashboard } };
+  const ownershipState = { runtime_id: runtimeState.runtime_id, pid, process_start_ticks };
+  await mkdir(stateDirectory, { recursive: true });
+  await writeFile(join(stateDirectory, 'runtime.json'), JSON.stringify(runtimeState));
+  await writeFile(join(stateDirectory, 'ownership.json'), JSON.stringify(ownershipState));
+  const env = { ...process.env, LEESH_LOOP_NOTION_DATABASE_URL: 'https://notion.example/database' };
+
+  await assert.rejects(execFileAsync(process.execPath, [cli, 'stop', configPath], { env, timeout: 10_000 }), error => {
+    assert.match(error.stderr, /run-owned Symphony runtime runtime-to-stop still responds after stop/);
+    return true;
+  });
+
   assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'runtime.json'), 'utf8')), runtimeState);
   assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'ownership.json'), 'utf8')), ownershipState);
   if (child.exitCode === null && child.signalCode === null) await once(child, 'exit');
