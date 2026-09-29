@@ -19,7 +19,7 @@ test('chatgpt-shot timing keeps an observation duration when Jobs has no timesta
     notionClient: { async readTask() { return task; } },
     operatorClient: { async readSymphonyRuntimeStatus() { return {}; }, async readSymphonyRuntimeState() { return {}; }, async readSymphonyIssue() { return { running: { started_at: '2026-09-27T10:00:00Z' } }; }, async readSymphonyExecutions() { return productionExecutions; }, async readDispatchedTrackerInput() { return null; } },
     githubClient: { async pullRequestsForBase() { return []; } },
-    gitClient: { async listRemoteBranchRefs() { return {}; } },
+    gitClient: { async listRemoteBranchRefs() { throw new Error('repository-wide refs must not be collected'); } },
     chatgptShotClient: { async inspectReviewJobs() { return { job_id: '123e4567-e89b-42d3-a456-426614174000', terminal_state: 'running', result: null, error: null, observations: [], observed_duration_ms: null }; } }
   });
   const snapshot = await collector.collectSnapshot({ databaseUrl: config.notion_database_url, identifier: task.identifier, dashboard: 'http://127.0.0.1:1', baseBranch: 'base/run-1', workspaceRoot: directory + '/workspaces' });
@@ -29,6 +29,7 @@ test('chatgpt-shot timing keeps an observation duration when Jobs has no timesta
   assert.ok(Number.isFinite(record.timing.chatgpt_shot.observed_duration_ms));
   assert.equal(record.timing.chatgpt_shot.observations.length, 1);
   assert.deepEqual(snapshot.symphony.executions, productionExecutions);
+  assert.equal(Object.hasOwn(snapshot, 'git'), false);
   assert.equal(record.timing.symphony.worker_started_at, undefined);
   assert.equal(record.timing.symphony.observed_duration_ms, undefined);
   assert.equal(record.schema_version, 3);

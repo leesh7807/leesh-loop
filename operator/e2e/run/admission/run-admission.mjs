@@ -1,7 +1,17 @@
 import { RunTimingRecorder, runWithTimeout } from '../run-timing.mjs';
 import { ACTIVE_STATES } from '../lifecycle/lifecycle-interpreter.mjs';
-import { addFailure } from '../../model/run-record-store.mjs';
+import { addFailure, recordFinalizationAction } from '../../model/run-record-store.mjs';
 import { RunDoneVerifier } from '../lifecycle/run-done-verifier.mjs';
+import { readRunOwnedRuntime, recordedRunRuntimeId } from '../run-owned-runtime.mjs';
+
+function hasVerifiedMergedBaseResidue(record) {
+  const baseBranch = record.binding?.base_branch;
+  const verifiedBaseCommit = record.artifacts?.remote_base_commit;
+  if (!baseBranch || !/^[0-9a-f]{40}$/i.test(verifiedBaseCommit || '')) return false;
+  return (record.evidence?.owned_branch_cleanup?.refs || []).some(ref => ref.branch === baseBranch
+    && ref.status === 'identity_changed'
+    && ref.commit?.toLowerCase() === verifiedBaseCommit.toLowerCase());
+}
 
 export class RunAdmission {
   constructor({ config, catalog, runRecordStore, notionClient, gitClient, operatorClient, runFinalizer, runEvidenceCollector, runCompletionVerifier, runDoneVerifier, runTimingRecorder }) {
@@ -19,16 +29,56 @@ export class RunAdmission {
 
   async checkRunAdmission() {
     const records = await this.runRecordStore.listRecords();
+    const hasRecordedOwnedBranches = record => Boolean(record.binding?.base_branch
+      || record.artifacts?.delivery_branch
+      || record.artifacts?.delivery_branches?.length
+      || record.evidence?.branch_isolation?.remaining_run_owned_refs?.length);
     const needsReconciliation = record => record.status !== 'finished'
       || record.finalization?.complete !== true
+      || (record.finalization?.unresolved?.length ?? 0) > 0
       || (record.cleanup?.unresolved?.length ?? 0) > 0
       || (record.timing?.symphony?.start_requested_at && record.cleanup?.runtime_stopped !== true)
       || (record.timing?.symphony?.started_at && record.cleanup?.runtime_stopped !== true)
-      || (record.evidence?.branch_isolation?.remaining_run_owned_refs?.length ?? 0) > 0
-      || (record.evidence?.branch_isolation?.unresolved_new_refs?.length ?? 0) > 0;
+      || (hasRecordedOwnedBranches(record) && !record.evidence?.owned_branch_cleanup?.checked_at)
+      || (record.evidence?.owned_branch_cleanup?.remaining_refs?.length ?? 0) > 0
+      || hasVerifiedMergedBaseResidue(record);
+    for (const previous of records) {
+      const started = Boolean(previous.timing?.symphony?.started_at);
+      if (!started && !recordedRunRuntimeId(previous)) continue;
+      let runtimeReadback = await readRunOwnedRuntime(previous, this.operatorClient);
+      if (runtimeReadback.status !== 'absent') {
+        previous.cleanup.runtime_stopped = false;
+        await this.runRecordStore.save(previous);
+        await this.reconcileInterruptedRun(previous);
+        runtimeReadback = await readRunOwnedRuntime(previous, this.operatorClient);
+      }
+      if (runtimeReadback.status !== 'absent') {
+        const action = 'verify_run_owned_symphony_runtime';
+        const reason = runtimeReadback.status === 'present'
+          ? `run-owned Symphony runtime ${runtimeReadback.runtime_id} remains dispatch-capable`
+          : `run-owned Symphony runtime status is unconfirmed: ${runtimeReadback.error}`;
+        previous.evidence.owned_runtime_cleanup = { ...runtimeReadback, checked_at: new Date().toISOString() };
+        previous.finalization.unresolved ||= [];
+        previous.cleanup.unresolved ||= [];
+        if (!previous.finalization.unresolved.includes(action)) previous.finalization.unresolved.push(action);
+        if (!previous.cleanup.unresolved.includes(action)) previous.cleanup.unresolved.push(action);
+        previous.finalization.complete = false;
+        previous.finalization.incomplete = true;
+        previous.cleanup.runtime_stopped = false;
+        recordFinalizationAction(previous, action, { status: 'failed', error: reason });
+        if (previous.failures.at(-1)?.error !== reason) addFailure(previous, new Error(reason), 'runtime_cleanup');
+        await this.runRecordStore.save(previous);
+        throw new Error(`previous E2E run ${previous.run_id} has unresolved owned runtime cleanup: ${reason}`);
+      }
+    }
     for (const previous of records.filter(needsReconciliation)) {
       await this.reconcileInterruptedRun(previous);
-      if (previous.finalization?.complete !== true || previous.evidence?.branch_isolation?.remaining_run_owned_refs?.length || previous.evidence?.branch_isolation?.unresolved_new_refs?.length) throw new Error(`previous E2E run ${previous.run_id} remains unresolved; refusing a new dispatch`);
+      if (previous.finalization?.complete !== true
+        || previous.finalization?.unresolved?.length
+        || previous.cleanup?.unresolved?.length
+        || (hasRecordedOwnedBranches(previous) && !previous.evidence?.owned_branch_cleanup?.checked_at)
+        || previous.evidence?.owned_branch_cleanup?.remaining_refs?.length
+        || hasVerifiedMergedBaseResidue(previous)) throw new Error(`previous E2E run ${previous.run_id} remains unresolved; refusing a new dispatch`);
     }
     for (const previous of records) {
       const workspace = previous.paths?.workspace_root;
@@ -37,12 +87,7 @@ export class RunAdmission {
     const tasks = await this.notionClient.listTasks(this.config.notion_database_url);
     const conflicting = tasks.filter(task => ACTIVE_STATES.has(task.state) || task.state === 'Publisher Pending');
     if (conflicting.length) throw new Error(`resolved E2E Notion database has active or dispatchable residue: ${conflicting.map(task => `${task.identifier}:${task.state}`).join(', ')}`);
-    const refs = await this.gitClient.listRemoteBranchRefs();
-    for (const previous of records) {
-      const branch = previous.binding?.base_branch;
-      if (branch && refs[`refs/heads/${branch}`]) throw new Error(`previous run-scoped base branch remains: ${branch}`);
-    }
-    return { workload: this.catalog, refs, tasks };
+    return { workload: this.catalog, tasks };
   }
 
   async reconcileInterruptedRun(record) {

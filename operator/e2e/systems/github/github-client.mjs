@@ -6,6 +6,12 @@ function repositorySlug(repositoryUrl) {
   return `${match[1]}/${match[2]}`;
 }
 
+const PULL_REQUEST_FIELDS = 'number,url,state,isDraft,headRefName,headRefOid,baseRefName,mergedAt,mergeCommit,createdAt,headRepository,headRepositoryOwner,isCrossRepository';
+
+export function isSameRepositoryDelivery(pr, repository) {
+  return pr?.isCrossRepository === false && pr.headRepository?.nameWithOwner === repository;
+}
+
 export class GitHubClient {
   constructor({ repositoryUrl, ghCommand = command } = {}) {
     this.repository = repositorySlug(repositoryUrl);
@@ -13,10 +19,17 @@ export class GitHubClient {
   }
 
   async pullRequestsForBase(baseBranch, signal) {
-    const { stdout } = await this.ghCommand('gh', ['pr', 'list', '--repo', this.repository, '--base', baseBranch, '--state', 'all', '--limit', '100', '--json', 'number,url,state,isDraft,headRefName,headRefOid,baseRefName,mergedAt,mergeCommit,createdAt,headRepository,headRepositoryOwner,isCrossRepository'], { timeout: 30_000, signal });
+    const { stdout } = await this.ghCommand('gh', ['pr', 'list', '--repo', this.repository, '--base', baseBranch, '--state', 'all', '--limit', '100', '--json', PULL_REQUEST_FIELDS], { timeout: 30_000, signal });
     const rows = parseJsonOutput(stdout, 'GitHub PR inspection');
     if (!Array.isArray(rows)) throw new Error('GitHub PR inspection returned a non-array');
     return rows;
+  }
+
+  async readPullRequest(identity, signal) {
+    const { stdout } = await this.ghCommand('gh', ['pr', 'view', String(identity), '--repo', this.repository, '--json', PULL_REQUEST_FIELDS], { timeout: 30_000, signal });
+    const row = parseJsonOutput(stdout, 'GitHub delivery PR readback');
+    if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('GitHub delivery PR readback returned an invalid result');
+    return row;
   }
 
   async branchNamesForBase(baseBranch) {
@@ -25,24 +38,45 @@ export class GitHubClient {
 
   findDeliveryPullRequest(prs, deliveredPr) {
     const number = String(deliveredPr || '').match(/(?:\/|#)(\d+)$/)?.[1] || String(deliveredPr || '');
-    return prs.find(pr => pr.url === deliveredPr || String(pr.number) === number) || null;
+    return prs.findLast(pr => pr.url === deliveredPr || String(pr.number) === number) || null;
+  }
+
+  isSameRepositoryDelivery(pr) {
+    return isSameRepositoryDelivery(pr, this.repository);
+  }
+
+  deliveryPrIdentities(record) {
+    const identities = new Set();
+    if (record.artifacts?.delivery_pr_url) identities.add(record.artifacts.delivery_pr_url);
+    for (const delivery of record.artifacts?.owned_deliveries || []) if (delivery.pr_url) identities.add(delivery.pr_url);
+    for (const identity of record.artifacts?.workpad_delivery_prs || []) identities.add(identity);
+    return [...identities];
+  }
+
+  resolveRunOwnedDeliveries(prs, record) {
+    const identities = this.deliveryPrIdentities(record);
+    const deliveries = identities.map(identity => {
+      const recorded = (record.artifacts?.owned_deliveries || []).find(delivery => delivery.pr_url === identity);
+      if (recorded?.branch) return { identity, branch: recorded.branch, source: 'recorded', pullRequest: null };
+      if (identity === record.artifacts?.delivery_pr_url && record.artifacts?.delivery_branch) {
+        return { identity, branch: record.artifacts.delivery_branch, source: 'recorded', pullRequest: null };
+      }
+      const pullRequest = this.findDeliveryPullRequest(prs, identity);
+      if (!pullRequest) return { identity, branch: null, source: 'missing', pullRequest: null };
+      if (pullRequest.headRefName && this.isSameRepositoryDelivery(pullRequest)) {
+        return { identity, branch: pullRequest.headRefName, source: 'snapshot', pullRequest };
+      }
+      return { identity, branch: null, source: 'invalid', pullRequest };
+    });
+    if (identities.length > 0 && record.artifacts?.delivery_branch
+      && !deliveries.some(delivery => delivery.branch === record.artifacts.delivery_branch)) {
+      deliveries.push({ identity: record.artifacts.delivery_pr_url || null, branch: record.artifacts.delivery_branch, source: 'recorded', pullRequest: null });
+    }
+    return { identities, deliveries };
   }
 
   findRunOwnedDeliveryBranches(prs, record) {
-    const before = record.evidence?.branch_refs_before || {};
-    const startedAt = Date.parse(record.started_at || '');
-    const baseBranch = record.binding?.base_branch;
-    return [...new Set(prs.filter(pr => {
-      const branch = pr.headRefName;
-      const createdAt = Date.parse(pr.createdAt || '');
-      const headRepository = pr.headRepository?.nameWithOwner || null;
-      return Boolean(branch)
-        && pr.baseRefName === baseBranch
-        && pr.isCrossRepository === false
-        && headRepository === this.repository
-        && !before[`refs/heads/${branch}`]
-        && Number.isFinite(createdAt)
-        && (!Number.isFinite(startedAt) || createdAt >= startedAt);
-    }).map(pr => pr.headRefName))];
+    const { deliveries } = this.resolveRunOwnedDeliveries(prs, record);
+    return [...new Set(deliveries.map(delivery => delivery.branch).filter(Boolean))];
   }
 }

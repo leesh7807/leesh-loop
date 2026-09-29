@@ -4,6 +4,9 @@ import { RunTimingRecorder, runWithTimeout, currentTimeIso, waitForNextPoll } fr
 import { RunCompletionVerifier } from './run-completion-verifier.mjs';
 import { RunDoneVerifier } from './run-done-verifier.mjs';
 import { RunFinalizer } from '../finalization/run-finalizer.mjs';
+import { recordRunDeliveryEvidence } from '../../model/run-delivery-evidence.mjs';
+import { recordRunWorkpadEvidence } from '../../model/run-workpad-evidence.mjs';
+import { isSameRepositoryDelivery } from '../../systems/github/github-client.mjs';
 
 export class RunLifecycleObserver {
   constructor({ config, notionClient, githubClient, runEvidenceCollector, runRecordStore, lifecycleInterpreter, runCompletionVerifier, runDoneVerifier, runFinalizer, runTimingRecorder, clock = () => Date.now(), waitForPoll = waitForNextPoll } = {}) {
@@ -45,11 +48,19 @@ export class RunLifecycleObserver {
         const state = task.state;
         this.recordLifecycleObservation(record, state, snapshot.observed_at);
         record.artifacts.delivery_prs = snapshot.github.delivery_prs || [];
+        recordRunWorkpadEvidence(record, task.workpad);
         const mechanicalTransition = record.lifecycle.mechanical_human_review_transition;
         if (state === 'Human Review' && !mechanicalTransition?.performed) {
-          const observedDeliveryHead = record.artifacts.delivery_prs.find(pr => pr.headRefOid)?.headRefOid;
-          record.artifacts.delivered_head = observedDeliveryHead || null;
-          record.artifacts.delivered_head_locked = true;
+          const deliveryPrUrl = record.artifacts.workpad_latest_delivery_pr;
+          const deliveryPr = deliveryPrUrl && deliveryPrUrl !== 'none'
+            ? this.githubClient.findDeliveryPullRequest(record.artifacts.delivery_prs, deliveryPrUrl)
+            : null;
+          const sameRepositoryDelivery = isSameRepositoryDelivery(deliveryPr, this.githubClient.repository);
+          recordRunDeliveryEvidence(record, deliveryPrUrl, deliveryPr, {
+            sameRepository: sameRepositoryDelivery,
+            observedAt: snapshot.observed_at,
+            lockDeliveredHead: true
+          });
         }
         const planBinding = state === 'Done' ? null : this.doneVerifier.observeTrackerInput(record, task, snapshot);
         if (planBinding?.status === 'mismatch') {

@@ -54,7 +54,7 @@ The implementation is grouped by responsibility:
 - `systems/` contains concrete Notion, Git, GitHub, Operator, Publisher, and `chatgpt-shot` clients.
 - `run/admission/` checks whether a new run is safe to start and resolves interrupted runs.
 - `run/lifecycle/` interprets observed task states, verifies completion, and observes lifecycle progression.
-- `run/finalization/` owns the ordered run stop, terminalization, evidence, cleanup, and isolation checks.
+- `run/finalization/` owns the ordered run stop, terminalization, evidence, and owned-resource cleanup/readback.
 - `run/e2e-runner.mjs` shows the production E2E procedure in order; `cli.mjs` only composes dependencies and invokes it.
 
 Catalog Accepted Plans remain the default workload pool. Before publication, only a catalog-selected
@@ -74,5 +74,6 @@ production execution records. E2E lifecycle and whole-run durations remain E2E o
 
 A terminal run is a useful result even when production stops before `Done`. Inspect
 `verified_through`, `verification_gaps`, `failures`, `finalization`, `cleanup` and the evidence
-snapshots separately. An unresolved finalization or branch-isolation finding deliberately blocks
-the next admission.
+snapshots separately. Admission rechecks unresolved owned resources, including the run-scoped base,
+the task's recorded delivery branch, runtime and workspace. Changes to unrelated repository branches
+are not run residue and do not block admission.

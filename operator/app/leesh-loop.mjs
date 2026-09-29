@@ -92,11 +92,48 @@ async function terminate(state) {
   return true;
 }
 async function clear(config) { const p = paths(config); await Promise.all([remove(p.state), remove(p.ownership), remove(p.authorization), remove(p.acknowledgement), remove(p.startup_status)]); }
+async function confirmRuntimeAbsent(state) {
+  const runtimeId = state?.runtime_id;
+  const dashboard = state?.effective?.dashboard;
+  if (typeof runtimeId !== 'string' || !runtimeId || typeof dashboard !== 'string' || !dashboard) {
+    return { status: 'unconfirmed', error: 'owned Symphony runtime identity or dashboard is unavailable' };
+  }
+  try {
+    const observed = await request(`${dashboard}/api/v1/runtime`);
+    if (typeof observed?.runtime_id !== 'string' || !observed.runtime_id) {
+      return { status: 'unconfirmed', error: 'runtime status did not include a runtime identity' };
+    }
+    if (observed.runtime_id === runtimeId) {
+      return { status: 'present', runtime_id: runtimeId, observed_runtime_id: observed.runtime_id };
+    }
+    return { status: 'absent', runtime_id: runtimeId, observed_runtime_id: observed.runtime_id };
+  } catch (error) {
+    if (error?.cause?.code === 'ECONNREFUSED') return { status: 'absent', runtime_id: runtimeId, reason: 'runtime dashboard refused the connection' };
+    return { status: 'unconfirmed', runtime_id: runtimeId, error: String(error?.message || error) };
+  }
+}
+async function stopRuntimeAndClear(config, state) {
+  if (!await terminate(state)) {
+    return { status: 'unconfirmed', stopped: false, process_identity_mismatch: true, pid: state?.pid || null };
+  }
+  const readback = await confirmRuntimeAbsent(state);
+  if (readback.status !== 'absent') return { ...readback, stopped: false };
+  await stopUi(config);
+  await clear(config);
+  return { ...readback, stopped: true };
+}
+function runtimeStopFailure(result) {
+  if (result.process_identity_mismatch) return `owned Symphony process ${result.pid || 'unknown'} does not match its recorded PID identity`;
+  if (result.status === 'present') return `run-owned Symphony runtime ${result.runtime_id} still responds after stop`;
+  return `run-owned Symphony runtime stop could not be confirmed: ${result.error || 'runtime identity is still present or unavailable'}`;
+}
 async function reconcile(config, desired) {
   const p = paths(config); const state = await json(p.state); if (!state) return null;
   if (state.status === 'running' && await runtimeObserved(state) && compatible(state.effective, desired)) return state;
   if (state.status === 'running' && await runtimeObserved(state) && !compatible(state.effective, desired)) throw new Error('a live acknowledged runtime has incompatible configuration; run stop explicitly');
-  await terminate(state); await clear(config); return null;
+  const stopped = await stopRuntimeAndClear(config, state);
+  if (!stopped.stopped) throw new Error(runtimeStopFailure(stopped));
+  return null;
 }
 async function launch(command, args, env, outputPath) {
   const output = await open(outputPath, 'w', 0o600);
@@ -314,10 +351,25 @@ async function start(config) {
         return { reused: false, pid, dashboard: identity.dashboard };
       }
       catch (windowError) { return { reused: false, pid, dashboard: identity.dashboard, window_error: String(windowError.message || windowError) }; }
-    } catch (error) { const state = await json(p.state); try { await terminate(state); await clear(config); } catch (cleanupError) { await atomicJson(p.state, { ...(state || starting), status: 'failed', cleanup_error: String(cleanupError) }); } throw error; }
+    } catch (error) { const state = await json(p.state); try { const stopped = await stopRuntimeAndClear(config, state); if (!stopped.stopped) throw new Error(runtimeStopFailure(stopped)); } catch (cleanupError) { await atomicJson(p.state, { ...(state || starting), status: 'failed', cleanup_error: String(cleanupError) }); } throw error; }
   });
 }
-async function stop(config) { return withLock(config, async () => { const state = await json(paths(config).state); if (state) await terminate(state); await stopUi(config); await clear(config); return { stopped: Boolean(state) }; }); }
+async function stop(config) { return withLock(config, async () => { const state = await json(paths(config).state); if (state) { const result = await stopRuntimeAndClear(config, state); if (!result.stopped) throw new Error(runtimeStopFailure(result)); return { stopped: true }; } await stopUi(config); await clear(config); return { stopped: false }; }); }
+async function stopOwnedRuntime(config, runtimeId) {
+  if (!runtimeId) throw new Error('stop-owned requires a runtime ID');
+  return withLock(config, async () => {
+    const state = await json(paths(config).state);
+    if (!state) return { stopped: false, already_absent: true, expected_runtime_id: runtimeId };
+    if (state.runtime_id !== runtimeId) {
+      return { stopped: false, identity_mismatch: true, expected_runtime_id: runtimeId, observed_runtime_id: state.runtime_id || null };
+    }
+    const result = await stopRuntimeAndClear(config, state);
+    if (result.stopped) return { stopped: true, runtime_id: runtimeId };
+    if (result.process_identity_mismatch) return { stopped: false, process_identity_mismatch: true, expected_runtime_id: runtimeId };
+    if (result.status === 'present') return { stopped: false, runtime_still_present: true, expected_runtime_id: runtimeId, observed_runtime_id: result.observed_runtime_id };
+    return { stopped: false, runtime_unconfirmed: true, expected_runtime_id: runtimeId, error: result.error };
+  });
+}
 
 async function serve(config, { prepared = false } = {}) {
   if (!prepared) {
@@ -340,21 +392,23 @@ const [command, ...commandArgs] = locked ? args.slice(1) : args;
 const configFile = commandArgs[0] || defaultConfig;
 let directExecution = false;
 try { directExecution = Boolean(process.argv[1] && realpathSync(process.argv[1]) === appScript); } catch { /* Node may be importing this module from another entry point. */ }
-if (directExecution && !['start', 'stop', 'serve', 'serve-prepared'].includes(command)) {
-  const usage = 'Usage: node operator/app/leesh-loop.mjs <start|stop|serve> [project-config.json]';
+if (directExecution && !['start', 'stop', 'stop-owned', 'serve', 'serve-prepared'].includes(command)) {
+  const usage = 'Usage: node operator/app/leesh-loop.mjs <start|stop|stop-owned|serve> [project-config.json] [runtime-id]';
   if (command === '--help' || command === '-h') console.log(usage);
   else { console.error(usage); process.exitCode = 2; }
 } else if (directExecution) {
-  loadConfig(configFile, { validateWorkspaceFileSources: command === 'start', requireNotionDatabase: command !== 'stop' }).then(async config => {
-    if (!locked && ['start', 'stop'].includes(command)) {
+  loadConfig(configFile, { validateWorkspaceFileSources: command === 'start', requireNotionDatabase: !['stop', 'stop-owned'].includes(command) }).then(async config => {
+    if (!locked && ['start', 'stop', 'stop-owned'].includes(command)) {
       await mkdir(stateRoot(config), { recursive: true, mode: 0o700 });
       const lockPath = join(stateRoot(config), 'lifecycle.flock');
-      const result = spawnSync('flock', ['-x', lockPath, process.execPath, process.argv[1], '__locked', command, config.configuration_path], { cwd: root, stdio: 'inherit' });
+      const lockedArgs = ['-x', lockPath, process.execPath, process.argv[1], '__locked', command, config.configuration_path];
+      if (command === 'stop-owned') lockedArgs.push(commandArgs[1] || '');
+      const result = spawnSync('flock', lockedArgs, { cwd: root, stdio: 'inherit' });
       if (result.error) throw result.error;
       process.exitCode = result.status ?? 1;
       return undefined;
     }
-    return command === 'start' ? start(config) : command === 'stop' ? stop(config) : serve(config, { prepared: command === 'serve-prepared' });
+    return command === 'start' ? start(config) : command === 'stop' ? stop(config) : command === 'stop-owned' ? stopOwnedRuntime(config, commandArgs[1]) : serve(config, { prepared: command === 'serve-prepared' });
   }).then(value => { if (value) console.log(JSON.stringify(value)); }).catch(error => { console.error(`Operator failed: ${error.message}`); process.exitCode = 1; });
 }
 
