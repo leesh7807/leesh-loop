@@ -112,19 +112,13 @@
       ]
     },
     "last_transition": {
-      "type": "recovery_attempt_failed",
-      "at": "2026-09-29T14:42:05.837Z",
+      "type": "recovery_started",
+      "at": "2026-09-29T18:50:07.890Z",
       "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
-      "recovery_attempt_id": "ed4178ee-f4b7-4baa-9bac-adcab47aed3e",
-      "result": "still unavailable",
-      "evidence": {
-        "stable_database_id": "3e08a265-8625-805c-ad23-fe1137be4a1e",
-        "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
-        "error": "Notion GET /blocks/3e38a265-8625-812f-b3b3-d0f82a7ebd17/children?page_size=100 rate-limit retry aborted: The operation was aborted due to timeout"
-      }
+      "recovery_attempt_id": "dc935a20-ab02-47bb-b385-12ff4d23eba3"
     }
   },
-  "event_sequence": 12,
-  "previous_event_sha": "d636d07db30e5f6c522fa28223d96dcd5f39bde2",
-  "recorded_at": "2026-09-29T14:42:08.185Z"
+  "event_sequence": 13,
+  "previous_event_sha": "2e7a8ba48a8672253ef654ea11beb992277e4e22",
+  "recorded_at": "2026-09-29T18:50:10.212Z"
 }
