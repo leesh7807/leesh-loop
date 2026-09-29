@@ -5,7 +5,7 @@
     "schema_version": 1,
     "kind": "database_reservation",
     "database_id": "3ea8a265-8625-8047-81e0-ead9c231fc10",
-    "status": "in use",
+    "status": "unavailable",
     "reservation": {
       "run_id": "220531b9-c5c1-45ac-ad04-b9d83d2e68a3",
       "acquired_at": "2026-09-29T13:53:06.821Z",
@@ -42,27 +42,47 @@
       "run_record_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/220531b9-c5c1-45ac-ad04-b9d83d2e68a3/run.json",
       "workflow_snapshot_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/220531b9-c5c1-45ac-ad04-b9d83d2e68a3/workflow.md"
     },
-    "recovery_marker": null,
-    "unavailable": null,
+    "recovery_marker": "f5300ece-5620-4f85-9b96-1f85bca8c0b4",
+    "unavailable": {
+      "marker": "f5300ece-5620-4f85-9b96-1f85bca8c0b4",
+      "at": "2026-09-29T14:08:56.278Z",
+      "reason": "current E2E run finalization or required cleanup did not complete",
+      "evidence": {
+        "lifecycle_status": "failed",
+        "child_runtime_id": "e261775e-66a2-479e-abe8-def130954819",
+        "child_runtime_status": "stopped",
+        "finalization_complete": false,
+        "unresolved": [
+          "reread_task_after_runtime_stop"
+        ],
+        "cleanup_unresolved": [
+          "reread_task_after_runtime_stop"
+        ],
+        "ended_at": "2026-09-29T14:08:32.586Z"
+      }
+    },
     "last_transition": {
-      "type": "run_lifecycle_updated",
-      "at": "2026-09-29T14:08:41.171Z",
+      "type": "in_use_to_unavailable",
+      "at": "2026-09-29T14:08:56.278Z",
       "run_id": "220531b9-c5c1-45ac-ad04-b9d83d2e68a3",
-      "run_lifecycle": "failed",
-      "lifecycle_status": "failed",
-      "child_runtime_id": "e261775e-66a2-479e-abe8-def130954819",
-      "child_runtime_status": "stopped",
-      "finalization_complete": false,
-      "unresolved": [
-        "reread_task_after_runtime_stop"
-      ],
-      "cleanup_unresolved": [
-        "reread_task_after_runtime_stop"
-      ],
-      "ended_at": "2026-09-29T14:08:32.586Z"
+      "recovery_marker": "f5300ece-5620-4f85-9b96-1f85bca8c0b4",
+      "reason": "current E2E run finalization or required cleanup did not complete",
+      "evidence": {
+        "lifecycle_status": "failed",
+        "child_runtime_id": "e261775e-66a2-479e-abe8-def130954819",
+        "child_runtime_status": "stopped",
+        "finalization_complete": false,
+        "unresolved": [
+          "reread_task_after_runtime_stop"
+        ],
+        "cleanup_unresolved": [
+          "reread_task_after_runtime_stop"
+        ],
+        "ended_at": "2026-09-29T14:08:32.586Z"
+      }
     }
   },
-  "event_sequence": 7,
-  "previous_event_sha": "5e34a9d80db4d65d441c2a54a4120376dbffc407",
-  "recorded_at": "2026-09-29T14:08:43.573Z"
+  "event_sequence": 8,
+  "previous_event_sha": "c6a53dc2e4932e11c24aa336a45f484cee082c5a",
+  "recorded_at": "2026-09-29T14:08:59.085Z"
 }
