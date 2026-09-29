@@ -1,19 +1,33 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { clearPublicationDraft, readPublicationDraft, writePublicationDraft } from './publication-draft.js';
 import './style.css';
 
 const REFRESH_INTERVAL_MS = 7500;
 const formatTime = value => new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' }).format(value);
+const draftKey = (plan, state, selectedBlockers) => JSON.stringify({ plan, state, blockedBy: selectedBlockers.map(task => task.taskId) });
 
-function TaskCard({ task }) {
+function TaskCard({ task, selected, selectionDisabled, onToggle }) {
   return (
-    <article className="task-card">
+    <article className={`task-card${selected ? ' selected-blocker' : ''}`}>
       <div className="task-heading">
         <div className="task-title-block">
           <h3>{task.title || '(Untitled)'}</h3>
           {task.identifier && <p className="task-identifier">{task.identifier}</p>}
         </div>
-        <div className="task-state"><span className="meta-label">State</span><strong>{task.state}</strong></div>
+        <div className="task-actions">
+          <div className="task-state"><span className="meta-label">State</span><strong>{task.state}</strong></div>
+          <label className="blocker-choice">
+            <input
+              type="checkbox"
+              checked={selected}
+              disabled={selectionDisabled}
+              onChange={() => onToggle(task)}
+              aria-label={`Use ${task.title || '(Untitled)'} in State ${task.state} as a Blocked By task`}
+            />
+            <span>{selected ? 'Selected as blocker' : 'Use as Blocked By'}</span>
+          </label>
+        </div>
       </div>
 
       <section className="blocker-section" aria-label={`Blocked By for ${task.title}`}>
@@ -45,7 +59,8 @@ function TaskCard({ task }) {
   );
 }
 
-function TaskSurface({ tasks, loading, error, refreshedAt, onRetry }) {
+function TaskSurface({ tasks, selectedBlockers, selectionDisabled, loading, error, refreshedAt, onRetry, onToggleBlocker }) {
+  const selectedIds = new Set(selectedBlockers.map(task => task.taskId));
   return (
     <section className="surface task-surface" aria-labelledby="tasks-heading" aria-busy={loading && !refreshedAt}>
       <div className="surface-header">
@@ -57,6 +72,8 @@ function TaskSurface({ tasks, loading, error, refreshedAt, onRetry }) {
           {loading && !refreshedAt ? 'Loading tasks' : refreshedAt ? `Updated ${formatTime(refreshedAt)}` : ''}
         </p>
       </div>
+      <p className="task-help">Choose one or more existing tasks here. Their title and State stay visible while you add them to this Plan’s publication context.</p>
+      <p className="selection-count" aria-live="polite">{selectedBlockers.length ? `${selectedBlockers.length} blocker${selectedBlockers.length === 1 ? '' : 's'} selected for this Plan` : 'No blockers selected'}</p>
       {error && (
         <div className="refresh-error" role="status">
           <p><strong>Refresh failed.</strong> Showing the last successful task read{refreshedAt ? ` from ${formatTime(refreshedAt)}` : ''}. The Operator will retry automatically.</p>
@@ -65,30 +82,40 @@ function TaskSurface({ tasks, loading, error, refreshedAt, onRetry }) {
       )}
       {!refreshedAt && loading ? <p className="empty-state">Reading the current task list…</p> : null}
       {!loading && !error && tasks.length === 0 ? <p className="empty-state">There are no current tasks.</p> : null}
-      {tasks.length > 0 && <div className="task-list">{tasks.map((task, index) => <TaskCard key={`${task.taskUrl}-${index}`} task={task} />)}</div>}
+      {tasks.length > 0 && (
+        <div className="task-list">
+          {tasks.map(task => <TaskCard key={task.taskId || task.taskUrl} task={task} selected={selectedIds.has(task.taskId)} selectionDisabled={selectionDisabled} onToggle={onToggleBlocker} />)}
+        </div>
+      )}
     </section>
   );
 }
 
-function PublicationSurface({ config }) {
-  const [plan, setPlan] = useState('');
-  const [state, setState] = useState('');
-  const [publishing, setPublishing] = useState(false);
+function PublicationSurface({ config, plan, state, selectedBlockers, publishing, setPublishing, onDraftChange, onRemoveBlocker, onReset }) {
   const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    const currentKey = draftKey(plan, state, selectedBlockers);
+    if (result?.kind === 'success' && result.draftKey === currentKey) clearPublicationDraft();
+    else writePublicationDraft({ plan, state, selectedBlockers });
+  }, [plan, state, selectedBlockers, result]);
 
   async function submit(event) {
     event.preventDefault();
     setPublishing(true);
     setResult(null);
+    const submittedBlockers = [...selectedBlockers];
+    writePublicationDraft({ plan, state, selectedBlockers: submittedBlockers });
     try {
       const response = await fetch('/api/v1/publish', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ plan, state })
+        body: JSON.stringify({ plan, state, blockedBy: submittedBlockers.map(task => task.taskId) })
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || 'Publishing failed.');
-      setResult({ kind: 'success', ...body });
+      setResult({ kind: 'success', ...body, blockers: submittedBlockers, draftKey: draftKey(plan, state, submittedBlockers) });
+      clearPublicationDraft();
     } catch (error) {
       setResult({ kind: 'failure', message: error.message || 'Publishing failed.' });
     } finally {
@@ -97,9 +124,8 @@ function PublicationSurface({ config }) {
   }
 
   function reset() {
-    setPlan('');
-    setState('');
     setResult(null);
+    onReset();
   }
 
   return (
@@ -114,35 +140,58 @@ function PublicationSurface({ config }) {
         <div className="plan-field">
           <label htmlFor="plan">1. Review the Plan</label>
           <p className="field-help">The Publisher keeps the accepted Plan and task details in Notion.</p>
-          <textarea id="plan" name="plan" value={plan} onChange={event => setPlan(event.target.value)} spellCheck="false" aria-label="Plan Markdown" />
+          <textarea id="plan" name="plan" value={plan} onChange={event => onDraftChange({ plan: event.target.value })} spellCheck="false" aria-label="Plan Markdown" disabled={publishing} />
         </div>
+        <section className="publication-blockers" aria-labelledby="publication-blockers-heading">
+          <div className="context-heading">
+            <h3 id="publication-blockers-heading">2. Confirm Blocked By</h3>
+            <p className="field-help">Selected from the current Tasks list; included when this Plan is published.</p>
+          </div>
+          {selectedBlockers.length ? (
+            <ul className="selected-blockers">
+              {selectedBlockers.map(task => (
+                <li key={task.taskId}>
+                  <span className="selected-task-name">{task.title || '(Untitled)'}</span>
+                  <span className="selected-task-state">State: {task.state}</span>
+                  <button type="button" className="remove-blocker" onClick={() => onRemoveBlocker(task.taskId)} disabled={publishing} aria-label={`Remove ${task.title || '(Untitled)'} from Blocked By`}>Remove</button>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="no-selected-blockers">No blockers selected. This Plan will publish without a Blocked By relation.</p>}
+        </section>
         <div className="publish-decision">
           <div>
-            <label htmlFor="state">2. Choose publication State</label>
-            <select id="state" name="state" value={state} onChange={event => setState(event.target.value)}>
+            <label htmlFor="state">3. Choose publication State</label>
+            <select id="state" name="state" value={state} onChange={event => onDraftChange({ state: event.target.value })} disabled={publishing}>
               <option value="">Publisher default ({config.defaultState})</option>
               {config.states.map(value => <option value={value} key={value}>{value}</option>)}
             </select>
             <p className="field-help">State choices come from the current Publisher configuration.</p>
           </div>
-          <button type="submit" disabled={publishing} aria-busy={publishing}>{publishing ? 'Publishing…' : '3. Publish Plan'}</button>
+          <button type="submit" disabled={publishing} aria-busy={publishing}>{publishing ? 'Publishing…' : '4. Publish Plan'}</button>
         </div>
       </form>
 
       {result && (
         <section className={`publication-result ${result.kind}`} role={result.kind === 'success' ? 'status' : 'alert'} aria-labelledby="result-heading">
-          <p className="eyebrow">4. Publication result</p>
+          <p className="eyebrow">5. Publication result</p>
           <h3 id="result-heading">{result.kind === 'success' ? 'Plan published' : 'Publish failed'}</h3>
           {result.kind === 'success' ? (
             <>
               <p>Task <code>{result.identifier}</code> was published with State <strong>{result.state}</strong>.</p>
+              {result.blockers.length ? (
+                <div className="published-blockers">
+                  <p><strong>Blocked By</strong></p>
+                  <ul>{result.blockers.map(task => <li key={task.taskId}>{task.title || '(Untitled)'} <span>({task.state})</span></li>)}</ul>
+                </div>
+              ) : <p>This task was published without blockers.</p>}
               {result.url && <a href={result.url} target="_blank" rel="noreferrer">Open published task in Notion ↗</a>}
               <button className="text-button" type="button" onClick={reset}>Publish another Plan</button>
             </>
           ) : (
             <>
               <p className="error-detail">{result.message}</p>
-              <p>Your Plan and selected State are still in the form. Correct the Plan if needed, then try again.</p>
+              <p>Your Plan, publication State, and selected Blocked By tasks are still in the form. Correct the input if needed, then retry.</p>
             </>
           )}
         </section>
@@ -154,11 +203,14 @@ function PublicationSurface({ config }) {
 function App() {
   const [config, setConfig] = useState(null);
   const [tasks, setTasks] = useState([]);
+  const [draft, setDraft] = useState(() => readPublicationDraft());
+  const [publishing, setPublishing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState(null);
   const requestInFlight = useRef(false);
   const hasReadTasks = useRef(false);
+  const { plan, state, selectedBlockers } = draft;
 
   const refresh = useCallback(async () => {
     if (requestInFlight.current) return;
@@ -169,6 +221,19 @@ function App() {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || 'Could not refresh tasks.');
       setTasks(body.tasks);
+      setDraft(current => {
+        const available = new Map(body.tasks.map(task => [task.taskId, task]));
+        const refreshed = current.selectedBlockers.map(selected => {
+          const task = available.get(selected.taskId);
+          return task ? { taskId: task.taskId, title: task.title, state: task.state, identifier: task.identifier } : selected;
+        });
+        const unchanged = refreshed.every((task, index) => task.taskId === current.selectedBlockers[index].taskId
+          && task.title === current.selectedBlockers[index].title
+          && task.state === current.selectedBlockers[index].state
+          && task.identifier === current.selectedBlockers[index].identifier);
+        if (unchanged) return current;
+        return { ...current, selectedBlockers: refreshed };
+      });
       setError(false);
       setRefreshedAt(new Date());
       hasReadTasks.current = true;
@@ -188,6 +253,33 @@ function App() {
     return () => { active = false; window.clearInterval(timer); };
   }, [refresh]);
 
+  function toggleBlocker(task) {
+    setDraft(current => {
+      const selectedBlockers = current.selectedBlockers.some(selected => selected.taskId === task.taskId)
+        ? current.selectedBlockers.filter(selected => selected.taskId !== task.taskId)
+        : [...current.selectedBlockers, { taskId: task.taskId, title: task.title, state: task.state, identifier: task.identifier }];
+      return { ...current, selectedBlockers };
+    });
+  }
+
+  function removeBlocker(taskId) {
+    setDraft(current => {
+      return { ...current, selectedBlockers: current.selectedBlockers.filter(task => task.taskId !== taskId) };
+    });
+  }
+
+  function updateDraft(values) {
+    setDraft(current => {
+      return { ...current, ...values };
+    });
+  }
+
+  function resetDraft() {
+    const emptyDraft = { plan: '', state: '', selectedBlockers: [] };
+    clearPublicationDraft();
+    setDraft(emptyDraft);
+  }
+
   return (
     <div className="page-shell">
       <header className="page-header">
@@ -202,8 +294,20 @@ function App() {
         </nav>
       </header>
       <main className="work-layout">
-        <TaskSurface tasks={tasks} loading={loading} error={error} refreshedAt={refreshedAt} onRetry={refresh} />
-        {config ? <PublicationSurface config={config} /> : <section className="surface"><p className="empty-state">Loading Publisher configuration…</p></section>}
+        <TaskSurface tasks={tasks} selectedBlockers={selectedBlockers} selectionDisabled={publishing} loading={loading} error={error} refreshedAt={refreshedAt} onRetry={refresh} onToggleBlocker={toggleBlocker} />
+        {config ? (
+          <PublicationSurface
+            config={config}
+            plan={plan}
+            state={state}
+            selectedBlockers={selectedBlockers}
+            publishing={publishing}
+            setPublishing={setPublishing}
+            onDraftChange={updateDraft}
+            onRemoveBlocker={removeBlocker}
+            onReset={resetDraft}
+          />
+        ) : <section className="surface"><p className="empty-state">Loading Publisher configuration…</p></section>}
       </main>
       <footer className="page-footer"><span>Task and Plan details remain in Notion.</span><span>Runtime details remain in Symphony.</span></footer>
     </div>

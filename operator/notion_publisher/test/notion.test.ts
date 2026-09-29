@@ -185,6 +185,23 @@ test("finalization, relation wiring, and page locking use their provider-native 
   ]);
 });
 
+test("Publisher blocker readback uses the shared paginated relation decoder", async () => {
+  const client = new RequestFake([
+    {
+      id: "task/page",
+      parent: { type: "data_source_id", data_source_id: "tasks" },
+      properties: { "Blocked By": { id: "blocked by", type: "relation", relation: [{ id: "blocker-one" }], has_more: true } }
+    },
+    { results: [{ relation: { id: "blocker-two" } }, { id: "blocker-one" }], has_more: false }
+  ]);
+
+  assert.deepEqual(await client.taskBlockerIds("task/page", "tasks", "Blocked By"), ["blocker-one", "blocker-two"]);
+  assert.deepEqual(client.calls.map(({ method, path }) => [method, path]), [
+    ["GET", "/pages/task%2Fpage"],
+    ["GET", "/pages/task%2Fpage/properties/blocked%20by?page_size=100"]
+  ]);
+});
+
 test("provider payload keeps Unicode text literal across rich-text chunk boundaries", async () => {
   let wireBody = "";
   const client = new NotionClient("token", async (_url, init) => {

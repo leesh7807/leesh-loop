@@ -79,11 +79,27 @@ test('task refresh errors do not own or block the independent publication route'
   const publication = await fetch(`${base}/api/v1/publish`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ plan: '# Keep this Plan\n\n## Work', state: 'Human Review' })
+    body: JSON.stringify({ plan: '# Keep this Plan\n\n## Work', state: 'Human Review', blockedBy: ['task-a', 'task-b'] })
   });
   assert.equal(publication.status, 200);
   assert.equal((await publication.json()).identifier, 'PLAN-PUBLISHED');
-  assert.deepEqual(calls, [{ plan: '# Keep this Plan\n\n## Work', state: 'Human Review' }]);
+  assert.deepEqual(calls, [{ plan: '# Keep this Plan\n\n## Work', state: 'Human Review', blockedBy: ['task-a', 'task-b'] }]);
+
+  const invalidBlockers = await fetch(`${base}/api/v1/publish`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ plan: '# Invalid blocker list', state: 'Ready', blockedBy: ['task-a', 2] })
+  });
+  assert.equal(invalidBlockers.status, 400);
+  assert.equal(calls.length, 1);
+
+  const withoutBlockers = await fetch(`${base}/api/v1/publish`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ plan: '# Keep the old path', state: '' })
+  });
+  assert.equal(withoutBlockers.status, 200);
+  assert.deepEqual(calls[1], { plan: '# Keep the old path', state: '' });
 
   const recovered = await fetch(`${base}/api/v1/tasks`);
   assert.equal(recovered.status, 200);

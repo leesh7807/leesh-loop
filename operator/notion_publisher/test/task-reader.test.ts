@@ -26,7 +26,8 @@ function task(id: number, state = "Backlog"): any {
 test("task reader follows Notion cursors and only excludes Cancelled and Publisher Pending", async () => {
   const first = Array.from({ length: 98 }, (_, index) => task(index + 1));
   first.push(task(99, "Cancelled"), task(100, "Publisher Pending"));
-  first[0].properties["Blocked By"].relation = [{ id: "task-2" }];
+  first[0].properties["Blocked By"].relation = [];
+  first[0].properties["Blocked By"].has_more = true;
   const second = [task(101, "Human Review"), task(102, "Merging")];
   const taskRequests: any[] = [];
   const fetcher = async (input: string | URL | Request, init?: RequestInit) => {
@@ -43,6 +44,7 @@ test("task reader follows Notion cursors and only excludes Cancelled and Publish
       taskRequests.push(body);
       return response(body.start_cursor ? { results: second, has_more: false, next_cursor: null } : { results: first, has_more: true, next_cursor: "cursor-next" });
     }
+    if (url.pathname === "/v1/pages/task-1/properties/blocked-by") return response({ results: [{ relation: { id: "task-2" } }], has_more: false, next_cursor: null });
     throw new Error(`unexpected request ${init?.method || "GET"} ${url.pathname}`);
   };
   const reader = new NotionTaskReader(new NotionClient("fixture-token", fetcher), "https://www.notion.so/00000000000000000000000000000001", DEFAULT_POLICY);
@@ -50,6 +52,7 @@ test("task reader follows Notion cursors and only excludes Cancelled and Publish
   const tasks = await reader.listTasks();
 
   assert.equal(tasks.length, 100);
+  assert.equal(tasks[0].taskId, "task-1");
   assert.equal(tasks.some(item => item.state === "Cancelled" || item.state === "Publisher Pending"), false);
   assert.equal(tasks.some(item => item.state === "Human Review"), true);
   assert.equal(tasks.some(item => item.state === "Merging"), true);

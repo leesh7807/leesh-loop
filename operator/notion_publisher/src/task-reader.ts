@@ -3,6 +3,7 @@ import { NotionClient } from "./notion.js";
 
 export type BlockerSummary = { title: string; state: string; url: string };
 export type TaskSummary = {
+  taskId: string;
   title: string;
   state: string;
   blockedBy: BlockerSummary[];
@@ -45,30 +46,6 @@ export class NotionTaskReader {
       cursor = page.has_more ? page.next_cursor : undefined;
     } while (cursor);
     return rows;
-  }
-
-  private async relationIds(page: any, propertyName: string): Promise<string[]> {
-    const property = page?.properties?.[propertyName];
-    if (property?.type !== "relation" || !Array.isArray(property.relation)) throw new PublicationError(`provider/API failure: task relation ${propertyName} was malformed`);
-    const rawIds: unknown[] = property.relation.map((item: any) => item?.id);
-    if (rawIds.some(id => typeof id !== "string")) throw new PublicationError(`provider/API failure: task relation ${propertyName} contained a malformed page`);
-    const ids = rawIds as string[];
-    if (property.has_more !== true) return [...new Set(ids)];
-    if (typeof page?.id !== "string" || typeof property.id !== "string") throw new PublicationError(`provider/API failure: task relation ${propertyName} omitted its pagination identity`);
-    let cursor: string | undefined;
-    do {
-      const suffix = cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : "";
-      const result = await this.client.request("GET", `/pages/${page.id}/properties/${property.id}?page_size=100${suffix}`);
-      if (!Array.isArray(result?.results) || typeof result.has_more !== "boolean") throw new PublicationError(`provider/API failure: paginated task relation ${propertyName} was malformed`);
-      for (const item of result.results) {
-        const id = item?.relation?.id ?? item?.id;
-        if (typeof id !== "string") throw new PublicationError(`provider/API failure: task relation ${propertyName} contained a malformed page`);
-        ids.push(id);
-      }
-      if (result.has_more && typeof result.next_cursor !== "string") throw new PublicationError(`provider/API failure: paginated task relation ${propertyName} omitted next_cursor`);
-      cursor = result.has_more ? result.next_cursor : undefined;
-    } while (cursor);
-    return [...new Set(ids)];
   }
 
   private async pageSummary(page: any, binding: { taskDataSourceId: string }, taskPages: Map<string, any>): Promise<BlockerSummary> {
@@ -126,8 +103,8 @@ export class NotionTaskReader {
     for (const row of visibleRows) {
       const title = titleOf(row, this.policy.title);
       if (typeof row.url !== "string" || !row.url) throw new PublicationError("provider/API failure: task page has no Notion URL");
-      const blockedIds = await this.relationIds(row, this.policy.blockedBy);
-      const planIds = await this.relationIds(row, PLAN_PROPERTY);
+      const blockedIds = await this.client.readRelationIds(row, this.policy.blockedBy);
+      const planIds = await this.client.readRelationIds(row, PLAN_PROPERTY);
       const blockerRows: any[] = [];
       for (const id of blockedIds) blockerRows.push(byId.get(id) ?? await this.client.request("GET", `/pages/${id}`));
       const blockedBy = await Promise.all(blockerRows.map(page => this.pageSummary(page, binding, byId)));
@@ -136,6 +113,7 @@ export class NotionTaskReader {
       const labels = row.properties?.[this.policy.labels];
       const identifier = row.properties?.[this.policy.identifier];
       result.push({
+        taskId: row.id,
         title,
         state: stateOf(row, this.policy.state),
         blockedBy,

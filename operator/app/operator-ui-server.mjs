@@ -36,13 +36,14 @@ async function collect(stream) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-async function publishPlan({ plan, state, config, root, stateDirectory, publisherConfigPath, notionToken }) {
+async function publishPlan({ plan, state, blockedBy, config, root, stateDirectory, publisherConfigPath, notionToken }) {
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
   const temp = join(stateDirectory, `publish-${randomUUID()}.md`);
   try {
     await writeFile(temp, plan, { mode: 0o600 });
     const args = [join(root, 'operator/notion_publisher/dist/src/cli.js'), '--plan', temp, '--config', publisherConfigPath, '--database-url', config.notion_database_url];
     if (state !== '') args.push('--state', state);
+    if (blockedBy !== undefined) args.push('--blocked-by-json', JSON.stringify(blockedBy));
     const env = { ...process.env };
     if (notionToken) env.NOTION_TOKEN = notionToken;
     const publisher = spawn(process.execPath, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env });
@@ -103,10 +104,19 @@ export async function createOperatorUiServer({ root, config, stateDirectory, pub
           sendJson(response, 400, { error: 'Plan and publication State must be strings.' });
           return;
         }
+        if (submitted.blockedBy !== undefined && (!Array.isArray(submitted.blockedBy) || submitted.blockedBy.some(id => typeof id !== 'string' || !id.trim()))) {
+          sendJson(response, 400, { error: 'Blocked By must be a list of task identities.' });
+          return;
+        }
+        const publishInput = {
+          plan: submitted.plan,
+          state: submitted.state,
+          ...(submitted.blockedBy === undefined ? {} : { blockedBy: submitted.blockedBy })
+        };
         try {
           const publication = await (runPublisher
-            ? runPublisher({ plan: submitted.plan, state: submitted.state })
-            : publishPlan({ plan: submitted.plan, state: submitted.state, config, root, stateDirectory, publisherConfigPath, notionToken }));
+            ? runPublisher(publishInput)
+            : publishPlan({ ...publishInput, config, root, stateDirectory, publisherConfigPath, notionToken }));
           sendJson(response, 200, publication);
         } catch (error) {
           sendJson(response, error?.status || 500, { error: error instanceof Error ? error.message : 'Publishing failed.' });
