@@ -25,15 +25,17 @@
       },
       "run_lifecycle": "active",
       "child_runtime": {
-        "runtime_id": null,
-        "status": "starting",
-        "state_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/e9f214d7-97f6-4a98-900a-4ea3dc4decd7/operator-state",
-        "process_identity": null,
-        "requested_at": "2026-09-29T14:31:05.984Z",
-        "ports": {
-          "symphony_port": 42065,
-          "ui_port": 45499
-        }
+        "runtime_id": "9d9279e7-0837-42d6-8ad0-1eb9f2b413a7",
+        "status": "active",
+        "dashboard": "http://127.0.0.1:42065",
+        "process_identity": {
+          "pid": 150449,
+          "process_start_ticks": "3088755",
+          "boot_id": "43f4e705-39f8-4dee-b528-e3c113adbd88",
+          "pid_namespace": "pid:[4026531836]",
+          "host": "lees"
+        },
+        "state_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/e9f214d7-97f6-4a98-900a-4ea3dc4decd7/operator-state/runtime.json"
       },
       "base_branch": "base/e9f214d7-97f6-4a98-900a-4ea3dc4decd7",
       "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/workspaces/e9f214d7-97f6-4a98-900a-4ea3dc4decd7",
@@ -44,13 +46,13 @@
     "unavailable": null,
     "last_transition": {
       "type": "child_runtime_updated",
-      "at": "2026-09-29T14:31:07.322Z",
+      "at": "2026-09-29T14:31:23.167Z",
       "run_id": "e9f214d7-97f6-4a98-900a-4ea3dc4decd7",
-      "child_runtime_id": null,
-      "child_runtime_status": "starting"
+      "child_runtime_id": "9d9279e7-0837-42d6-8ad0-1eb9f2b413a7",
+      "child_runtime_status": "active"
     }
   },
-  "event_sequence": 3,
-  "previous_event_sha": "109fbd10d2f55aa6452c221fbe2bbdff3362d045",
-  "recorded_at": "2026-09-29T14:31:09.570Z"
+  "event_sequence": 4,
+  "previous_event_sha": "f6f5a18d54e182b01ea0ba6c5daa71158675bae5",
+  "recorded_at": "2026-09-29T14:31:25.377Z"
 }
