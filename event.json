@@ -1,0 +1,22 @@
+{
+  "kind": "e2e_run_lifecycle",
+  "run_id": "5936364b-a744-43d0-8da9-c61c26ab2e0d",
+  "lifecycle": {
+    "run_id": "5936364b-a744-43d0-8da9-c61c26ab2e0d",
+    "status": "active",
+    "origin": "direct",
+    "started_at": "2026-09-29T18:49:59.666Z",
+    "run_process": {
+      "pid": 24,
+      "process_start_ticks": "4641081",
+      "boot_id": "43f4e705-39f8-4dee-b528-e3c113adbd88",
+      "pid_namespace": "pid:[4026532927]",
+      "host": "lees"
+    },
+    "outer_execution_provenance": null,
+    "updated_at": "2026-09-29T18:50:00.380Z"
+  },
+  "event_sequence": 1,
+  "previous_event_sha": null,
+  "recorded_at": "2026-09-29T18:50:00.998Z"
+}
