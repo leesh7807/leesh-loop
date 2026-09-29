@@ -17,7 +17,8 @@ async function readJson(path) {
   catch { return null; }
 }
 
-export function createRunRecord({ config, runId, workload, paths, runInput, startedAt = currentTimeIso() }) {
+export function createRunRecord({ config, database, runId, workload, paths, runInput, startedAt = currentTimeIso() }) {
+  if (!database?.database_url || !database?.database_id) throw new Error('E2E run record requires the selected database binding from admission');
   const start = Date.parse(startedAt);
   const workloadEvidence = runInput?.workload_evidence || {
     source: workload.source || 'catalog_random',
@@ -57,11 +58,11 @@ export function createRunRecord({ config, runId, workload, paths, runInput, star
         workflow: paths.workflowSnapshot
       }
     },
-    binding: { notion_database_url: config.notion_database_url, repository_url: config.repository_url, seed_source_ref: config.seed_source_ref, seed_commit: null, base_branch: null, base_commit: null },
-    artifacts: { task_id: null, task_url: null, task_identifier: null, publisher_result: null, publisher_failure: null, plan_binding: null, delivery_prs: [], delivery_pr_url: null, delivery_branch: null, delivery_branches: [], owned_deliveries: [], workpad_delivery_prs: [], workpad_latest_delivery_pr: null, workpad_merge_targets: [], delivered_head: null, delivered_head_locked: false, merged_head: null, remote_base_commit: null },
+    binding: { notion_database_url: database.database_url, database_id: database.database_id, repository_url: config.repository_url, seed_source_ref: config.seed_source_ref, seed_commit: null, base_branch: null, base_commit: null },
+    artifacts: { task_id: null, task_url: null, task_identifier: null, publisher_result: null, publisher_failure: null, plan_binding: null, delivery_prs: [], delivered_head: null, delivered_head_locked: false, merged_head: null, remote_base_commit: null },
     lifecycle: { observations: [], verified_through: null, verification_gaps: [], terminal_state: null, mechanical_human_review_transition: { performed: false, observed_at: null } },
     timing: { run: { started_at: startedAt, ended_at: null, observed_duration_ms: null }, lifecycle: {}, symphony: { start_requested_at: null, started_at: null, stopped_at: null }, chatgpt_shot: { job_id: null, first_observed_at: null, last_observed_at: null, observations: [], terminal_state: null, observed_duration_ms: null } },
-    evidence: { snapshots: [], errors: [], owned_branch_cleanup: null, workspace_paths: [] },
+    evidence: { snapshots: [], errors: [], branch_refs_before: null, branch_refs_after: null, branch_isolation: null, workspace_paths: [] },
     failures: [],
     finalization: { reason: null, actor: 'e2e-harness', actions: [], complete: false, incomplete: false, unresolved: [] },
     cleanup: { task_terminalized: false, runtime_stopped: false, branches_deleted: [], workspaces_deleted: [], unresolved: [] },

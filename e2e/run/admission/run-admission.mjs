@@ -61,8 +61,6 @@ export class RunAdmission {
           continue;
         }
         acquired = true;
-        this.config.notion_database_url = candidate.database_url;
-        this.config.notion_database_id = candidate.database_id;
         try {
           const tasks = await this.notionClient.listTasks(candidate.database_url);
           const conflicting = tasks.filter(task => !PRESERVED_STATES.has(task.state));

@@ -88,6 +88,7 @@ export class E2ERunner {
       };
     }
     let record = null;
+    const databaseUrl = admission.database.database_url;
     let paths = null;
     let branch = null;
     let portLease = null;
@@ -104,10 +105,9 @@ export class E2ERunner {
         workflow: { ...this.runInput.workflow, snapshot_path: paths.workflowSnapshot },
         runtime_options: { ...resolvedRuntimeOptions(this.config), database_id: admission.database.database_id, origin }
       };
-      record = createRunRecord({ config: this.config, runId, workload, paths, runInput: resolvedRunInput });
+      record = createRunRecord({ config: this.config, database: admission.database, runId, workload, paths, runInput: resolvedRunInput });
       record.binding.base_branch = branch;
       record.binding.seed_commit = seedCommit;
-      record.binding.database_id = admission.database.database_id;
       record.run_origin = origin;
       record.outer_execution_provenance = outerExecutionProvenance;
       record.evidence.branch_refs_before = admission.refs;
@@ -170,7 +170,7 @@ export class E2ERunner {
         await this.runRecordStore.save(record);
         await portLease.release();
         try {
-          runtimeResult = await this.operatorClient.startConfiguredOperatorProject(paths.runtimeProject, this.config.runtime_start_timeout_ms, this.config.notion_database_url);
+          runtimeResult = await this.operatorClient.startConfiguredOperatorProject(paths.runtimeProject, this.config.runtime_start_timeout_ms, databaseUrl);
           if (runtimeResult.window_error) throw new Error(`Operator UI startup failed: ${runtimeResult.window_error}`);
           portAttempt.result = 'started';
           portAttempt.finished_at = currentTimeIso();
@@ -211,7 +211,7 @@ export class E2ERunner {
       await this.notionPublisherClient.prepareProductionPublisher();
       let publication;
       try {
-        publication = await this.notionPublisherClient.publishAcceptedPlan({ plan: workload.accepted_plan, databaseUrl: this.config.notion_database_url, directory: paths.directory });
+        publication = await this.notionPublisherClient.publishAcceptedPlan({ plan: workload.accepted_plan, databaseUrl, directory: paths.directory });
       } catch (error) {
         record.artifacts.publisher_failure = { at: currentTimeIso(), error: String(error?.message || error) };
         throw error;
@@ -223,7 +223,7 @@ export class E2ERunner {
       task = { id: publication.page_id, identifier: publication.identifier, state: null };
       record.status = 'published';
       await this.runRecordStore.save(record);
-      const publishedTask = await this.notionClient.readTask(this.config.notion_database_url, publication.page_id);
+      const publishedTask = await this.notionClient.readTask(databaseUrl, publication.page_id);
       const publicationPlanIdentifier = publication.plan_identifier || publication.identifier;
       const taskPlanIdentifier = publishedTask?.plan_identifier || (publishedTask ? `PLAN-${sha256(publishedTask.accepted_plan).slice(0, 12).toUpperCase()}` : null);
       if (!publishedTask || publicationPlanIdentifier !== workload.plan_identifier || taskPlanIdentifier !== workload.plan_identifier || publishedTask.identifier !== publication.identifier || !matchesPublisherReadback(workload.accepted_plan, publishedTask.accepted_plan)) throw new Error('Publisher authoritative readback does not match the selected Accepted Plan, Plan provenance, and newly issued task identity');

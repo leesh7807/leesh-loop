@@ -38,11 +38,13 @@ export class RunLifecycleObserver {
   }
 
   async observeRunUntilTerminalDecision(record, task, dashboard, baseBranch) {
+    const databaseUrl = record.binding?.notion_database_url;
+    if (!databaseUrl) throw new Error(`E2E run ${record.run_id} has no selected database binding`);
     while (true) {
-      const snapshot = await runWithTimeout(() => this.runEvidenceCollector.collectSnapshot({ databaseUrl: this.config.notion_database_url, identifier: record.artifacts.task_identifier, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root }), 30_000, 'E2E evidence snapshot');
+      const snapshot = await runWithTimeout(() => this.runEvidenceCollector.collectSnapshot({ databaseUrl, identifier: record.artifacts.task_identifier, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root }), 30_000, 'E2E evidence snapshot');
       record.evidence.snapshots.push(snapshot);
       this.runTimingRecorder.recordEvidenceSnapshot(record, snapshot);
-      const observedTask = snapshot.notion ? await this.notionClient.readTask(this.config.notion_database_url, record.artifacts.task_id) : task;
+      const observedTask = snapshot.notion ? await this.notionClient.readTask(databaseUrl, record.artifacts.task_id) : task;
       if (observedTask) {
         task = observedTask;
         const state = task.state;
@@ -90,7 +92,7 @@ export class RunLifecycleObserver {
             await this.runRecordStore.save(record);
             return this.runFinalizer.finalizeRun({ record, reason: 'reentered_human_review', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
           }
-          const merging = await this.notionClient.updateTaskState(this.config.notion_database_url, task.id, 'Merging');
+          const merging = await this.notionClient.updateTaskState(databaseUrl, task.id, 'Merging');
           if (merging.state !== 'Merging') throw new Error(`Human Review mechanical transition readback was ${merging.state}`);
           record.lifecycle.mechanical_human_review_transition = { performed: true, observed_at: currentTimeIso() };
           this.recordLifecycleObservation(record, 'Merging', currentTimeIso());

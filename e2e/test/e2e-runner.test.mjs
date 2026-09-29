@@ -52,13 +52,16 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
   const taskIdentifier = 'TASK-fixture-1';
   let publishedPlan = plan;
   const publishedPlans = [];
+  const publishedDatabaseUrls = [];
+  const notionDatabaseReads = [];
+  const notionAdmissionReads = [];
   const task = state => ({ id: 'page-1', url: 'https://notion/page-1', identifier: taskIdentifier, state, accepted_plan: publishedPlan, workpad: state === 'Human Review' ? humanReviewWorkpad : '' });
   const transitions = [];
   const notion = {
-    async listTasks() { return []; },
+    async listTasks(databaseUrl) { notionAdmissionReads.push(databaseUrl); return []; },
     async listTasksForPlanIdentifier() { return [{ id: 'page-1', created_at: new Date(Date.now() + 1_000).toISOString() }]; },
-    async readTask() { return task(observedState); },
-    async updateTaskState(_databaseUrl, _taskId, nextState) { transitions.push(nextState); observedState = nextState; return task(observedState); },
+    async readTask(databaseUrl) { notionDatabaseReads.push(databaseUrl); return task(observedState); },
+    async updateTaskState(databaseUrl, _taskId, nextState) { notionDatabaseReads.push(databaseUrl); transitions.push(nextState); observedState = nextState; return task(observedState); },
     async appendWorkpad() {}
   };
   const startedDatabaseUrls = [];
@@ -96,7 +99,7 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
     async verifyCommitOnRemoteBranch() { return true; },
     async deleteRemoteBranch() {}
   };
-  const publisher = { async publishAcceptedPlan({ plan: acceptedPlan }) { publishedPlan = acceptedPlan; publishedPlans.push(acceptedPlan); return { page_id: 'page-1', url: 'https://notion/page-1', identifier: taskIdentifier, plan_identifier: derivePlanIdentifier(acceptedPlan) }; }, async prepareProductionPublisher() {} };
+  const publisher = { async publishAcceptedPlan({ plan: acceptedPlan, databaseUrl }) { publishedPlan = acceptedPlan; publishedPlans.push(acceptedPlan); publishedDatabaseUrls.push(databaseUrl); return { page_id: 'page-1', url: 'https://notion/page-1', identifier: taskIdentifier, plan_identifier: derivePlanIdentifier(acceptedPlan) }; }, async prepareProductionPublisher() {} };
   const github = {
     async pullRequestsForBase(baseBranch) {
       return [{ number: 4, url: deliveryUrl, baseRefName: baseBranch, headRefName: 'feature', headRefOid: deliveryHead, mergedAt: observedState === 'Done' ? new Date(clock()).toISOString() : null, mergeCommit: observedState === 'Done' ? { oid: mergeCommit } : null }];
@@ -114,7 +117,7 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
   const finalized = [];
   const runtimeStartingAtCall = [];
   const finalizer = { async finalizeRun({ record, reason, task: currentTask }) { finalized.push(reason); if (reason === 'reentered_human_review') { const cancelled = await notion.updateTaskState(config.notion_database_url, currentTask.id, 'Cancelled'); assert.equal(cancelled.state, 'Cancelled'); record.cleanup.task_terminalized = true; } record.status = 'finished'; record.finalization.reason = reason; record.finalization.complete = true; record.ended_at = new Date(clock()).toISOString(); await store.save(record); return record; } };
-  return { config, runInput, catalog: validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 5, accepted_plan: plan }]), notionClient: notion, operatorClient: runtime, gitClient: git, notionPublisherClient: publisher, githubClient: github, runEvidenceCollector: evidence, runFinalizer: finalizer, runRecordStore: store, reservationAuthority, finalized, transitions, publishedPlans, startedDatabaseUrls, runtimeStartingAtCall, get runtimeStopCalls() { return runtimeStopCalls; }, get runtimeStoppedVerificationCalls() { return runtimeStoppedVerificationCalls; } };
+  return { config, runInput, catalog: validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 5, accepted_plan: plan }]), notionClient: notion, operatorClient: runtime, gitClient: git, notionPublisherClient: publisher, githubClient: github, runEvidenceCollector: evidence, runFinalizer: finalizer, runRecordStore: store, reservationAuthority, finalized, transitions, publishedPlans, publishedDatabaseUrls, notionDatabaseReads, notionAdmissionReads, startedDatabaseUrls, runtimeStartingAtCall, get runtimeStopCalls() { return runtimeStopCalls; }, get runtimeStoppedVerificationCalls() { return runtimeStoppedVerificationCalls; } };
 }
 
 test('E2ERunner reaches terminal Done through injected production dependencies', async () => {
@@ -152,6 +155,28 @@ test('E2ERunner reaches terminal Done through injected production dependencies',
   assert.deepEqual(harness.transitions, ['Merging']);
   assert.equal(record.lifecycle.mechanical_human_review_transition.performed, true);
   assert.equal(Object.hasOwn(record.artifacts, 'mechanical_approval'), false);
+});
+
+test('E2ERunner keeps selected database binding explicit instead of mutating shared runtime config', async () => {
+  let current = 0;
+  const harness = fixture({ states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done'], clock: () => current++ });
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-selected-database-'));
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+  const selected = harness.config.database_pool[0];
+  const unselectedDefaultUrl = 'https://www.notion.so/cccccccccccc4ccc8ccccccccccccccc';
+  harness.config.notion_database_url = unselectedDefaultUrl;
+
+  const record = await new E2ERunner({ ...harness, random: () => 0, clock: () => current++, waitForPoll: async () => {} }).runProductionE2E();
+
+  assert.equal(harness.config.notion_database_url, unselectedDefaultUrl);
+  assert.equal(record.binding.notion_database_url, selected.database_url);
+  assert.equal(record.binding.database_id, selected.database_id);
+  assert.deepEqual(harness.startedDatabaseUrls, [selected.database_url]);
+  assert.deepEqual(harness.publishedDatabaseUrls, [selected.database_url]);
+  assert.ok(harness.notionAdmissionReads.every(databaseUrl => databaseUrl === selected.database_url));
+  assert.ok(harness.notionDatabaseReads.length > 0);
+  assert.ok(harness.notionDatabaseReads.every(databaseUrl => databaseUrl === selected.database_url));
 });
 
 test('E2ERunner retries a run-owned Operator startup with a new port pair after a bind conflict', async () => {

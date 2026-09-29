@@ -35,6 +35,7 @@ export class RunFinalizer {
   }
 
   async finalizeRun({ record, reason, task, dashboard, baseBranch, workspaceRoot, normalDone = false }) {
+    const databaseUrl = record.binding?.notion_database_url;
     record.finalization.reason = reason;
     if (!normalDone) {
       await this.runFinalizationAction(record, 'stop_run_owned_symphony', async signal => {
@@ -51,13 +52,13 @@ export class RunFinalizer {
       });
       if (record.cleanup.runtime_stopped) {
         const reread = task?.id
-          ? await this.runFinalizationAction(record, 'reread_task_after_runtime_stop', signal => this.notionClient.readTask(this.config.notion_database_url, task.id, signal))
+          ? await this.runFinalizationAction(record, 'reread_task_after_runtime_stop', signal => this.notionClient.readTask(databaseUrl, task.id, signal))
           : null;
         const rereadAction = record.finalization.actions.at(-1);
         if (rereadAction?.status === 'completed' && reread) task = reread;
         if (rereadAction?.status === 'completed' && task && !TERMINAL_STATES.has(task.state)) {
           await this.runFinalizationAction(record, 'cancel_nonterminal_task', async signal => {
-            const cancelled = await this.notionClient.updateTaskState(this.config.notion_database_url, task.id, 'Cancelled', signal);
+            const cancelled = await this.notionClient.updateTaskState(databaseUrl, task.id, 'Cancelled', signal);
             if (cancelled.state !== 'Cancelled') throw new Error(`Cancelled transition readback was ${cancelled.state}`);
             task = cancelled;
             record.cleanup.task_terminalized = true;
@@ -84,7 +85,7 @@ export class RunFinalizer {
     }
 
     await this.runFinalizationAction(record, 'final_evidence_snapshot', async signal => {
-      const snapshot = await this.runEvidenceCollector.collectSnapshot({ databaseUrl: this.config.notion_database_url, identifier: record.artifacts.task_identifier, dashboard, baseBranch, workspaceRoot, signal });
+      const snapshot = await this.runEvidenceCollector.collectSnapshot({ databaseUrl, identifier: record.artifacts.task_identifier, dashboard, baseBranch, workspaceRoot, signal });
       record.evidence.snapshots.push(snapshot);
       this.runTimingRecorder.recordEvidenceSnapshot(record, snapshot);
       return { observed_at: snapshot.observed_at, errors: snapshot.errors };
