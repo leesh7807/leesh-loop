@@ -38,7 +38,7 @@ export class GitHubClient {
 
   findDeliveryPullRequest(prs, deliveredPr) {
     const number = String(deliveredPr || '').match(/(?:\/|#)(\d+)$/)?.[1] || String(deliveredPr || '');
-    return prs.find(pr => pr.url === deliveredPr || String(pr.number) === number) || null;
+    return prs.findLast(pr => pr.url === deliveredPr || String(pr.number) === number) || null;
   }
 
   isSameRepositoryDelivery(pr) {

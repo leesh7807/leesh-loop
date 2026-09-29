@@ -241,6 +241,11 @@ test('finalization uses the authorized merge commit for an unverified run-scoped
     record.artifacts.delivered_head = targetHead;
     record.artifacts.delivered_head_locked = true;
     record.artifacts.owned_deliveries = [{ pr_url: deliveryUrl, branch: deliveryBranch, head: targetHead }];
+    record.evidence.snapshots.push({
+      observed_at: '2026-09-28T11:00:00Z',
+      notion: { state: 'Merging', workpad },
+      github: { delivery_prs: [{ ...pullRequest, mergedAt: null, mergeCommit: null }] }
+    });
     const remoteBranches = new Map([[baseBranch, initialBase], [deliveryBranch, targetHead]]);
     const deleteCalls = [];
     const git = {

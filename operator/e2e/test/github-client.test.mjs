@@ -20,6 +20,14 @@ test('delivery branch cleanup follows only the task-recorded PR identity', () =>
   assert.deepEqual(github.findRunOwnedDeliveryBranches(prs, record), ['task-delivery']);
 });
 
+test('delivery PR lookup uses the latest observation when snapshots contain repeated identities', () => {
+  const github = new GitHubClient({ repositoryUrl: 'git@github.com:owner/repo.git' });
+  const deliveryUrl = 'https://github.com/owner/repo/pull/7';
+  const earlier = { number: 7, url: deliveryUrl, headRefName: 'task-delivery', mergedAt: null };
+  const later = { ...earlier, mergedAt: '2026-09-28T12:00:00Z', mergeCommit: { oid: 'a'.repeat(40) } };
+  assert.equal(github.findDeliveryPullRequest([earlier, later], deliveryUrl), later);
+});
+
 test('GitHub adapter does not reinterpret raw Workpad snapshots', () => {
   const github = new GitHubClient({ repositoryUrl: 'git@github.com:owner/repo.git' });
   const deliveryUrl = 'https://github.com/owner/repo/pull/7';
