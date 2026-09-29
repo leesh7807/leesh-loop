@@ -45,14 +45,18 @@
     "recovery_marker": null,
     "unavailable": null,
     "last_transition": {
-      "type": "child_runtime_updated",
-      "at": "2026-09-29T14:43:23.339Z",
+      "type": "active_run_protected",
+      "at": "2026-09-29T18:51:25.268Z",
       "run_id": "77e09127-94b9-43c8-9156-cc25dca6a9f7",
-      "child_runtime_id": "145db36e-b2a5-4fe1-8116-5164e4033092",
-      "child_runtime_status": "stopped"
+      "evidence": {
+        "run_lifecycle_status": "failed",
+        "run_process_state": "unknown",
+        "child_runtime_id": "145db36e-b2a5-4fe1-8116-5164e4033092",
+        "child_process_state": "dead"
+      }
     }
   },
-  "event_sequence": 8,
-  "previous_event_sha": "9d4d40405a1d6b6c097c9b51187e4e1cabe9ee83",
-  "recorded_at": "2026-09-29T14:43:25.454Z"
+  "event_sequence": 9,
+  "previous_event_sha": "492d544d2d34836292e7641920a3000657935005",
+  "recorded_at": "2026-09-29T18:51:28.366Z"
 }
