@@ -111,31 +111,39 @@ After that readiness and dispatch-acknowledgement boundary, `start` opens the lo
 
 Agents work against the target repository according to its `WORKFLOW.md`, then write results and state back to Notion. For the concrete Leesh Loop workflow, a bound Symphony worker may also publish a supplied Plan as a canonical `Backlog` task through the existing Publisher and add that task to the current task's `Blocked By` relation. These are separate limited capabilities: the relation operation is bound to the dispatched task and is not arbitrary Notion management.
 
-## Production E2E harness
+## Repository-level E2E harness
 
-The production E2E harness lives under [`operator/e2e`](operator/e2e). Its tracked
-[`project.json`](operator/e2e/project.json) uses paths relative to that directory, so no
-machine-specific home path is needed. Run `npm run e2e` from the repository root in a
-credentialed host shell.
-The E2E CLI reads `NOTION_TOKEN` from its process environment or the repository root `.env`, and
-uses the normal GitHub CLI authentication. The token stays in the host-side E2E and Operator
-processes; Symphony removes tracker secrets from the Codex worker process and the E2E harness does
-not copy `.env` into the nested workspace. The E2E database URL comes from
-`LEESH_LOOP_E2E_NOTION_DATABASE_URL`; the Project file carries the seed source ref and Codex
-selections. The harness resolves the repository-owned E2E
-workflow, creates an opaque run-scoped base and a nested run-local Symphony workspace inside the
-current checkout, and uses the existing Publisher → `leesh-loop.mjs start` → Operator → Symphony
-production path. It does not introduce a separate E2E runtime or Symphony launcher, and stores
-durable evidence under the ignored `operator/e2e/runs/<run-id>/run.json` record. Pass run options
-after `--`, for example `npm run e2e -- --plan PATH [--hard-cap-ms MS]` for direct workload input
-or `npm run e2e -- --workflow PATH` for an exact per-run workflow.
+The production E2E harness is owned by the top-level [`e2e`](e2e) directory and runs with
+`npm run e2e`. A direct repository invocation and a request from a Symphony worker workspace use
+the same E2E-owned command boundary: it creates a durable run identity, performs database
+recovery and reservation, then starts an independent Operator/Symphony child runtime. The worker
+requests this boundary with `npm run e2e`; its workflow does not call production `npm start` or
+start Symphony itself.
 
-The harness records observed lifecycle, worker/review timing, external artifacts, finalization and
-cleanup separately. A run that ends at an observed production failure or finite hard cap is still a
-useful result when its evidence is preserved and admission reconciliation confirms that no residue
-blocks the next run. To perform the pre-dispatch safety check without publishing a task, run
-`node operator/e2e/cli.mjs admit operator/e2e/project.json` from the repository root. The root
-`e2e` script is for running a workload; it does not select the `admit` command.
+E2E has no user-managed Project file. It reads only the repository URL, configured production base
+branch, Codex model, and Codex reasoning effort from [`operator/project.json`](operator/project.json).
+The E2E workflow, workspace and state paths, temporary ports, timeouts, polling and cleanup policy
+remain E2E-owned. The default is [`e2e/WORKFLOW.md`](e2e/WORKFLOW.md), and `--workflow PATH` keeps
+the existing per-run workflow pass-through. The `.env` file is read by the E2E host-side process;
+it is never copied into the nested worker workspace.
+
+The legacy `LEESH_LOOP_E2E_NOTION_DATABASE_URL` supplies the first pool member. The initial pool
+adds the four empty databases listed in `e2e/model/e2e-runtime-config.mjs`. To replace the pool,
+provide `LEESH_LOOP_E2E_NOTION_DATABASE_URLS` as newline- or comma-separated URLs; its size is the
+available candidate capacity. Reservation and recovery events are stored in the configured Git
+remote, keyed by canonical Notion database identity, so different checkouts observe the same
+reservation. E2E run records, workflows, runtime state and nested workspaces stay under the current
+checkout's ignored `e2e/runs/<run-id>` and `e2e/workspaces/<run-id>` paths.
+
+Run with catalog selection or an explicit Accepted Plan. Options are passed through after `--`:
+
+```sh
+npm run e2e
+npm run e2e -- --plan PATH [--hard-cap-ms MS]
+npm run e2e -- --workflow PATH
+```
+
+To inspect the pool without starting a production workload, run `node e2e/cli.mjs admit`.
 
 ## Repository Harness
 
