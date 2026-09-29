@@ -46,7 +46,7 @@
     "unavailable": null,
     "last_transition": {
       "type": "active_run_protected",
-      "at": "2026-09-29T14:23:44.970Z",
+      "at": "2026-09-29T14:30:24.174Z",
       "run_id": "77e09127-94b9-43c8-9156-cc25dca6a9f7",
       "evidence": {
         "run_lifecycle_status": "active",
@@ -56,7 +56,7 @@
       }
     }
   },
-  "event_sequence": 5,
-  "previous_event_sha": "c9661cb5a0995432a2a9596f62471df312438a88",
-  "recorded_at": "2026-09-29T14:23:47.000Z"
+  "event_sequence": 6,
+  "previous_event_sha": "6ddcff3cb80df22e1100e7fc43155f9320e50243",
+  "recorded_at": "2026-09-29T14:30:26.269Z"
 }
