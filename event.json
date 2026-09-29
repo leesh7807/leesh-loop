@@ -19,11 +19,25 @@
       "execution_id": null,
       "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9"
     },
-    "updated_at": "2026-09-29T13:53:13.961Z",
+    "updated_at": "2026-09-29T13:53:54.897Z",
     "selected_database_id": "3ea8a265-8625-8047-81e0-ead9c231fc10",
-    "database_url": "https://app.notion.com/p/studyleesh/3ea8a2658625804781e0ead9c231fc10?v=d3a8a26586258361bab908ea713fdf9b"
+    "database_url": "https://app.notion.com/p/studyleesh/3ea8a2658625804781e0ead9c231fc10?v=d3a8a26586258361bab908ea713fdf9b",
+    "child_runtime_id": "e261775e-66a2-479e-abe8-def130954819",
+    "child_runtime": {
+      "runtime_id": "e261775e-66a2-479e-abe8-def130954819",
+      "status": "active",
+      "dashboard": "http://127.0.0.1:34563",
+      "process_identity": {
+        "pid": 1078,
+        "process_start_ticks": "2863254",
+        "boot_id": "43f4e705-39f8-4dee-b528-e3c113adbd88",
+        "pid_namespace": "pid:[4026532935]",
+        "host": "lees"
+      },
+      "state_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/220531b9-c5c1-45ac-ad04-b9d83d2e68a3/operator-state/runtime.json"
+    }
   },
-  "event_sequence": 2,
-  "previous_event_sha": "8edc6a61190d86acc0b4cad511c4cdf619511c44",
-  "recorded_at": "2026-09-29T13:53:16.141Z"
+  "event_sequence": 3,
+  "previous_event_sha": "1eb2e187b3e09565d92d29292012867042d92154",
+  "recorded_at": "2026-09-29T13:53:57.341Z"
 }
