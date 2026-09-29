@@ -1,6 +1,7 @@
 import { RunTimingRecorder, runWithTimeout, currentTimeIso } from '../run-timing.mjs';
 import { TERMINAL_STATES } from '../lifecycle/lifecycle-interpreter.mjs';
 import { addFailure, recordFinalizationAction } from '../../model/run-record-store.mjs';
+import { recordRunDeliveryEvidence } from '../../model/run-delivery-evidence.mjs';
 import { recordSnapshotWorkpadEvidence, recordRunWorkpadEvidence } from '../../model/run-workpad-evidence.mjs';
 import { isSameRepositoryDelivery } from '../../systems/github/github-client.mjs';
 import { readRunOwnedRuntime, recordedRunRuntimeId } from '../run-owned-runtime.mjs';
@@ -178,13 +179,8 @@ export class RunFinalizer {
             if (!observed?.headRefName || !isSameRepositoryDelivery(observed, this.githubClient.repository)) {
               throw new Error(`delivery PR ${identity} does not identify a same-repository run-owned head`);
             }
-            record.artifacts.delivery_pr_url = observed.url || identity;
-            record.artifacts.delivery_branch = observed.headRefName;
-            record.artifacts.delivery_branches ||= [];
-            if (!record.artifacts.delivery_branches.includes(observed.headRefName)) record.artifacts.delivery_branches.push(observed.headRefName);
-            record.artifacts.owned_deliveries ||= [];
-            if (!record.artifacts.owned_deliveries.some(delivery => delivery.pr_url === record.artifacts.delivery_pr_url)) record.artifacts.owned_deliveries.push({ pr_url: record.artifacts.delivery_pr_url, branch: observed.headRefName, head: observed.headRefOid || null, observed_at: currentTimeIso() });
-            return { url: record.artifacts.delivery_pr_url, branch: observed.headRefName };
+            const delivery = recordRunDeliveryEvidence(record, observed.url || identity, observed, { sameRepository: true, observedAt: currentTimeIso() });
+            return { url: delivery.pr_url, branch: delivery.branch };
           });
           if (readback?.branch) ownedBranches.add(readback.branch);
           continue;
@@ -195,13 +191,8 @@ export class RunFinalizer {
           });
           continue;
         }
-        record.artifacts.delivery_pr_url = pr.url || identity;
-        record.artifacts.delivery_branch = pr.headRefName;
-        record.artifacts.delivery_branches ||= [];
-        if (!record.artifacts.delivery_branches.includes(pr.headRefName)) record.artifacts.delivery_branches.push(pr.headRefName);
-        record.artifacts.owned_deliveries ||= [];
-        if (!record.artifacts.owned_deliveries.some(delivery => delivery.pr_url === record.artifacts.delivery_pr_url)) record.artifacts.owned_deliveries.push({ pr_url: record.artifacts.delivery_pr_url, branch: pr.headRefName, head: pr.headRefOid || null, observed_at: currentTimeIso() });
-        ownedBranches.add(pr.headRefName);
+        const delivery = recordRunDeliveryEvidence(record, pr.url || identity, pr, { sameRepository: true, observedAt: currentTimeIso() });
+        ownedBranches.add(delivery.branch);
       }
       const legacyOwnedBranches = (record.evidence.branch_isolation?.remaining_run_owned_refs || [])
         .map(ref => /^refs\/heads\/(.+)$/.exec(ref)?.[1])

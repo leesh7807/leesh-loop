@@ -4,6 +4,7 @@ import { RunTimingRecorder, runWithTimeout, currentTimeIso, waitForNextPoll } fr
 import { RunCompletionVerifier } from './run-completion-verifier.mjs';
 import { RunDoneVerifier } from './run-done-verifier.mjs';
 import { RunFinalizer } from '../finalization/run-finalizer.mjs';
+import { recordRunDeliveryEvidence } from '../../model/run-delivery-evidence.mjs';
 import { recordRunWorkpadEvidence } from '../../model/run-workpad-evidence.mjs';
 import { isSameRepositoryDelivery } from '../../systems/github/github-client.mjs';
 
@@ -55,16 +56,11 @@ export class RunLifecycleObserver {
             ? this.githubClient.findDeliveryPullRequest(record.artifacts.delivery_prs, deliveryPrUrl)
             : null;
           const sameRepositoryDelivery = isSameRepositoryDelivery(deliveryPr, this.githubClient.repository);
-          record.artifacts.delivery_pr_url = deliveryPrUrl && deliveryPrUrl !== 'none' ? deliveryPrUrl : null;
-          record.artifacts.delivery_branch = sameRepositoryDelivery ? deliveryPr.headRefName : null;
-          record.artifacts.delivery_branches ||= [];
-          if (record.artifacts.delivery_branch && !record.artifacts.delivery_branches.includes(record.artifacts.delivery_branch)) record.artifacts.delivery_branches.push(record.artifacts.delivery_branch);
-          record.artifacts.owned_deliveries ||= [];
-          if (record.artifacts.delivery_pr_url && sameRepositoryDelivery && !record.artifacts.owned_deliveries.some(delivery => delivery.pr_url === record.artifacts.delivery_pr_url)) {
-            record.artifacts.owned_deliveries.push({ pr_url: record.artifacts.delivery_pr_url, branch: deliveryPr.headRefName, head: deliveryPr.headRefOid || null, observed_at: snapshot.observed_at });
-          }
-          record.artifacts.delivered_head = sameRepositoryDelivery ? deliveryPr.headRefOid || null : null;
-          record.artifacts.delivered_head_locked = true;
+          recordRunDeliveryEvidence(record, deliveryPrUrl, deliveryPr, {
+            sameRepository: sameRepositoryDelivery,
+            observedAt: snapshot.observed_at,
+            lockDeliveredHead: true
+          });
         }
         const planBinding = state === 'Done' ? null : this.doneVerifier.observeTrackerInput(record, task, snapshot);
         if (planBinding?.status === 'mismatch') {
