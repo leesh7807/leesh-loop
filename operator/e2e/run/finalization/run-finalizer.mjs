@@ -13,6 +13,20 @@ function completedBranchDeletion(record, action, branch) {
     || (record.cleanup?.branches_deleted || []).includes(branch);
 }
 
+function resolveRuntimeAbsence(record, runtimeReadback) {
+  const action = 'verify_run_owned_symphony_runtime';
+  const wasUnresolved = record.finalization.unresolved.includes(action) || record.cleanup.unresolved.includes(action);
+  record.finalization.unresolved = record.finalization.unresolved.filter(item => item !== action);
+  record.cleanup.unresolved = record.cleanup.unresolved.filter(item => item !== action);
+  record.finalization.incomplete = record.finalization.unresolved.length > 0;
+  if (wasUnresolved) {
+    recordFinalizationAction(record, action, {
+      status: 'completed',
+      value: { ...runtimeReadback, reason: 'authoritative runtime readback confirmed this run-owned runtime is absent' }
+    });
+  }
+}
+
 function authorizedMergeTarget(record, identities, branch, prs, githubClient) {
   for (const target of [...(record.artifacts?.workpad_merge_targets || [])].reverse()) {
     if (!identities.includes(target.approved_pr) || !COMMIT_SHA.test(target.merge_target_head || '')) continue;
@@ -78,6 +92,7 @@ export class RunFinalizer {
     }
     if (beforeStop.status === 'absent') {
       record.cleanup.runtime_stopped = true;
+      resolveRuntimeAbsence(record, beforeStop);
       this.runTimingRecorder.recordSymphonyStopped(record, currentTimeIso());
       return { skipped: true, runtime_readback: beforeStop };
     }
@@ -95,6 +110,7 @@ export class RunFinalizer {
         ? `run-owned Symphony runtime ${runtimeReadback.runtime_id} still responds after stop`
         : `run-owned Symphony runtime stop could not be confirmed: ${runtimeReadback.error}`);
     }
+    resolveRuntimeAbsence(record, runtimeReadback);
     record.cleanup.runtime_stopped = true;
     this.runTimingRecorder.recordSymphonyStopped(record, currentTimeIso());
     return { ...value, runtime_readback: runtimeReadback };

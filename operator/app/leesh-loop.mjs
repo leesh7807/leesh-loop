@@ -329,6 +329,23 @@ async function stopOwnedRuntime(config, runtimeId) {
     if (!await terminate(state)) {
       return { stopped: false, process_identity_mismatch: true, expected_runtime_id: runtimeId };
     }
+    let observed;
+    try {
+      if (typeof state.effective?.dashboard !== 'string' || !state.effective.dashboard) {
+        return { stopped: false, runtime_unconfirmed: true, expected_runtime_id: runtimeId };
+      }
+      observed = await request(`${state.effective.dashboard}/api/v1/runtime`);
+    } catch (error) {
+      if (error?.cause?.code !== 'ECONNREFUSED') {
+        return { stopped: false, runtime_unconfirmed: true, expected_runtime_id: runtimeId, error: String(error?.message || error) };
+      }
+    }
+    if (observed && (typeof observed.runtime_id !== 'string' || !observed.runtime_id)) {
+      return { stopped: false, runtime_unconfirmed: true, expected_runtime_id: runtimeId };
+    }
+    if (observed?.runtime_id === runtimeId) {
+      return { stopped: false, runtime_still_present: true, expected_runtime_id: runtimeId, observed_runtime_id: observed.runtime_id };
+    }
     await stopUi(config);
     await clear(config);
     return { stopped: true, runtime_id: runtimeId };

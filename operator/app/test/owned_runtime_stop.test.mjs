@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { execFile } from 'node:child_process';
+import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
@@ -47,6 +48,23 @@ async function fixture() {
   return { directory, stateDirectory, configPath };
 }
 
+async function runtimeServer(t, runtimeId, { hang = false } = {}) {
+  const server = createServer((_request, response) => {
+    if (hang) return;
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ runtime_id: runtimeId }));
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
 test('conditional runtime stop leaves a replacement runtime and its state untouched', async t => {
   const { directory, stateDirectory, configPath } = await fixture();
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -54,6 +72,8 @@ test('conditional runtime stop leaves a replacement runtime and its state untouc
   await mkdir(stateDirectory, { recursive: true });
   const runtimeState = { runtime_id: 'replacement-runtime', pid, process_start_ticks };
   await writeFile(join(stateDirectory, 'runtime.json'), JSON.stringify(runtimeState));
+  const ownershipState = { runtime_id: 'replacement-runtime', pid, process_start_ticks };
+  await writeFile(join(stateDirectory, 'ownership.json'), JSON.stringify(ownershipState));
   await writeFile(join(stateDirectory, 'publish-ui.json'), JSON.stringify({ pid: 999999, process_start_ticks: 'unrelated' }));
 
   const { stdout } = await execFileAsync(process.execPath, [cli, 'stop-owned', configPath, 'recorded-run-runtime'], { timeout: 10_000 });
@@ -65,6 +85,7 @@ test('conditional runtime stop leaves a replacement runtime and its state untouc
     observed_runtime_id: 'replacement-runtime'
   });
   assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'runtime.json'), 'utf8')), runtimeState);
+  assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'ownership.json'), 'utf8')), ownershipState);
   assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'publish-ui.json'), 'utf8')), { pid: 999999, process_start_ticks: 'unrelated' });
   assert.equal(child.exitCode, null);
 });
@@ -73,12 +94,62 @@ test('conditional runtime stop cleans the state only for the matching runtime id
   const { directory, stateDirectory, configPath } = await fixture();
   t.after(() => rm(directory, { recursive: true, force: true }));
   const { child, pid, process_start_ticks } = await startOwnedProcess(t);
+  const dashboard = await runtimeServer(t, 'replacement-runtime');
   await mkdir(stateDirectory, { recursive: true });
-  await writeFile(join(stateDirectory, 'runtime.json'), JSON.stringify({ runtime_id: 'recorded-run-runtime', pid, process_start_ticks }));
+  await writeFile(join(stateDirectory, 'runtime.json'), JSON.stringify({ runtime_id: 'recorded-run-runtime', pid, process_start_ticks, effective: { dashboard } }));
+  await writeFile(join(stateDirectory, 'ownership.json'), JSON.stringify({ runtime_id: 'recorded-run-runtime', pid, process_start_ticks }));
 
   const { stdout } = await execFileAsync(process.execPath, [cli, 'stop-owned', configPath, 'recorded-run-runtime'], { timeout: 10_000 });
 
   assert.deepEqual(JSON.parse(stdout), { stopped: true, runtime_id: 'recorded-run-runtime' });
   await assert.rejects(readFile(join(stateDirectory, 'runtime.json'), 'utf8'), { code: 'ENOENT' });
+  await assert.rejects(readFile(join(stateDirectory, 'ownership.json'), 'utf8'), { code: 'ENOENT' });
+  if (child.exitCode === null && child.signalCode === null) await once(child, 'exit');
+});
+
+test('run-owned stop preserves runtime ownership when the dashboard still reports that runtime', async t => {
+  const { directory, stateDirectory, configPath } = await fixture();
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { child, pid, process_start_ticks } = await startOwnedProcess(t);
+  const dashboard = await runtimeServer(t, 'recorded-run-runtime');
+  const runtimeState = { runtime_id: 'recorded-run-runtime', pid, process_start_ticks, effective: { dashboard } };
+  const ownershipState = { runtime_id: 'recorded-run-runtime', pid, process_start_ticks };
+  await mkdir(stateDirectory, { recursive: true });
+  await writeFile(join(stateDirectory, 'runtime.json'), JSON.stringify(runtimeState));
+  await writeFile(join(stateDirectory, 'ownership.json'), JSON.stringify(ownershipState));
+
+  const { stdout } = await execFileAsync(process.execPath, [cli, 'stop-owned', configPath, 'recorded-run-runtime'], { timeout: 10_000 });
+
+  assert.deepEqual(JSON.parse(stdout), {
+    stopped: false,
+    runtime_still_present: true,
+    expected_runtime_id: 'recorded-run-runtime',
+    observed_runtime_id: 'recorded-run-runtime'
+  });
+  assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'runtime.json'), 'utf8')), runtimeState);
+  assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'ownership.json'), 'utf8')), ownershipState);
+  if (child.exitCode === null && child.signalCode === null) await once(child, 'exit');
+});
+
+test('run-owned stop preserves runtime ownership when dashboard confirmation times out', async t => {
+  const { directory, stateDirectory, configPath } = await fixture();
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { child, pid, process_start_ticks } = await startOwnedProcess(t);
+  const dashboard = await runtimeServer(t, 'recorded-run-runtime', { hang: true });
+  const runtimeState = { runtime_id: 'recorded-run-runtime', pid, process_start_ticks, effective: { dashboard } };
+  const ownershipState = { runtime_id: 'recorded-run-runtime', pid, process_start_ticks };
+  await mkdir(stateDirectory, { recursive: true });
+  await writeFile(join(stateDirectory, 'runtime.json'), JSON.stringify(runtimeState));
+  await writeFile(join(stateDirectory, 'ownership.json'), JSON.stringify(ownershipState));
+
+  const { stdout } = await execFileAsync(process.execPath, [cli, 'stop-owned', configPath, 'recorded-run-runtime'], { timeout: 10_000 });
+
+  const result = JSON.parse(stdout);
+  assert.equal(result.stopped, false);
+  assert.equal(result.runtime_unconfirmed, true);
+  assert.equal(result.expected_runtime_id, 'recorded-run-runtime');
+  assert.ok(result.error);
+  assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'runtime.json'), 'utf8')), runtimeState);
+  assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'ownership.json'), 'utf8')), ownershipState);
   if (child.exitCode === null && child.signalCode === null) await once(child, 'exit');
 });

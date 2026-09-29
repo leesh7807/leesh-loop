@@ -98,6 +98,36 @@ test('successful reconciliation clears an earlier unresolved action', async () =
   assert.deepEqual(second.cleanup.unresolved, []);
 });
 
+test('authoritative runtime absence clears an earlier unresolved runtime verification', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-absent-runtime-'));
+  const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
+  const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
+  const record = createRunRecord({ config, runId: 'run-absent-runtime', workload, paths: createRunPaths(config, 'run-absent-runtime') });
+  record.runtime = { dashboard: 'http://127.0.0.1:4410', runtime_id: 'runtime-run-absent' };
+  record.timing.symphony.started_at = new Date().toISOString();
+  record.finalization.unresolved = ['verify_run_owned_symphony_runtime'];
+  record.cleanup.unresolved = ['verify_run_owned_symphony_runtime'];
+  record.finalization.incomplete = true;
+  const task = { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' };
+  const runtime = {
+    async readSymphonyRuntimeStatus() { throw Object.assign(new Error('runtime is absent'), { cause: { code: 'ECONNREFUSED' } }); },
+    async stopRunOwnedSymphonyRuntime() { assert.fail('must not stop a runtime already confirmed absent'); }
+  };
+  const notion = { async readTask() { return task; } };
+  const git = { async readRemoteBranchCommit() { return null; }, async deleteRemoteBranch() { return { already_absent: true }; } };
+  const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: task, github: { delivery_prs: [] }, symphony: {}, chatgpt_shot: null, errors: [] }; } };
+  const finalizer = new RunFinalizer({ config, runRecordStore: { async save() {} }, notionClient: notion, operatorClient: runtime, gitClient: git, githubClient: {}, runEvidenceCollector: evidence });
+
+  const result = await finalizer.finalizeRun({ record, reason: 'admission_reconciliation', task, workspaceRoot: null });
+
+  assert.equal(result.cleanup.runtime_stopped, true);
+  assert.equal(result.evidence.owned_runtime_cleanup.status, 'absent');
+  assert.deepEqual(result.finalization.unresolved, []);
+  assert.deepEqual(result.cleanup.unresolved, []);
+  assert.equal(result.finalization.complete, true);
+  assert.ok(result.finalization.actions.some(item => item.action === 'verify_run_owned_symphony_runtime' && item.status === 'completed'));
+});
+
 test('reconciliation blocks cleanup when a durably requested runtime has no recorded identity', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-starting-'));
   const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
