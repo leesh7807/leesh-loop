@@ -54,13 +54,9 @@ export function materializeWorkloadForRun(candidate, { tasks = [] } = {}) {
   });
 }
 
-export function selectAvailableWorkload(catalog, { random = Math.random, completedCatalogEntryIds = [] } = {}) {
-  const completed = new Set(completedCatalogEntryIds);
-  const candidates = catalog.filter(candidate => !completed.has(candidate.id));
-  if (candidates.length === 0) {
-    throw new Error('E2E workload catalog has no unfinished entries; replace completed catalog workloads before another default run');
-  }
+export function selectAvailableWorkload(catalog, { random = Math.random } = {}) {
+  if (catalog.length === 0) throw new Error('E2E workload catalog has no candidates');
   const value = Number(random());
-  const index = Number.isFinite(value) && value >= 0 && value < 1 ? Math.floor(value * candidates.length) : 0;
-  return candidates[index];
+  const index = Number.isFinite(value) && value >= 0 && value < 1 ? Math.floor(value * catalog.length) : 0;
+  return catalog[index];
 }

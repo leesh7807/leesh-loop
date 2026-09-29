@@ -87,15 +87,7 @@ export class RunAdmission {
     const tasks = await this.notionClient.listTasks(this.config.notion_database_url);
     const conflicting = tasks.filter(task => ACTIVE_STATES.has(task.state) || task.state === 'Publisher Pending');
     if (conflicting.length) throw new Error(`resolved E2E Notion database has active or dispatchable residue: ${conflicting.map(task => `${task.identifier}:${task.state}`).join(', ')}`);
-    const completedCatalogEntryIds = [...new Set(records
-      .filter(record => record.workload?.source === 'catalog_random')
-      .filter(record => {
-        const taskIdentifier = record.artifacts?.task_identifier || record.workload?.plan_identifier;
-        return tasks.some(task => task.identifier === taskIdentifier && task.state === 'Done');
-      })
-      .map(record => record.workload?.catalog_entry_id || record.workload?.id)
-      .filter(id => typeof id === 'string' && id.length > 0))];
-    return { workload: this.catalog, tasks, completedCatalogEntryIds };
+    return { workload: this.catalog, tasks };
   }
 
   async reconcileInterruptedRun(record) {

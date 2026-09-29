@@ -53,11 +53,10 @@ catalog-id selector. Use `--plan PATH` when the Plan's particular task meaning i
 production E2E path; `--workflow` alone still uses a randomly selected catalog Plan. Supply both
 options when a scenario depends on both a specific task and workflow.
 
-Default selection is random among catalog entries without a linked `Done` task from an earlier
-catalog run. Completed entries are not reused; when every entry is complete, replace them with fresh
-small repository changes before starting another default run. Completion is matched through the
-durable run's catalog provenance and task identity, so a `--plan` scenario remains separate even if
-it has similar Plan text.
+Each default run selects randomly from the full catalog. The selected entry is materialized with the
+next numeric H1 suffix, so a completed catalog workload remains eligible for later runs. Provided
+Plan scenarios remain separate through their workload provenance even when their text resembles a
+catalog Plan.
 
 Use `--workflow ./WORKFLOW.md` to supply one exact workflow document for a run. The workflow is
 resolved once before the production runtime starts and is copied verbatim into that run's evidence.

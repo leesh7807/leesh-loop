@@ -62,7 +62,7 @@ test('catalog random input retains before/after materialization evidence', async
   assert.equal(resolved.evidence.hard_cap.provenance, 'catalog_entry.hard_cap_ms');
 });
 
-test('catalog resolution skips completed entries while preserving random selection', async t => {
+test('catalog resolution can republish a completed entry with the next materialized identity', async t => {
   const files = await fixtureFiles(t);
   const input = await resolveE2ERunInput({ config: files.config });
   const catalog = validateWorkloadCatalog([
@@ -73,11 +73,11 @@ test('catalog resolution skips completed entries while preserving random selecti
     runInput: input,
     catalog,
     tasks: [{ title: 'A-1', state: 'Done' }],
-    completedCatalogEntryIds: ['a'],
     random: () => 0
   });
-  assert.equal(resolved.workload.catalog_entry_id, 'b');
-  assert.equal(resolved.workload.accepted_plan, '# B-1\n\nAdd a workspace-files example.\n');
+  assert.equal(resolved.workload.catalog_entry_id, 'a');
+  assert.equal(resolved.workload.execution_number, 2);
+  assert.equal(resolved.workload.accepted_plan, '# A-2\n\nAdd a Git target example.\n');
 });
 
 test('invalid UTF-8 and empty provided plans are rejected before production input is resolved', async t => {

@@ -60,7 +60,7 @@ export async function resolveE2ERunInput({ config, planPath, workflowPath, hardC
     }
   };
 }
-export function resolveWorkloadForRun({ runInput, catalog = [], tasks = [], completedCatalogEntryIds = [], random = Math.random } = {}) {
+export function resolveWorkloadForRun({ runInput, catalog = [], tasks = [], random = Math.random } = {}) {
   if (runInput?.workload) {
     const provided = runInput.workload;
     return {
@@ -86,7 +86,7 @@ export function resolveWorkloadForRun({ runInput, catalog = [], tasks = [], comp
     };
   }
 
-  const selected = selectAvailableWorkload(catalog, { random, completedCatalogEntryIds });
+  const selected = selectAvailableWorkload(catalog, { random });
   const materialized = materializeWorkloadForRun(selected, { tasks });
   return {
     workload: Object.freeze({ ...materialized, source: 'catalog_random', catalog_entry_id: selected.id, hard_cap_provenance: 'catalog_entry.hard_cap_ms' }),

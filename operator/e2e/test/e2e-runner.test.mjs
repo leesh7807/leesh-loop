@@ -435,29 +435,6 @@ test('admission keeps catalog workloads eligible when prior task instances are t
   const result = await new E2ERunner({ ...harness, random: () => 0 }).admission.checkRunAdmission();
   assert.equal(result.workload.length, 1);
   assert.equal(result.workload[0].plan_identifier, harness.catalog[0].plan_identifier);
-  assert.deepEqual(result.completedCatalogEntryIds, []);
-});
-
-test('admission consumes only Done workloads bound to catalog run provenance', async () => {
-  const harness = fixture({ states: ['Ready'], clock: () => 0 });
-  harness.runRecordStore.listRecords = async () => [
-    {
-      status: 'finished', finalization: { complete: true }, cleanup: {}, binding: {}, paths: {},
-      workload: { source: 'catalog_random', catalog_entry_id: 'representative', plan_identifier: 'PLAN-CATALOG' },
-      artifacts: { task_identifier: 'PLAN-CATALOG' }
-    },
-    {
-      status: 'finished', finalization: { complete: true }, cleanup: {}, binding: {}, paths: {},
-      workload: { source: 'provided', plan_identifier: 'PLAN-PROVIDED' },
-      artifacts: { task_identifier: 'PLAN-PROVIDED' }
-    }
-  ];
-  harness.notionClient.listTasks = async () => [
-    { identifier: 'PLAN-CATALOG', state: 'Done' },
-    { identifier: 'PLAN-PROVIDED', state: 'Done' }
-  ];
-  const result = await new E2ERunner({ ...harness, random: () => 0 }).admission.checkRunAdmission();
-  assert.deepEqual(result.completedCatalogEntryIds, ['representative']);
 });
 
 test('admission ignores legacy unresolved_new_refs without rewriting history', async () => {
