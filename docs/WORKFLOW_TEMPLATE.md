@@ -4,6 +4,17 @@ This template supplies the common Plan-based worker policy and GitHub delivery d
 
 The concrete upstream `elixir/WORKFLOW.md` in OpenAI Symphony is a useful worker-policy reference only. It is not inherited by Leesh Loop workers.
 
+You are working on an Accepted Plan task.
+
+* Identifier: {{ issue.identifier }}
+* Title: {{ issue.title }}
+* Current state: {{ issue.state }}
+* URL: {{ issue.url }}
+
+Accepted Plan:
+
+{{ issue.description }}
+
 ## Start from the accepted execution input
 
 Treat the task's Accepted Plan as an immutable, correctly published execution input. Do not add a publication preflight, re-prove publication or task-to-Plan binding, or attempt to repair malformed publication/integration from a normal worker run. Those are Publisher, adapter, or integration defects.

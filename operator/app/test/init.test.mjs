@@ -105,6 +105,11 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.doesNotMatch(result.completionOutput, /npm (?:install|ci)|mix deps\.get/);
   assert.match(workflow, /chatgpt-shot submit/);
   assert.match(workflow, /chatgpt-shot jobs/);
+  assert.match(workflow, /\{\{ issue\.identifier \}\}/);
+  assert.match(workflow, /\{\{ issue\.title \}\}/);
+  assert.match(workflow, /\{\{ issue\.state \}\}/);
+  assert.match(workflow, /\{\{ issue\.url \}\}/);
+  assert.match(workflow, /\{\{ issue\.description \}\}/);
   assert.match(workflow, /git clone --branch "\$SYMPHONY_GITHUB_BASE_BRANCH"/);
   assert.match(workflow, /create the task branch from that fetched remote commit/);
   assert.match(workflow, /Create the PR with an explicit configured base/);
