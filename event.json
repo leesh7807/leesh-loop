@@ -24,7 +24,15 @@
       },
       "run_lifecycle": "active",
       "child_runtime": {
-        "status": "not_started"
+        "runtime_id": null,
+        "status": "starting",
+        "state_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/6e7752ed-37d1-49c8-bfbb-a6fe3396cd3e/operator-state",
+        "process_identity": null,
+        "requested_at": "2026-09-29T13:39:38.248Z",
+        "ports": {
+          "symphony_port": 45183,
+          "ui_port": 37515
+        }
       },
       "base_branch": "base/6e7752ed-37d1-49c8-bfbb-a6fe3396cd3e",
       "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/workspaces/6e7752ed-37d1-49c8-bfbb-a6fe3396cd3e",
@@ -34,18 +42,14 @@
     "recovery_marker": null,
     "unavailable": null,
     "last_transition": {
-      "type": "reservation_metadata_updated",
-      "at": "2026-09-29T13:39:26.825Z",
+      "type": "child_runtime_updated",
+      "at": "2026-09-29T13:39:39.731Z",
       "run_id": "6e7752ed-37d1-49c8-bfbb-a6fe3396cd3e",
-      "metadata": {
-        "base_branch": "base/6e7752ed-37d1-49c8-bfbb-a6fe3396cd3e",
-        "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/workspaces/6e7752ed-37d1-49c8-bfbb-a6fe3396cd3e",
-        "run_record_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/6e7752ed-37d1-49c8-bfbb-a6fe3396cd3e/run.json",
-        "workflow_snapshot_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/6e7752ed-37d1-49c8-bfbb-a6fe3396cd3e/workflow.md"
-      }
+      "child_runtime_id": null,
+      "child_runtime_status": "starting"
     }
   },
-  "event_sequence": 2,
-  "previous_event_sha": "d01301bc05b6ff2ea902053024967ec1bb6e1e5d",
-  "recorded_at": "2026-09-29T13:39:29.278Z"
+  "event_sequence": 3,
+  "previous_event_sha": "ed564a4b938c40121de8c1716f8e316d97ee4ae3",
+  "recorded_at": "2026-09-29T13:39:42.334Z"
 }
