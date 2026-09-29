@@ -21,6 +21,12 @@ export class OperatorClient {
     return parseJsonOutput(stdout, 'Operator stop');
   }
 
+  async stopRunOwnedSymphonyRuntime(projectPath, runtimeId, timeoutMs, signal) {
+    if (typeof runtimeId !== 'string' || !runtimeId) throw new Error('run-owned Symphony stop requires a recorded runtime ID');
+    const { stdout } = await this.commandRunner('node', [this.app, 'stop-owned', projectPath, runtimeId], { cwd: this.root, timeout: timeoutMs, signal });
+    return parseJsonOutput(stdout, 'Operator run-owned Symphony stop');
+  }
+
   requestSignal(signal, timeoutMs) {
     return signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
   }

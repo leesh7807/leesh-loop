@@ -318,6 +318,22 @@ async function start(config) {
   });
 }
 async function stop(config) { return withLock(config, async () => { const state = await json(paths(config).state); if (state) await terminate(state); await stopUi(config); await clear(config); return { stopped: Boolean(state) }; }); }
+async function stopOwnedRuntime(config, runtimeId) {
+  if (!runtimeId) throw new Error('stop-owned requires a runtime ID');
+  return withLock(config, async () => {
+    const state = await json(paths(config).state);
+    if (!state) return { stopped: false, already_absent: true, expected_runtime_id: runtimeId };
+    if (state.runtime_id !== runtimeId) {
+      return { stopped: false, identity_mismatch: true, expected_runtime_id: runtimeId, observed_runtime_id: state.runtime_id || null };
+    }
+    if (!await terminate(state)) {
+      return { stopped: false, process_identity_mismatch: true, expected_runtime_id: runtimeId };
+    }
+    await stopUi(config);
+    await clear(config);
+    return { stopped: true, runtime_id: runtimeId };
+  });
+}
 
 async function serve(config, { prepared = false } = {}) {
   if (!prepared) {
@@ -340,21 +356,23 @@ const [command, ...commandArgs] = locked ? args.slice(1) : args;
 const configFile = commandArgs[0] || defaultConfig;
 let directExecution = false;
 try { directExecution = Boolean(process.argv[1] && realpathSync(process.argv[1]) === appScript); } catch { /* Node may be importing this module from another entry point. */ }
-if (directExecution && !['start', 'stop', 'serve', 'serve-prepared'].includes(command)) {
-  const usage = 'Usage: node operator/app/leesh-loop.mjs <start|stop|serve> [project-config.json]';
+if (directExecution && !['start', 'stop', 'stop-owned', 'serve', 'serve-prepared'].includes(command)) {
+  const usage = 'Usage: node operator/app/leesh-loop.mjs <start|stop|stop-owned|serve> [project-config.json] [runtime-id]';
   if (command === '--help' || command === '-h') console.log(usage);
   else { console.error(usage); process.exitCode = 2; }
 } else if (directExecution) {
-  loadConfig(configFile, { validateWorkspaceFileSources: command === 'start', requireNotionDatabase: command !== 'stop' }).then(async config => {
-    if (!locked && ['start', 'stop'].includes(command)) {
+  loadConfig(configFile, { validateWorkspaceFileSources: command === 'start', requireNotionDatabase: !['stop', 'stop-owned'].includes(command) }).then(async config => {
+    if (!locked && ['start', 'stop', 'stop-owned'].includes(command)) {
       await mkdir(stateRoot(config), { recursive: true, mode: 0o700 });
       const lockPath = join(stateRoot(config), 'lifecycle.flock');
-      const result = spawnSync('flock', ['-x', lockPath, process.execPath, process.argv[1], '__locked', command, config.configuration_path], { cwd: root, stdio: 'inherit' });
+      const lockedArgs = ['-x', lockPath, process.execPath, process.argv[1], '__locked', command, config.configuration_path];
+      if (command === 'stop-owned') lockedArgs.push(commandArgs[1] || '');
+      const result = spawnSync('flock', lockedArgs, { cwd: root, stdio: 'inherit' });
       if (result.error) throw result.error;
       process.exitCode = result.status ?? 1;
       return undefined;
     }
-    return command === 'start' ? start(config) : command === 'stop' ? stop(config) : serve(config, { prepared: command === 'serve-prepared' });
+    return command === 'start' ? start(config) : command === 'stop' ? stop(config) : command === 'stop-owned' ? stopOwnedRuntime(config, commandArgs[1]) : serve(config, { prepared: command === 'serve-prepared' });
   }).then(value => { if (value) console.log(JSON.stringify(value)); }).catch(error => { console.error(`Operator failed: ${error.message}`); process.exitCode = 1; });
 }
 

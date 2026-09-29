@@ -55,6 +55,37 @@ export class RunFinalizer {
     }
   }
 
+  async stopRunOwnedRuntime(record, signal) {
+    record.cleanup.runtime_stopped = false;
+    const beforeStop = await readRunOwnedRuntime(record, this.operatorClient, signal);
+    record.evidence.owned_runtime_cleanup = { ...beforeStop, checked_at: currentTimeIso() };
+    if (beforeStop.status === 'unconfirmed') {
+      throw new Error(`run-owned Symphony runtime identity could not be confirmed before stop: ${beforeStop.error}`);
+    }
+    if (beforeStop.status === 'absent') {
+      record.cleanup.runtime_stopped = true;
+      this.runTimingRecorder.recordSymphonyStopped(record, currentTimeIso());
+      return { skipped: true, runtime_readback: beforeStop };
+    }
+
+    const value = await this.operatorClient.stopRunOwnedSymphonyRuntime(
+      record.paths.runtime_project,
+      recordedRunRuntimeId(record),
+      this.config.runtime_stop_timeout_ms,
+      signal
+    );
+    const runtimeReadback = await readRunOwnedRuntime(record, this.operatorClient, signal);
+    record.evidence.owned_runtime_cleanup = { ...runtimeReadback, checked_at: currentTimeIso(), stop_result: value };
+    if (runtimeReadback.status !== 'absent') {
+      throw new Error(runtimeReadback.status === 'present'
+        ? `run-owned Symphony runtime ${runtimeReadback.runtime_id} still responds after stop`
+        : `run-owned Symphony runtime stop could not be confirmed: ${runtimeReadback.error}`);
+    }
+    record.cleanup.runtime_stopped = true;
+    this.runTimingRecorder.recordSymphonyStopped(record, currentTimeIso());
+    return { ...value, runtime_readback: runtimeReadback };
+  }
+
   async finalizeRun({ record, reason, task, dashboard, baseBranch, workspaceRoot, normalDone = false }) {
     record.finalization.reason = reason;
     if (!normalDone) {
@@ -63,18 +94,7 @@ export class RunFinalizer {
           record.cleanup.runtime_stopped = true;
           return { skipped: true };
         }
-        record.cleanup.runtime_stopped = false;
-        const value = await this.operatorClient.stopConfiguredOperatorProject(record.paths.runtime_project, this.config.runtime_stop_timeout_ms, signal);
-        const runtimeReadback = await readRunOwnedRuntime(record, this.operatorClient, signal);
-        record.evidence.owned_runtime_cleanup = { ...runtimeReadback, checked_at: currentTimeIso() };
-        if (runtimeReadback.status !== 'absent') {
-          throw new Error(runtimeReadback.status === 'present'
-            ? `run-owned Symphony runtime ${runtimeReadback.runtime_id} still responds after stop`
-            : `run-owned Symphony runtime stop could not be confirmed: ${runtimeReadback.error}`);
-        }
-        record.cleanup.runtime_stopped = true;
-        this.runTimingRecorder.recordSymphonyStopped(record, currentTimeIso());
-        return { ...value, runtime_readback: runtimeReadback };
+        return this.stopRunOwnedRuntime(record, signal);
       });
       if (record.cleanup.runtime_stopped) {
         const reread = task?.id
@@ -101,18 +121,7 @@ export class RunFinalizer {
           record.cleanup.runtime_stopped = true;
           return { skipped: true };
         }
-        record.cleanup.runtime_stopped = false;
-        const value = await this.operatorClient.stopConfiguredOperatorProject(record.paths.runtime_project, this.config.runtime_stop_timeout_ms, signal);
-        const runtimeReadback = await readRunOwnedRuntime(record, this.operatorClient, signal);
-        record.evidence.owned_runtime_cleanup = { ...runtimeReadback, checked_at: currentTimeIso() };
-        if (runtimeReadback.status !== 'absent') {
-          throw new Error(runtimeReadback.status === 'present'
-            ? `run-owned Symphony runtime ${runtimeReadback.runtime_id} still responds after stop`
-            : `run-owned Symphony runtime stop could not be confirmed: ${runtimeReadback.error}`);
-        }
-        record.cleanup.runtime_stopped = true;
-        this.runTimingRecorder.recordSymphonyStopped(record, currentTimeIso());
-        return { ...value, runtime_readback: runtimeReadback };
+        return this.stopRunOwnedRuntime(record, signal);
       });
     }
 

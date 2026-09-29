@@ -22,7 +22,7 @@ test('finalization preserves an external stop failure and still converges finite
     async updateTaskState() { throw new Error('must not mutate task while runtime stop is unconfirmed'); }
   };
   const store = { async save() {} };
-  const runtime = { async stopConfiguredOperatorProject() { throw new Error('stop unavailable'); } };
+  const runtime = { async readSymphonyRuntimeStatus() { return { runtime_id: 'runtime-run-1', dispatch_capable: true }; }, async stopRunOwnedSymphonyRuntime() { throw new Error('stop unavailable'); } };
   let deleteCalls = 0;
   const git = { async readRemoteBranchCommit() { return null; }, async deleteRemoteBranch() { deleteCalls += 1; return { already_absent: true }; } };
   const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'In Progress', accepted_plan: '# Fixture\n', workpad: '' }, github: { delivery_prs: [] }, symphony: {}, chatgpt_shot: null, errors: [] }; } };
@@ -52,7 +52,7 @@ test('finalization keeps a live run-owned runtime unresolved after the Operator 
   let branchDeleteCalls = 0;
   let workspaceDeleteCalls = 0;
   const runtime = {
-    async stopConfiguredOperatorProject() { stopCalls += 1; return { stopped: true }; },
+    async stopRunOwnedSymphonyRuntime() { stopCalls += 1; return { stopped: true }; },
     async readSymphonyRuntimeStatus() { return { runtime_id: 'runtime-run-live', dispatch_capable: true }; },
     async removeWorkspaceRoot() { workspaceDeleteCalls += 1; return { removed: true }; }
   };
@@ -82,7 +82,11 @@ test('successful reconciliation clears an earlier unresolved action', async () =
   let stopCalls = 0;
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
   const store = { async save() {} };
-  const runtime = { async stopConfiguredOperatorProject() { stopCalls += 1; if (stopCalls === 1) throw new Error('temporary stop failure'); return { stopped: true }; }, async readSymphonyRuntimeStatus() { return { runtime_id: 'replacement-runtime', dispatch_capable: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
+  const runtime = {
+    async stopRunOwnedSymphonyRuntime() { stopCalls += 1; if (stopCalls === 1) throw new Error('temporary stop failure'); return { stopped: true }; },
+    async readSymphonyRuntimeStatus() { if (stopCalls >= 2) throw Object.assign(new Error('runtime stopped'), { cause: { code: 'ECONNREFUSED' } }); return { runtime_id: 'runtime-run-1', dispatch_capable: true }; },
+    async removeWorkspaceRoot(path) { return { path, removed: true }; }
+  };
   const git = { async readRemoteBranchCommit() { return null; }, async deleteRemoteBranch() { return { already_absent: true }; } };
   const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }, github: { delivery_prs: [] }, symphony: {}, chatgpt_shot: null, errors: [] }; } };
   const finalizer = new RunFinalizer({ config, runRecordStore: store, notionClient: notion, operatorClient: runtime, gitClient: git, githubClient: {}, runEvidenceCollector: evidence });
@@ -105,12 +109,12 @@ test('reconciliation blocks cleanup when a durably requested runtime has no reco
   let stopCalls = 0;
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
   const store = { async save() {} };
-  const runtime = { async stopConfiguredOperatorProject() { stopCalls += 1; return { stopped: true }; }, async readSymphonyRuntimeStatus() { return { runtime_id: 'runtime-unbound', dispatch_capable: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
+  const runtime = { async stopRunOwnedSymphonyRuntime() { stopCalls += 1; return { stopped: true }; }, async readSymphonyRuntimeStatus() { return { runtime_id: 'runtime-unbound', dispatch_capable: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
   const git = { async readRemoteBranchCommit() { return null; }, async deleteRemoteBranch() { return { already_absent: true }; } };
   const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }, github: {}, symphony: {}, chatgpt_shot: null, errors: [] }; } };
   const finalizer = new RunFinalizer({ config, runRecordStore: store, notionClient: notion, operatorClient: runtime, gitClient: git, githubClient: {}, runEvidenceCollector: evidence });
   const result = await finalizer.finalizeRun({ record, reason: 'admission_reconciliation', task: await notion.readTask(), baseBranch: 'base/run-starting', workspaceRoot: directory + '/workspaces' });
-  assert.equal(stopCalls, 1);
+  assert.equal(stopCalls, 0);
   assert.equal(result.cleanup.runtime_stopped, false);
   assert.equal(result.finalization.complete, false);
   assert.ok(result.finalization.unresolved.includes('stop_run_owned_symphony'));
@@ -135,7 +139,7 @@ test('finalization cleans and verifies only run-owned branches when unrelated re
   record.evidence.snapshots.push({ notion: { workpad: `Human Review\ncycle: 1\ndelivered_pr: ${deliveryUrl}\n` } });
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
   const store = { async save() {} };
-  const runtime = { async stopConfiguredOperatorProject() { return { stopped: true }; }, async readSymphonyRuntimeStatus() { return { runtime_id: 'replacement-runtime', dispatch_capable: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
+  const runtime = { async stopRunOwnedSymphonyRuntime() { throw new Error('must not stop a replacement runtime'); }, async readSymphonyRuntimeStatus() { return { runtime_id: 'replacement-runtime', dispatch_capable: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
   const remoteBranches = new Map([['main', 'b'.repeat(40)], ['operator-created-during-run', 'c'.repeat(40)], ['base/run-refs', 'd'.repeat(40)], ['feature', 'e'.repeat(40)], ['previous-owned', 'f'.repeat(40)]]);
   const deletionCalls = [];
   const readCalls = [];
@@ -167,7 +171,7 @@ test('finalization records and blocks admission on a run-owned branch that remai
   record.timing.symphony.started_at = new Date().toISOString();
   record.runtime = { dashboard: 'http://127.0.0.1:4410', runtime_id: 'runtime-run-owned-residue' };
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
-  const runtime = { async stopConfiguredOperatorProject() { return { stopped: true }; }, async readSymphonyRuntimeStatus() { return { runtime_id: 'replacement-runtime', dispatch_capable: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
+  const runtime = { async stopRunOwnedSymphonyRuntime() { throw new Error('must not stop a replacement runtime'); }, async readSymphonyRuntimeStatus() { return { runtime_id: 'replacement-runtime', dispatch_capable: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
   const git = { async deleteRemoteBranch() { return { branch: 'base/run-owned-residue', deleted: true }; }, async readRemoteBranchCommit() { return 'a'.repeat(40); } };
   const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { state: 'Cancelled' }, github: { delivery_prs: [] }, symphony: {}, errors: [] }; } };
   const finalizer = new RunFinalizer({ config, runRecordStore: { async save() {} }, notionClient: notion, operatorClient: runtime, gitClient: git, githubClient: {}, runEvidenceCollector: evidence });
@@ -259,7 +263,7 @@ test('finalization keeps a changed delivery ref unresolved when current GitHub e
     async readRemoteBranchCommit(branch) { return branch === 'feature' ? currentOtherTaskHead : null; },
     async deleteRemoteBranch(_branch, { expectedCommit }) { deleteCalls += 1; deleteCommits.push(expectedCommit); throw new Error(`run-owned branch feature changed before deletion (expected ${expectedCommit})`); }
   };
-  const finalizer = new RunFinalizer({ config, runRecordStore: { async save() {} }, notionClient: notion, operatorClient: { async stopConfiguredOperatorProject() { return { stopped: true }; } }, gitClient: git, githubClient: new GitHubClient({ repositoryUrl: 'https://github.com/owner/repo.git' }), runEvidenceCollector: evidence });
+  const finalizer = new RunFinalizer({ config, runRecordStore: { async save() {} }, notionClient: notion, operatorClient: { async stopRunOwnedSymphonyRuntime() { return { stopped: true }; }, async readSymphonyRuntimeStatus() { throw Object.assign(new Error('runtime stopped'), { cause: { code: 'ECONNREFUSED' } }); } }, gitClient: git, githubClient: new GitHubClient({ repositoryUrl: 'https://github.com/owner/repo.git' }), runEvidenceCollector: evidence });
 
   const result = await finalizer.finalizeRun({ record, reason: 'admission_reconciliation', task: await notion.readTask() });
   assert.equal(deleteCalls, 1);
@@ -292,7 +296,7 @@ test('finalization cleans the same delivery branch at its recorded authorized Me
     async readRemoteBranchCommit(branch) { return branch === 'feature' ? remoteHead : null; },
     async deleteRemoteBranch(branch, { expectedCommit }) { deleteCommits.push([branch, expectedCommit]); remoteHead = null; return { branch, deleted: true, expected_commit: expectedCommit }; }
   };
-  const finalizer = new RunFinalizer({ config, runRecordStore: { async save() {} }, notionClient: notion, operatorClient: { async stopConfiguredOperatorProject() { return { stopped: true }; } }, gitClient: git, githubClient: new GitHubClient({ repositoryUrl: 'https://github.com/owner/repo.git' }), runEvidenceCollector: evidence });
+  const finalizer = new RunFinalizer({ config, runRecordStore: { async save() {} }, notionClient: notion, operatorClient: { async stopRunOwnedSymphonyRuntime() { return { stopped: true }; }, async readSymphonyRuntimeStatus() { throw Object.assign(new Error('runtime stopped'), { cause: { code: 'ECONNREFUSED' } }); } }, gitClient: git, githubClient: new GitHubClient({ repositoryUrl: 'https://github.com/owner/repo.git' }), runEvidenceCollector: evidence });
 
   const result = await finalizer.finalizeRun({ record, reason: 'admission_reconciliation', task: await notion.readTask() });
   assert.deepEqual(deleteCommits, [['feature', mergeTargetHead]]);
@@ -317,7 +321,7 @@ test('reconciliation does not revisit a delivery branch after its recorded delet
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
   const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { state: 'Cancelled' }, github: { delivery_prs: [] }, symphony: {}, errors: [] }; } };
   const git = { async readRemoteBranchCommit(branch) { reads.push(branch); return branch === 'feature' ? remoteHead : null; }, async deleteRemoteBranch(branch) { deletions.push(branch); } };
-  const finalizer = new RunFinalizer({ config, runRecordStore: { async save() {} }, notionClient: notion, operatorClient: { async stopConfiguredOperatorProject() { return { stopped: true }; } }, gitClient: git, githubClient: {}, runEvidenceCollector: evidence });
+  const finalizer = new RunFinalizer({ config, runRecordStore: { async save() {} }, notionClient: notion, operatorClient: { async stopRunOwnedSymphonyRuntime() { return { stopped: true }; }, async readSymphonyRuntimeStatus() { throw Object.assign(new Error('runtime stopped'), { cause: { code: 'ECONNREFUSED' } }); } }, gitClient: git, githubClient: {}, runEvidenceCollector: evidence });
 
   const result = await finalizer.finalizeRun({ record, reason: 'admission_reconciliation', task: await notion.readTask() });
   assert.equal(result.finalization.complete, true);
