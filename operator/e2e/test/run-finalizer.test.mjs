@@ -217,6 +217,61 @@ test('finalization deletes a run-scoped base at its verified post-merge commit',
   assert.deepEqual(result.evidence.owned_branch_cleanup.refs.map(ref => [ref.branch, ref.expected_commit, ref.status]), [[baseBranch, mergeCommit, 'absent']]);
 });
 
+test('finalization uses the authorized merge commit for an unverified run-scoped base and blocks a changed base', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-unverified-merge-'));
+  const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
+  const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
+  const baseBranch = 'base/run-unverified-merge';
+  const deliveryBranch = 'task/unverified-merge';
+  const deliveryUrl = 'https://github.com/owner/repo/pull/17';
+  const seedCommit = 'd'.repeat(40);
+  const targetHead = 'c'.repeat(40);
+  const mergeCommit = 'e'.repeat(40);
+  const changedBase = 'f'.repeat(40);
+  const workpad = `Human Review\ncycle: 1\ndelivered_pr: ${deliveryUrl}\ndelivered_head: ${targetHead}\nMerging\ncycle: 1\napproved_pr: ${deliveryUrl}\napproved_head: ${targetHead}\nmerge_target_head: ${targetHead}\nattempt: merged\n`;
+  const pullRequest = { number: 17, url: deliveryUrl, baseRefName: baseBranch, headRefName: deliveryBranch, headRefOid: targetHead, mergedAt: '2026-09-28T12:00:00Z', mergeCommit: { oid: mergeCommit }, isCrossRepository: false, headRepository: { nameWithOwner: 'owner/repo' } };
+
+  async function finalizeAt(runId, initialBase) {
+    const record = createRunRecord({ config, runId, workload, paths: createRunPaths(config, runId) });
+    record.binding.base_branch = baseBranch;
+    record.binding.base_commit = seedCommit;
+    record.artifacts.delivery_pr_url = deliveryUrl;
+    record.artifacts.delivery_branch = deliveryBranch;
+    record.artifacts.delivery_branches = [deliveryBranch];
+    record.artifacts.delivered_head = targetHead;
+    record.artifacts.delivered_head_locked = true;
+    record.artifacts.owned_deliveries = [{ pr_url: deliveryUrl, branch: deliveryBranch, head: targetHead }];
+    const remoteBranches = new Map([[baseBranch, initialBase], [deliveryBranch, targetHead]]);
+    const deleteCalls = [];
+    const git = {
+      async readRemoteBranchCommit(branch) { return remoteBranches.get(branch) || null; },
+      async deleteRemoteBranch(branch, { expectedCommit }) {
+        deleteCalls.push({ branch, expectedCommit });
+        if (remoteBranches.get(branch) !== expectedCommit) throw new Error(`branch ${branch} did not match ${expectedCommit}`);
+        remoteBranches.delete(branch);
+        return { branch, deleted: true, expected_commit: expectedCommit };
+      }
+    };
+    const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { state: 'Done', workpad }, github: { delivery_prs: [pullRequest] }, symphony: {}, errors: [] }; } };
+    const finalizer = new RunFinalizer({ config, runRecordStore: { async save() {} }, notionClient: {}, operatorClient: {}, gitClient: git, githubClient: new GitHubClient({ repositoryUrl: 'https://github.com/owner/repo.git' }), runEvidenceCollector: evidence });
+    const result = await finalizer.finalizeRun({ record, reason: 'done_unverified_reconciliation', task: { state: 'Done' }, baseBranch, normalDone: false });
+    return { result, deleteCalls, remoteBranches };
+  }
+
+  const matchingBase = await finalizeAt('run-unverified-matching', mergeCommit);
+  assert.ok(matchingBase.deleteCalls.some(call => call.branch === baseBranch && call.expectedCommit === mergeCommit));
+  assert.equal(matchingBase.remoteBranches.has(baseBranch), false);
+  assert.equal(matchingBase.result.finalization.complete, true);
+
+  const changedBaseResult = await finalizeAt('run-unverified-changed', changedBase);
+  assert.ok(changedBaseResult.deleteCalls.some(call => call.branch === baseBranch && call.expectedCommit === mergeCommit));
+  assert.equal(changedBaseResult.remoteBranches.get(baseBranch), changedBase);
+  assert.equal(changedBaseResult.result.finalization.complete, false);
+  assert.ok(changedBaseResult.result.finalization.unresolved.includes(`delete_run_scoped_base:${baseBranch}`));
+  assert.deepEqual(changedBaseResult.result.evidence.owned_branch_cleanup.remaining_refs, [baseBranch]);
+  assert.equal(changedBaseResult.result.evidence.owned_branch_cleanup.refs.find(ref => ref.branch === baseBranch).status, 'unconfirmed');
+});
+
 test('final absence readback clears a branch deletion failure after the ref was removed', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-absence-retry-'));
   const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };

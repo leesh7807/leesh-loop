@@ -25,6 +25,18 @@ function authorizedMergeTarget(record, identities, branch, prs, githubClient) {
   return null;
 }
 
+function authorizedRunScopedBaseCommit(record, identities, baseBranch, prs, githubClient) {
+  for (const identity of identities) {
+    const pr = githubClient.findDeliveryPullRequest?.(prs, identity);
+    if (pr?.baseRefName !== baseBranch || !pr.mergedAt || !isSameRepositoryDelivery(pr, githubClient.repository)) continue;
+    const targetHead = authorizedMergeTarget(record, identities, pr.headRefName, prs, githubClient);
+    if (!targetHead || pr.headRefOid?.toLowerCase() !== targetHead.toLowerCase()) continue;
+    const mergeCommit = pr.mergeCommit?.oid;
+    if (COMMIT_SHA.test(mergeCommit || '')) return mergeCommit;
+  }
+  return null;
+}
+
 export class RunFinalizer {
   constructor({ config, runRecordStore, notionClient, operatorClient, gitClient, githubClient, runEvidenceCollector, runTimingRecorder }) {
     this.config = config;
@@ -211,7 +223,7 @@ export class RunFinalizer {
       };
       for (const branch of branches) {
         const baseBranchCommit = branch === baseBranch
-          ? record.artifacts?.remote_base_commit || record.binding?.base_commit
+          ? record.artifacts?.remote_base_commit || authorizedRunScopedBaseCommit(record, deliveryPrs, baseBranch, prs, this.githubClient) || record.binding?.base_commit
           : null;
         const authorizedTarget = mergingTarget(branch);
         const ownedDelivery = latestRecordedDelivery(branch);
@@ -247,15 +259,20 @@ export class RunFinalizer {
               return pr?.headRefName === branch && isSameRepositoryDelivery(pr, this.githubClient.repository);
             }));
             const deliveryEvidenceUnavailable = requiresGitHubEvidence && (!currentDeliveryObserved || !currentNotionReadbackAvailable);
+            const baseIdentityChanged = branch === baseBranch && commit && expectedCommit && commit.toLowerCase() !== expectedCommit.toLowerCase();
             const status = !commit
               ? 'absent'
               : !expectedCommit
                 ? 'unconfirmed'
                 : commit.toLowerCase() === expectedCommit.toLowerCase()
                   ? 'present'
-                  : deliveryEvidenceUnavailable ? 'unconfirmed' : 'identity_changed';
-            const error = status === 'unconfirmed' && commit && requiresGitHubEvidence && deliveryEvidenceUnavailable
-              ? 'current Notion/GitHub delivery evidence is unavailable; ref identity cannot be confirmed'
+                  : baseIdentityChanged || deliveryEvidenceUnavailable ? 'unconfirmed' : 'identity_changed';
+            const error = status === 'unconfirmed' && commit
+              ? baseIdentityChanged
+                ? 'run-scoped base remains at a commit different from its authorized cleanup target'
+                : requiresGitHubEvidence && deliveryEvidenceUnavailable
+                  ? 'current Notion/GitHub delivery evidence is unavailable; ref identity cannot be confirmed'
+                  : null
               : null;
             refs.push({ branch, expected_commit: expectedCommit, status, commit, ...(error ? { error } : {}) });
           } catch (error) {
