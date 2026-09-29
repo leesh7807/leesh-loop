@@ -171,6 +171,7 @@ export class E2ERunner {
         await portLease.release();
         try {
           runtimeResult = await this.operatorClient.startConfiguredOperatorProject(paths.runtimeProject, this.config.runtime_start_timeout_ms, this.config.notion_database_url);
+          if (runtimeResult.window_error) throw new Error(`Operator UI startup failed: ${runtimeResult.window_error}`);
           portAttempt.result = 'started';
           portAttempt.finished_at = currentTimeIso();
           await this.runRecordStore.save(record);

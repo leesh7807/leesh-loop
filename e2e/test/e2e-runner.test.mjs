@@ -11,7 +11,7 @@ import { RunRecordStore } from '../model/run-record-store.mjs';
 
 const plan = '# Representative task\n\nInspect the repository and write a concise note under docs/.\n';
 
-function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, reviewEvidence, runInput, runtimePortPairs, runtimePortConflicts = [] } = {}) {
+function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, reviewEvidence, runInput, runtimePortPairs, runtimePortConflicts = [], runtimePortConflictResults = [] } = {}) {
   const root = '/repo';
   const config = {
     repository_url: 'git@github.com:owner/repo.git',
@@ -66,6 +66,7 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
   let portPairIndex = 0;
   let currentPorts = portPairs[0];
   const portConflicts = [...runtimePortConflicts];
+  const portConflictResults = [...runtimePortConflictResults];
   let runtimeStopCalls = 0;
   let runtimeStoppedVerificationCalls = 0;
   const runtime = {
@@ -78,7 +79,8 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
       startedDatabaseUrls.push(databaseUrl);
       const conflict = portConflicts.shift();
       if (conflict) throw new Error(conflict);
-      return { dashboard: `http://127.0.0.1:${currentPorts.symphony_port}`, pid: 12 };
+      const window_error = portConflictResults.shift();
+      return { dashboard: `http://127.0.0.1:${currentPorts.symphony_port}`, pid: 12, ...(window_error ? { window_error } : {}) };
     },
     async readOwnedRuntimeIdentity() {
       return { runtime_id: 'runtime-fixture', status: 'active', dashboard: `http://127.0.0.1:${currentPorts.symphony_port}`, process_identity: { pid: 12, process_start_ticks: '12', boot_id: 'test-boot', host: 'test' } };
@@ -180,6 +182,36 @@ test('E2ERunner retries a run-owned Operator startup with a new port pair after 
   assert.equal(runtimeProject.ui_port, 4620);
   assert.equal(record.run_input.runtime_options.symphony_port, 4420);
   assert.equal(record.run_input.runtime_options.ui_port, 4620);
+  assert.equal(harness.runtimeStopCalls, 1);
+  assert.equal(harness.runtimeStoppedVerificationCalls, 1);
+});
+
+test('E2ERunner retries when production Operator reports a UI port conflict in a successful start response', async () => {
+  let current = 0;
+  const harness = fixture({
+    states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done'],
+    clock: () => current++,
+    runtimePortPairs: [
+      { symphony_port: 4430, ui_port: 4630 },
+      { symphony_port: 4440, ui_port: 4640 }
+    ],
+    runtimePortConflictResults: ['Operator UI at http://127.0.0.1:4630 is not owned by this project']
+  });
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-port-result-retry-'));
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+
+  const record = await new E2ERunner({ ...harness, random: () => 0, clock: () => current++, waitForPoll: async () => {} }).runProductionE2E();
+
+  assert.equal(record.status, 'finished');
+  assert.deepEqual(record.runtime.port_start_attempts.map(attempt => attempt.result), ['port_conflict', 'started']);
+  assert.deepEqual(record.runtime.port_start_attempts.map(attempt => attempt.ports), [
+    { symphony_port: 4430, ui_port: 4630 },
+    { symphony_port: 4440, ui_port: 4640 }
+  ]);
+  const runtimeProject = JSON.parse(await readFile(record.paths.runtime_project, 'utf8'));
+  assert.equal(runtimeProject.symphony_port, 4440);
+  assert.equal(runtimeProject.ui_port, 4640);
   assert.equal(harness.runtimeStopCalls, 1);
   assert.equal(harness.runtimeStoppedVerificationCalls, 1);
 });
