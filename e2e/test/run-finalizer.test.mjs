@@ -7,6 +7,33 @@ import { RunFinalizer } from '../run/finalization/run-finalizer.mjs';
 import { createRunPaths } from '../model/e2e-runtime-config.mjs';
 import { createRunRecord } from '../model/run-record-store.mjs';
 
+test('terminal run lifecycle is published after its reservation has ended', async () => {
+  const events = [];
+  const reservationAuthority = {
+    async updateRuntime() { events.push('update_runtime'); return { committed: true }; },
+    async updateRunLifecycle() { events.push('reservation_lifecycle'); return { committed: true }; },
+    async release() { events.push('release'); return { committed: true }; },
+    async markUnavailable() { events.push('unavailable'); return { committed: true, recovery_marker: 'marker-1' }; },
+    async writeRunLifecycle() { events.push('run_lifecycle'); }
+  };
+  const finalizer = new RunFinalizer({ config: {}, reservationAuthority });
+  const record = {
+    run_id: 'run-settlement-order',
+    binding: { database_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+    runtime: { child_runtime: { runtime_id: 'child-1', status: 'active' } },
+    cleanup: { runtime_stopped: true, unresolved: [] },
+    finalization: { complete: true, unresolved: [], incomplete: false },
+    failures: [],
+    ended_at: new Date().toISOString()
+  };
+
+  await finalizer.settleDatabaseReservation(record);
+
+  assert.ok(events.indexOf('release') < events.indexOf('run_lifecycle'));
+  assert.equal(events.includes('unavailable'), false);
+  assert.equal(record.database_reservation.status, 'available');
+});
+
 test('finalization preserves an external stop failure and still converges finitely', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-'));
   const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };

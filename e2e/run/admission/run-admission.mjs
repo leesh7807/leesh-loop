@@ -164,7 +164,9 @@ export class RunAdmission {
         ? 'dead'
         : await inspectProcessIdentity(childRuntime.process_identity);
     const runTerminal = TERMINAL_RUN_STATES.has(lifecycle.status);
-    const runDead = runProcessState === 'dead' || (runTerminal && lifecycle.status !== 'active');
+    // A terminal marker can be written while the owner is still finishing reservation
+    // settlement. Require authoritative process death before reclaiming an in-use state.
+    const runDead = runProcessState === 'dead';
     const childDead = childRuntime.status === 'not_started' || childRuntime.status === 'stopped' || childProcessState === 'dead';
     if (!runDead || !childDead) {
       const evidence = { run_lifecycle_status: lifecycle.status, run_process_state: runProcessState, child_runtime_id: childRuntime.runtime_id || null, child_process_state: childProcessState };

@@ -172,11 +172,25 @@ export class RunFinalizer {
       cleanup_unresolved: [...record.cleanup.unresolved],
       ended_at: endedAt
     };
+    let reservationEnded = false;
     try {
       const runtime = await this.reservationAuthority.updateRuntime(databaseId, runId, childRuntime);
       if (!runtime.committed) throw new Error('database reservation ownership changed before child runtime finalization readback');
       const lifecycle = await this.reservationAuthority.updateRunLifecycle(databaseId, runId, lifecycleStatus, transitionEvidence);
       if (!lifecycle.committed) throw new Error('database reservation ownership changed before run lifecycle finalization readback');
+      if (record.finalization.complete && record.cleanup.runtime_stopped === true && record.cleanup.unresolved.length === 0) {
+        const released = await this.reservationAuthority.release(databaseId, runId, transitionEvidence);
+        if (!released.committed) throw new Error(`database reservation could not be safely returned to available: ${released.reason || released.state?.status || 'conditional transition rejected'}`);
+        reservationEnded = true;
+        record.database_reservation = { database_id: databaseId, status: 'available', released_at: endedAt };
+      } else {
+        const unavailable = await this.reservationAuthority.markUnavailable(databaseId, runId, 'current E2E run finalization or required cleanup did not complete', transitionEvidence);
+        if (!unavailable.committed) throw new Error('current database reservation could not be atomically changed to unavailable');
+        reservationEnded = true;
+        record.database_reservation = { database_id: databaseId, status: 'unavailable', recovery_marker: unavailable.recovery_marker };
+        record.status = 'failed';
+        addFailure(record, new Error(`database ${databaseId} is unavailable until required E2E recovery completes`), 'database_reservation_finalization');
+      }
       await this.reservationAuthority.writeRunLifecycle(runId, {
         status: lifecycleStatus,
         ended_at: endedAt,
@@ -186,24 +200,27 @@ export class RunFinalizer {
         finalization_complete: record.finalization.complete,
         unresolved: [...record.finalization.unresolved]
       });
-      if (record.finalization.complete && record.cleanup.runtime_stopped === true && record.cleanup.unresolved.length === 0) {
-        const released = await this.reservationAuthority.release(databaseId, runId, transitionEvidence);
-        if (!released.committed) throw new Error(`database reservation could not be safely returned to available: ${released.reason || released.state?.status || 'conditional transition rejected'}`);
-        record.database_reservation = { database_id: databaseId, status: 'available', released_at: endedAt };
-        return;
-      }
-      const unavailable = await this.reservationAuthority.markUnavailable(databaseId, runId, 'current E2E run finalization or required cleanup did not complete', transitionEvidence);
-      if (!unavailable.committed) throw new Error('current database reservation could not be atomically changed to unavailable');
-      record.database_reservation = { database_id: databaseId, status: 'unavailable', recovery_marker: unavailable.recovery_marker };
-      record.status = 'failed';
-      addFailure(record, new Error(`database ${databaseId} is unavailable until required E2E recovery completes`), 'database_reservation_finalization');
     } catch (error) {
       record.status = 'failed';
       if (!record.finalization.unresolved.includes('database_reservation_finalization')) record.finalization.unresolved.push('database_reservation_finalization');
       if (!record.cleanup.unresolved.includes('database_reservation_finalization')) record.cleanup.unresolved.push('database_reservation_finalization');
       record.finalization.incomplete = true;
       addFailure(record, error, 'database_reservation_finalization');
-      await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: endedAt, selected_database_id: databaseId, failure: String(error?.message || error), child_runtime: childRuntime }).catch(() => {});
+      if (!reservationEnded) {
+        const current = await this.reservationAuthority.read(databaseId).catch(() => null);
+        if (current?.status !== 'in use' || current.reservation?.run_id !== runId) {
+          reservationEnded = true;
+        } else {
+          const unavailable = await this.reservationAuthority.markUnavailable(databaseId, runId, 'current E2E run finalization or required cleanup did not complete', { ...transitionEvidence, error: String(error?.message || error) }).catch(() => ({ committed: false }));
+          if (unavailable.committed) {
+            reservationEnded = true;
+            record.database_reservation = { database_id: databaseId, status: 'unavailable', recovery_marker: unavailable.recovery_marker };
+          }
+        }
+      }
+      if (reservationEnded) {
+        await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: endedAt, selected_database_id: databaseId, failure: String(error?.message || error), child_runtime: childRuntime }).catch(() => {});
+      }
     }
   }
 }

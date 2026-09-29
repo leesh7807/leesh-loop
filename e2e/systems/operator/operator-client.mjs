@@ -15,6 +15,11 @@ async function reserveAvailablePort() {
   return { port: server.address().port, server };
 }
 
+export function isRuntimePortConflict(error) {
+  const message = String(error?.message || error || '');
+  return /\bEADDRINUSE\b|address already in use|Operator UI at .* is not owned by this project|Operator UI is already owned on /i.test(message);
+}
+
 export class OperatorClient {
   constructor({ root, app = join(root, 'operator/app/leesh-loop.mjs'), commandRunner = command } = {}) {
     this.root = root;

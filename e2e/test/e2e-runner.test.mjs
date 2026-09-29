@@ -11,7 +11,7 @@ import { RunRecordStore } from '../model/run-record-store.mjs';
 
 const plan = '# Representative task\n\nInspect the repository and write a concise note under docs/.\n';
 
-function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, reviewEvidence, runInput } = {}) {
+function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, reviewEvidence, runInput, runtimePortPairs, runtimePortConflicts = [] } = {}) {
   const root = '/repo';
   const config = {
     repository_url: 'git@github.com:owner/repo.git',
@@ -26,6 +26,7 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
     finalization_timeout_ms: 100,
     runtime_start_timeout_ms: 100,
     runtime_stop_timeout_ms: 100,
+    runtime_port_attempts: 8,
   };
   let reservationSequence = 0;
   const reservationState = { database_id: config.database_pool[0].database_id, status: 'available', sequence: 0, sha: null, reservation: null, recovery_marker: null };
@@ -61,7 +62,30 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
     async appendWorkpad() {}
   };
   const startedDatabaseUrls = [];
-  const runtime = { async findAvailableRuntimePorts() { return { symphony_port: 4410, ui_port: 4610, async release() {} }; }, async startConfiguredOperatorProject(_projectPath, _timeout, databaseUrl) { startedDatabaseUrls.push(databaseUrl); return { dashboard: 'http://127.0.0.1:4410', pid: 12 }; }, async readOwnedRuntimeIdentity() { return { runtime_id: 'runtime-fixture', status: 'active', dashboard: 'http://127.0.0.1:4410', process_identity: { pid: 12, process_start_ticks: '12', boot_id: 'test-boot', host: 'test' } }; }, async stopConfiguredOperatorProject() { return { stopped: true }; } };
+  const portPairs = runtimePortPairs || [{ symphony_port: 4410, ui_port: 4610 }];
+  let portPairIndex = 0;
+  let currentPorts = portPairs[0];
+  const portConflicts = [...runtimePortConflicts];
+  let runtimeStopCalls = 0;
+  let runtimeStoppedVerificationCalls = 0;
+  const runtime = {
+    async findAvailableRuntimePorts() {
+      currentPorts = portPairs[Math.min(portPairIndex++, portPairs.length - 1)];
+      return { ...currentPorts, async release() {} };
+    },
+    async startConfiguredOperatorProject(_projectPath, _timeout, databaseUrl) {
+      runtimeStartingAtCall.push(structuredClone(reservationState.reservation?.child_runtime || null));
+      startedDatabaseUrls.push(databaseUrl);
+      const conflict = portConflicts.shift();
+      if (conflict) throw new Error(conflict);
+      return { dashboard: `http://127.0.0.1:${currentPorts.symphony_port}`, pid: 12 };
+    },
+    async readOwnedRuntimeIdentity() {
+      return { runtime_id: 'runtime-fixture', status: 'active', dashboard: `http://127.0.0.1:${currentPorts.symphony_port}`, process_identity: { pid: 12, process_start_ticks: '12', boot_id: 'test-boot', host: 'test' } };
+    },
+    async stopConfiguredOperatorProject() { runtimeStopCalls += 1; return { stopped: true }; },
+    async verifyRuntimeStopped() { runtimeStoppedVerificationCalls += 1; return { stopped: true }; }
+  };
   const git = {
     async listRemoteBranchRefs() { return {}; },
     async resolveSeedCommit() { return '0123456789012345678901234567890123456789'; },
@@ -87,13 +111,8 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
   const store = new RunRecordStore(config);
   const finalized = [];
   const runtimeStartingAtCall = [];
-  runtime.startConfiguredOperatorProject = async (_projectPath, _timeout, databaseUrl) => {
-    runtimeStartingAtCall.push(structuredClone(reservationState.reservation?.child_runtime || null));
-    startedDatabaseUrls.push(databaseUrl);
-    return { dashboard: 'http://127.0.0.1:4410', pid: 12 };
-  };
   const finalizer = { async finalizeRun({ record, reason, task: currentTask }) { finalized.push(reason); if (reason === 'reentered_human_review') { const cancelled = await notion.updateTaskState(config.notion_database_url, currentTask.id, 'Cancelled'); assert.equal(cancelled.state, 'Cancelled'); record.cleanup.task_terminalized = true; } record.status = 'finished'; record.finalization.reason = reason; record.finalization.complete = true; record.ended_at = new Date(clock()).toISOString(); await store.save(record); return record; } };
-  return { config, runInput, catalog: validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 5, accepted_plan: plan }]), notionClient: notion, operatorClient: runtime, gitClient: git, notionPublisherClient: publisher, githubClient: github, runEvidenceCollector: evidence, runFinalizer: finalizer, runRecordStore: store, reservationAuthority, finalized, transitions, publishedPlans, startedDatabaseUrls, runtimeStartingAtCall };
+  return { config, runInput, catalog: validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 5, accepted_plan: plan }]), notionClient: notion, operatorClient: runtime, gitClient: git, notionPublisherClient: publisher, githubClient: github, runEvidenceCollector: evidence, runFinalizer: finalizer, runRecordStore: store, reservationAuthority, finalized, transitions, publishedPlans, startedDatabaseUrls, runtimeStartingAtCall, get runtimeStopCalls() { return runtimeStopCalls; }, get runtimeStoppedVerificationCalls() { return runtimeStoppedVerificationCalls; } };
 }
 
 test('E2ERunner reaches terminal Done through injected production dependencies', async () => {
@@ -131,6 +150,38 @@ test('E2ERunner reaches terminal Done through injected production dependencies',
   assert.deepEqual(harness.transitions, ['Merging']);
   assert.equal(record.lifecycle.mechanical_human_review_transition.performed, true);
   assert.equal(Object.hasOwn(record.artifacts, 'mechanical_approval'), false);
+});
+
+test('E2ERunner retries a run-owned Operator startup with a new port pair after a bind conflict', async () => {
+  let current = 0;
+  const harness = fixture({
+    states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done'],
+    clock: () => current++,
+    runtimePortPairs: [
+      { symphony_port: 4410, ui_port: 4610 },
+      { symphony_port: 4420, ui_port: 4620 }
+    ],
+    runtimePortConflicts: ['Operator UI at http://127.0.0.1:4610 is not owned by this project']
+  });
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-port-retry-'));
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+
+  const record = await new E2ERunner({ ...harness, random: () => 0, clock: () => current++, waitForPoll: async () => {} }).runProductionE2E();
+
+  assert.equal(record.status, 'finished');
+  assert.deepEqual(record.runtime.port_start_attempts.map(attempt => attempt.result), ['port_conflict', 'started']);
+  assert.deepEqual(record.runtime.port_start_attempts.map(attempt => attempt.ports), [
+    { symphony_port: 4410, ui_port: 4610 },
+    { symphony_port: 4420, ui_port: 4620 }
+  ]);
+  const runtimeProject = JSON.parse(await readFile(record.paths.runtime_project, 'utf8'));
+  assert.equal(runtimeProject.symphony_port, 4420);
+  assert.equal(runtimeProject.ui_port, 4620);
+  assert.equal(record.run_input.runtime_options.symphony_port, 4420);
+  assert.equal(record.run_input.runtime_options.ui_port, 4620);
+  assert.equal(harness.runtimeStopCalls, 1);
+  assert.equal(harness.runtimeStoppedVerificationCalls, 1);
 });
 
 test('E2ERunner publishes a provided H1-less Plan unchanged through the production path', async () => {

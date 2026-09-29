@@ -12,6 +12,7 @@ import { RunDoneVerifier } from './lifecycle/run-done-verifier.mjs';
 import { RunLifecycleObserver } from './lifecycle/run-lifecycle-observer.mjs';
 import { currentProcessIdentity } from '../model/process-identity.mjs';
 import { identifyE2ERunOrigin } from '../model/run-origin.mjs';
+import { isRuntimePortConflict } from '../systems/operator/operator-client.mjs';
 
 async function writeRunInputSnapshots(paths, workload, workflow) {
   await Promise.all([
@@ -127,8 +128,8 @@ export class E2ERunner {
       await this.runRecordStore.save(record);
 
       portLease = await this.operatorClient.findAvailableRuntimePorts(this.config.runtime_port_attempts);
-      const ports = { symphony_port: portLease.symphony_port, ui_port: portLease.ui_port };
-      const project = createOperatorProjectConfig(this.config, paths, branch, paths.workflowSnapshot, ports);
+      let ports = { symphony_port: portLease.symphony_port, ui_port: portLease.ui_port };
+      let project = createOperatorProjectConfig(this.config, paths, branch, paths.workflowSnapshot, ports);
       resolvedRunInput.runtime_options = { ...resolvedRunInput.runtime_options, ...ports };
       record.run_input.runtime_options = { ...record.run_input.runtime_options, ...ports };
       await mkdir(dirname(paths.runtimeProject), { recursive: true, mode: 0o700 });
@@ -155,14 +156,46 @@ export class E2ERunner {
         ports
       };
       await this.runRecordStore.save(record);
-      const startingRuntime = await this.reservationAuthority.updateRuntime(admission.database.database_id, runId, record.runtime.child_runtime);
-      if (!startingRuntime.committed) throw new Error(`child runtime startup could not be bound to database reservation for E2E run ${runId}`);
 
       this.runTimingRecorder.recordSymphonyStartRequested(record, currentTimeIso());
       record.status = 'runtime_starting';
       await this.runRecordStore.save(record);
-      await portLease.release();
-      const runtimeResult = await this.operatorClient.startConfiguredOperatorProject(paths.runtimeProject, this.config.runtime_start_timeout_ms, this.config.notion_database_url);
+      let runtimeResult;
+      for (let attempt = 1; ; attempt += 1) {
+        const portAttempt = { attempt, ports: { symphony_port: ports.symphony_port, ui_port: ports.ui_port }, started_at: currentTimeIso(), result: 'starting' };
+        record.runtime.port_start_attempts ||= [];
+        record.runtime.port_start_attempts.push(portAttempt);
+        const startingRuntime = await this.reservationAuthority.updateRuntime(admission.database.database_id, runId, record.runtime.child_runtime);
+        if (!startingRuntime.committed) throw new Error(`child runtime startup could not be bound to database reservation for E2E run ${runId}`);
+        await this.runRecordStore.save(record);
+        await portLease.release();
+        try {
+          runtimeResult = await this.operatorClient.startConfiguredOperatorProject(paths.runtimeProject, this.config.runtime_start_timeout_ms, this.config.notion_database_url);
+          portAttempt.result = 'started';
+          portAttempt.finished_at = currentTimeIso();
+          await this.runRecordStore.save(record);
+          break;
+        } catch (error) {
+          portAttempt.result = isRuntimePortConflict(error) ? 'port_conflict' : 'failed';
+          portAttempt.error = String(error?.message || error);
+          portAttempt.finished_at = currentTimeIso();
+          await this.runRecordStore.save(record);
+          if (portAttempt.result !== 'port_conflict' || attempt >= this.config.runtime_port_attempts) throw error;
+
+          await this.operatorClient.stopConfiguredOperatorProject(paths.runtimeProject, this.config.runtime_stop_timeout_ms);
+          const stopped = await this.operatorClient.verifyRuntimeStopped(paths.runtimeState, record.runtime.child_runtime);
+          if (!stopped.stopped) throw new Error(`port-conflict startup attempt ${attempt} did not leave its run-owned Operator stopped`);
+
+          portLease = await this.operatorClient.findAvailableRuntimePorts(this.config.runtime_port_attempts);
+          ports = { symphony_port: portLease.symphony_port, ui_port: portLease.ui_port };
+          project = { ...project, ...ports };
+          record.runtime.project = project;
+          record.runtime.dashboard = `http://127.0.0.1:${project.symphony_port}`;
+          record.runtime.child_runtime = { ...record.runtime.child_runtime, runtime_id: null, status: 'starting', process_identity: null, requested_at: currentTimeIso(), ports };
+          record.run_input.runtime_options = { ...record.run_input.runtime_options, ...ports };
+          await writeFile(paths.runtimeProject, `${JSON.stringify(project, null, 2)}\n`, { mode: 0o600 });
+        }
+      }
       this.runTimingRecorder.recordSymphonyStarted(record, currentTimeIso());
       dashboard = runtimeResult.dashboard || record.runtime.dashboard;
       record.runtime.dashboard = dashboard;

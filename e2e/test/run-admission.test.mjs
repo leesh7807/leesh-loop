@@ -46,6 +46,23 @@ test('recovery preserves an in-use reservation while its run process is active',
   assert.equal((await authority.read(databaseA.database_id)).status, DATABASE_STATES.IN_USE);
 });
 
+test('recovery does not treat a terminal lifecycle marker as dead while the run process is active', async () => {
+  const authority = new DatabaseReservationAuthority({ eventStore: new MemoryEventStore() });
+  const process = await currentProcessIdentity();
+  await authority.reserve(databaseA.database_id, { run_id: 'finishing-run', run_process: process, origin: 'direct' });
+  await authority.updateRuntime(databaseA.database_id, 'finishing-run', { status: 'stopped' });
+  await authority.writeRunLifecycle('finishing-run', { run_id: 'finishing-run', status: 'completed', run_process: process });
+  let taskReads = 0;
+  const admission = createAdmission({ authority, notionClient: { async listTasks() { taskReads += 1; return []; } } });
+
+  const result = await admission.recoveryPass();
+
+  assert.equal(result[0].status, DATABASE_STATES.IN_USE);
+  assert.match(result[0].result, /preserved/);
+  assert.equal(taskReads, 0);
+  assert.equal((await authority.read(databaseA.database_id)).reservation.run_id, 'finishing-run');
+});
+
 test('recovery preserves an in-use reservation when child runtime startup is unresolved', async () => {
   const authority = new DatabaseReservationAuthority({ eventStore: new MemoryEventStore() });
   const current = await currentProcessIdentity();
