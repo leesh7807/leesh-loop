@@ -5,41 +5,39 @@
     "schema_version": 1,
     "kind": "database_reservation",
     "database_id": "3ea8a265-8625-8047-81e0-ead9c231fc10",
-    "status": "available",
-    "reservation": null,
+    "status": "in use",
+    "reservation": {
+      "run_id": "a7062a84-1960-4c5a-b9d3-863cdd154089",
+      "acquired_at": "2026-09-29T14:23:57.593Z",
+      "origin": "worker-originated",
+      "run_process": {
+        "pid": 142952,
+        "process_start_ticks": "3037156",
+        "boot_id": "43f4e705-39f8-4dee-b528-e3c113adbd88",
+        "pid_namespace": "pid:[4026531836]",
+        "host": "lees"
+      },
+      "outer_execution_provenance": {
+        "operator_runtime_id": "e0dc553a-0c05-40a7-a8ee-35a7a478c536",
+        "issue_identifier": null,
+        "execution_id": null,
+        "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9"
+      },
+      "run_lifecycle": "active",
+      "child_runtime": {
+        "status": "not_started"
+      }
+    },
     "recovery_marker": null,
     "unavailable": null,
     "last_transition": {
-      "type": "unavailable_to_available",
-      "at": "2026-09-29T14:23:33.911Z",
-      "recovery_marker": "f5300ece-5620-4f85-9b96-1f85bca8c0b4",
-      "recovery_attempt_id": "9422fd16-bedf-49b4-8904-bb7bbc3aae89",
-      "result": "recovered",
-      "evidence": {
-        "stable_database_id": "3ea8a265-8625-8047-81e0-ead9c231fc10",
-        "recovery_marker": "f5300ece-5620-4f85-9b96-1f85bca8c0b4",
-        "run_id": "220531b9-c5c1-45ac-ad04-b9d83d2e68a3",
-        "child_runtime_id": "e261775e-66a2-479e-abe8-def130954819",
-        "lifecycle": "run and child runtime are not active; process identity readback completed",
-        "cleanup": {
-          "listed_task_count": 1,
-          "cleaned": [
-            {
-              "id": "3ea8a265-8625-8121-aa3e-c59fdc87b815",
-              "identifier": "PLAN-604DA4BEC2EE",
-              "previous_state": "Ready",
-              "state": "Cancelled",
-              "provenance": "[E2E reconciliation]\nprevious_state: Ready\naction: stale task cancelled by E2E database recovery\ncleanup_time: 2026-09-29T14:08:56.278Z\nrecovery_identity: f5300ece-5620-4f85-9b96-1f85bca8c0b4\nprevious_run_id: 220531b9-c5c1-45ac-ad04-b9d83d2e68a3\nprevious_child_runtime_id: e261775e-66a2-479e-abe8-def130954819",
-              "verified_at": "2026-09-29T14:23:32.391Z"
-            }
-          ],
-          "preserved": [],
-          "readback_complete": true
-        }
-      }
+      "type": "available_to_in_use",
+      "at": "2026-09-29T14:23:57.593Z",
+      "run_id": "a7062a84-1960-4c5a-b9d3-863cdd154089",
+      "origin": "worker-originated"
     }
   },
-  "event_sequence": 10,
-  "previous_event_sha": "ca60ab5a9c19f88e38bfdab21bf5ccf041abe4b8",
-  "recorded_at": "2026-09-29T14:23:36.394Z"
+  "event_sequence": 11,
+  "previous_event_sha": "ccbddfb1efdaaafe66cd3bc8c9a0f9b87f8954d6",
+  "recorded_at": "2026-09-29T14:23:59.715Z"
 }
