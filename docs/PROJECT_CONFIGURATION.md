@@ -32,3 +32,9 @@ starting with the new Project configuration.
 
 The Production E2E Project accepts the same optional fields. Each run copies configured fields to
 its run-local Operator Project and leaves omitted fields absent.
+
+## Production E2E host configuration
+
+The Production E2E CLI reads `NOTION_TOKEN` and `LEESH_LOOP_E2E_NOTION_DATABASE_URL` from the host
+process environment or repository-root `.env`. See [`operator/e2e/README.md`](../operator/e2e/README.md)
+for setup and run details.
