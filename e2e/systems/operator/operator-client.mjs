@@ -17,7 +17,7 @@ async function reserveAvailablePort() {
 
 export function isRuntimePortConflict(error) {
   const message = String(error?.message || error || '');
-  return /\bEADDRINUSE\b|address already in use|Operator UI at .* is not owned by this project|Operator UI is already owned on /i.test(message);
+  return /\bEADDRINUSE\b|address already in use|Operator UI at .* is not owned by this project|Operator UI is already owned on |Operator UI startup failed: timed out waiting for Operator UI/i.test(message);
 }
 
 export class OperatorClient {

@@ -216,6 +216,33 @@ test('E2ERunner retries when production Operator reports a UI port conflict in a
   assert.equal(harness.runtimeStoppedVerificationCalls, 1);
 });
 
+test('E2ERunner retries when an occupied UI port makes production Operator UI startup time out', async () => {
+  let current = 0;
+  const harness = fixture({
+    states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done'],
+    clock: () => current++,
+    runtimePortPairs: [
+      { symphony_port: 4450, ui_port: 4650 },
+      { symphony_port: 4460, ui_port: 4660 }
+    ],
+    runtimePortConflictResults: ['timed out waiting for Operator UI']
+  });
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-ui-timeout-retry-'));
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+
+  const record = await new E2ERunner({ ...harness, random: () => 0, clock: () => current++, waitForPoll: async () => {} }).runProductionE2E();
+
+  assert.equal(record.status, 'finished');
+  assert.deepEqual(record.runtime.port_start_attempts.map(attempt => attempt.result), ['port_conflict', 'started']);
+  assert.deepEqual(record.runtime.port_start_attempts.map(attempt => attempt.ports), [
+    { symphony_port: 4450, ui_port: 4650 },
+    { symphony_port: 4460, ui_port: 4660 }
+  ]);
+  assert.equal(harness.runtimeStopCalls, 1);
+  assert.equal(harness.runtimeStoppedVerificationCalls, 1);
+});
+
 test('E2ERunner publishes a provided H1-less Plan unchanged through the production path', async () => {
   let current = 0;
   const providedPlan = 'Accepted work without a Markdown heading.\n한국어 내용.\n';
