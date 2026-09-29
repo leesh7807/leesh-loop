@@ -53,23 +53,30 @@ export class GitHubClient {
     return [...identities];
   }
 
-  findRunOwnedDeliveryBranches(prs, record) {
+  resolveRunOwnedDeliveries(prs, record) {
     const identities = this.deliveryPrIdentities(record);
-    const branches = new Set();
-    for (const identity of identities) {
+    const deliveries = identities.map(identity => {
       const recorded = (record.artifacts?.owned_deliveries || []).find(delivery => delivery.pr_url === identity);
-      if (recorded?.branch) {
-        branches.add(recorded.branch);
-        continue;
-      }
+      if (recorded?.branch) return { identity, branch: recorded.branch, source: 'recorded', pullRequest: null };
       if (identity === record.artifacts?.delivery_pr_url && record.artifacts?.delivery_branch) {
-        branches.add(record.artifacts.delivery_branch);
-        continue;
+        return { identity, branch: record.artifacts.delivery_branch, source: 'recorded', pullRequest: null };
       }
-      const pr = this.findDeliveryPullRequest(prs, identity);
-      if (pr?.headRefName && this.isSameRepositoryDelivery(pr)) branches.add(pr.headRefName);
+      const pullRequest = this.findDeliveryPullRequest(prs, identity);
+      if (!pullRequest) return { identity, branch: null, source: 'missing', pullRequest: null };
+      if (pullRequest.headRefName && this.isSameRepositoryDelivery(pullRequest)) {
+        return { identity, branch: pullRequest.headRefName, source: 'snapshot', pullRequest };
+      }
+      return { identity, branch: null, source: 'invalid', pullRequest };
+    });
+    if (identities.length > 0 && record.artifacts?.delivery_branch
+      && !deliveries.some(delivery => delivery.branch === record.artifacts.delivery_branch)) {
+      deliveries.push({ identity: record.artifacts.delivery_pr_url || null, branch: record.artifacts.delivery_branch, source: 'recorded', pullRequest: null });
     }
-    if (identities.length > 0 && record.artifacts?.delivery_branch) branches.add(record.artifacts.delivery_branch);
-    return [...branches];
+    return { identities, deliveries };
+  }
+
+  findRunOwnedDeliveryBranches(prs, record) {
+    const { deliveries } = this.resolveRunOwnedDeliveries(prs, record);
+    return [...new Set(deliveries.map(delivery => delivery.branch).filter(Boolean))];
   }
 }

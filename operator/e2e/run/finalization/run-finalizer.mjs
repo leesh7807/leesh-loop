@@ -163,36 +163,35 @@ export class RunFinalizer {
       record.cleanup.unresolved = record.cleanup.unresolved.filter(action => action !== skippedCleanupAction);
       record.finalization.incomplete = record.finalization.unresolved.length > 0;
       const prs = record.evidence.snapshots.flatMap(snapshot => snapshot.github?.delivery_prs || []);
-      const ownedBranches = new Set(this.githubClient.findRunOwnedDeliveryBranches?.(prs, record) || []);
-      const deliveryPrs = this.githubClient.deliveryPrIdentities?.(record) || [];
-      for (const identity of deliveryPrs) {
-        const recordedDelivery = (record.artifacts.owned_deliveries || []).find(delivery => delivery.pr_url === identity)
-          || (identity === record.artifacts.delivery_pr_url && record.artifacts.delivery_branch ? { pr_url: identity, branch: record.artifacts.delivery_branch } : null);
-        if (recordedDelivery?.branch) {
-          ownedBranches.add(recordedDelivery.branch);
+      const ownership = this.githubClient.resolveRunOwnedDeliveries?.(prs, record)
+        || { identities: this.githubClient.deliveryPrIdentities?.(record) || [], deliveries: [] };
+      const ownedBranches = new Set(ownership.deliveries.map(delivery => delivery.branch).filter(Boolean));
+      const deliveryPrs = ownership.identities;
+      for (const delivery of ownership.deliveries) {
+        const { identity, branch, source, pullRequest } = delivery;
+        if (source === 'recorded') continue;
+        if (source === 'snapshot') {
+          const observed = recordRunDeliveryEvidence(record, pullRequest.url || identity, pullRequest, { sameRepository: true, observedAt: currentTimeIso() });
+          ownedBranches.add(observed.branch);
           continue;
         }
-        let pr = this.githubClient.findDeliveryPullRequest?.(prs, identity) || null;
-        if (!pr) {
-          const readback = await this.runFinalizationAction(record, `read_run_owned_delivery_pr:${identity}`, async signal => {
-            const observed = await this.githubClient.readPullRequest(identity, signal);
-            if (!observed?.headRefName || !isSameRepositoryDelivery(observed, this.githubClient.repository)) {
-              throw new Error(`delivery PR ${identity} does not identify a same-repository run-owned head`);
-            }
-            const delivery = recordRunDeliveryEvidence(record, observed.url || identity, observed, { sameRepository: true, observedAt: currentTimeIso() });
-            return { url: delivery.pr_url, branch: delivery.branch };
-          });
-          if (readback?.branch) ownedBranches.add(readback.branch);
-          continue;
-        }
-        if (!isSameRepositoryDelivery(pr, this.githubClient.repository) || !pr.headRefName) {
+        if (source === 'invalid') {
           await this.runFinalizationAction(record, `read_run_owned_delivery_pr:${identity}`, async () => {
             throw new Error(`delivery PR ${identity} does not identify a same-repository run-owned head`);
           });
           continue;
         }
-        const delivery = recordRunDeliveryEvidence(record, pr.url || identity, pr, { sameRepository: true, observedAt: currentTimeIso() });
-        ownedBranches.add(delivery.branch);
+        if (source !== 'missing' || !identity) continue;
+        const readback = await this.runFinalizationAction(record, `read_run_owned_delivery_pr:${identity}`, async signal => {
+          const observed = await this.githubClient.readPullRequest(identity, signal);
+          const resolved = this.githubClient.resolveRunOwnedDeliveries([observed], record).deliveries.find(item => item.identity === identity);
+          if (resolved?.source !== 'snapshot') {
+            throw new Error(`delivery PR ${identity} does not identify a same-repository run-owned head`);
+          }
+          const registered = recordRunDeliveryEvidence(record, observed.url || identity, observed, { sameRepository: true, observedAt: currentTimeIso() });
+          return { url: registered.pr_url, branch: registered.branch };
+        });
+        if (readback?.branch) ownedBranches.add(readback.branch);
       }
       const legacyOwnedBranches = (record.evidence.branch_isolation?.remaining_run_owned_refs || [])
         .map(ref => /^refs\/heads\/(.+)$/.exec(ref)?.[1])

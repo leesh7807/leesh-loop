@@ -17,6 +17,9 @@ test('delivery branch cleanup follows only the task-recorded PR identity', () =>
     { number: 8, url: 'https://github.com/owner/repo/pull/8', headRefName: 'unrelated', isCrossRepository: false, headRepository: { nameWithOwner: 'owner/repo' } },
     { number: 9, url: 'https://github.com/owner/repo/pull/9', headRefName: 'forked', isCrossRepository: true, headRepository: { nameWithOwner: 'other/repo' } }
   ];
+  const resolution = github.resolveRunOwnedDeliveries(prs, record);
+  assert.deepEqual(resolution.identities, [deliveryUrl]);
+  assert.deepEqual(resolution.deliveries, [{ identity: deliveryUrl, branch: 'task-delivery', source: 'snapshot', pullRequest: prs[0] }]);
   assert.deepEqual(github.findRunOwnedDeliveryBranches(prs, record), ['task-delivery']);
 });
 
