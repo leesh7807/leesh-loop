@@ -5,7 +5,7 @@
     "schema_version": 1,
     "kind": "database_reservation",
     "database_id": "3e08a265-8625-805c-ad23-fe1137be4a1e",
-    "status": "in use",
+    "status": "unavailable",
     "reservation": {
       "run_id": "6e7752ed-37d1-49c8-bfbb-a6fe3396cd3e",
       "acquired_at": "2026-09-29T13:38:56.530Z",
@@ -27,16 +27,49 @@
         "status": "not_started"
       }
     },
-    "recovery_marker": null,
-    "unavailable": null,
+    "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
+    "unavailable": {
+      "marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
+      "at": "2026-09-29T13:39:03.784Z",
+      "reason": "database-specific admission found task residue",
+      "evidence": {
+        "tasks": [
+          {
+            "id": "3ea8a265-8625-81e2-b388-e9dff586d114",
+            "identifier": "PLAN-2C2488942CD2",
+            "state": "Ready"
+          }
+        ],
+        "recovery_pass": {
+          "database_id": "3e08a265-8625-805c-ad23-fe1137be4a1e",
+          "status": "available",
+          "result": "available"
+        }
+      }
+    },
     "last_transition": {
-      "type": "available_to_in_use",
-      "at": "2026-09-29T13:38:56.531Z",
+      "type": "in_use_to_unavailable",
+      "at": "2026-09-29T13:39:03.784Z",
       "run_id": "6e7752ed-37d1-49c8-bfbb-a6fe3396cd3e",
-      "origin": "worker-originated"
+      "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
+      "reason": "database-specific admission found task residue",
+      "evidence": {
+        "tasks": [
+          {
+            "id": "3ea8a265-8625-81e2-b388-e9dff586d114",
+            "identifier": "PLAN-2C2488942CD2",
+            "state": "Ready"
+          }
+        ],
+        "recovery_pass": {
+          "database_id": "3e08a265-8625-805c-ad23-fe1137be4a1e",
+          "status": "available",
+          "result": "available"
+        }
+      }
     }
   },
-  "event_sequence": 1,
-  "previous_event_sha": null,
-  "recorded_at": "2026-09-29T13:38:57.084Z"
+  "event_sequence": 2,
+  "previous_event_sha": "a85ee05742c06bfd35d5adfccaa151ca9b17c8c9",
+  "recorded_at": "2026-09-29T13:39:06.235Z"
 }
