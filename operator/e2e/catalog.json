@@ -1,17 +1,17 @@
 [
   {
-    "id": "publisher-plan-surface",
-    "hard_cap_ms": 2700000,
-    "accepted_plan": "# 2026-09-19-publisher-plan-surface\n\nInspect the canonical plan publication and task handoff in this repository. Create a concise Korean investigation note under docs/ describing the observed Publisher entry point, the canonical Plan/task relationship, and one concrete verification command. Do not change production behavior or credentials. Run the most direct focused check available, record its actual result, and prepare the repository change for the normal review and delivery workflow.\n"
+    "id": "project-git-target-config",
+    "hard_cap_ms": 1200000,
+    "accepted_plan": "# 2026-09-27-project-git-target-config\n\nAdd a short Git target subsection to `docs/PROJECT_CONFIGURATION.md` with an example showing `github_repository_url` and `github_base_branch` together. State that the two fields are configured as a pair, `main` is only an example, and the configured base is used for task workspaces/branches and delivery PRs. Keep the change documentation-only. Verify the field names and behavior against the root `README.md` and `operator/app`, then run `git diff --check`.\n"
   },
   {
-    "id": "workspace-contract-surface",
-    "hard_cap_ms": 2700000,
-    "accepted_plan": "# 2026-09-19-workspace-contract-surface\n\nInspect the workspace bootstrap and Git target contract in this repository. Create a concise Korean investigation note under docs/ describing how a configured base reaches a worker workspace and one concrete isolation or readiness risk. Do not change production behavior or credentials. Run the most direct focused check available, record its actual result, and prepare the repository change for the normal review and delivery workflow.\n"
+    "id": "project-workspace-files-config",
+    "hard_cap_ms": 1200000,
+    "accepted_plan": "# 2026-09-27-project-workspace-files-config\n\nAdd a concise `workspace_files` subsection to `docs/PROJECT_CONFIGURATION.md`. Explain that entries are absolute host-file paths copied by basename into newly created workspaces, existing destinations are not overwritten, and continuations preserve their current workspace without recopying. Keep the change documentation-only. Verify each statement against the root `README.md` and Operator workspace-file implementation, then run `git diff --check`.\n"
   },
   {
-    "id": "review-job-surface",
-    "hard_cap_ms": 2700000,
-    "accepted_plan": "# 2026-09-19-review-job-surface\n\nInspect the worker-facing independent review boundary in this repository. Create a concise Korean investigation note under docs/ describing the submit/readback contract, the evidence retained for a terminal result, and one concrete verification command. Do not change production behavior or credentials. Run the most direct focused check available, record its actual result, and prepare the repository change for the normal review and delivery workflow.\n"
+    "id": "e2e-host-notion-binding-config",
+    "hard_cap_ms": 1200000,
+    "accepted_plan": "# 2026-09-27-e2e-host-notion-binding-config\n\nAdd a short Production E2E configuration note to `docs/PROJECT_CONFIGURATION.md` naming the host-side `NOTION_TOKEN` and `LEESH_LOOP_E2E_NOTION_DATABASE_URL` inputs and linking to `operator/e2e/README.md` for setup details. Do not include secret values or change configuration behavior. Verify both names and the setup path against `operator/e2e/README.md` and `operator/e2e/model/e2e-project-config.mjs`, then run `git diff --check`.\n"
   }
 ]

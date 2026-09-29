@@ -14,13 +14,11 @@ test('catalog requires a finite cap and keeps harness metadata outside the accep
   assert.throws(() => validateWorkloadCatalog([{ id: 'bad', hard_cap_ms: 0, accepted_plan: planA }]), /finite positive/);
 });
 
-test('selection remains eligible after prior task instances are published', () => {
+test('selection remains random across every catalog entry', () => {
   const catalog = validateWorkloadCatalog([
     { id: 'a', hard_cap_ms: 10, accepted_plan: planA },
     { id: 'b', hard_cap_ms: 10, accepted_plan: planB }
   ]);
-  const selected = selectAvailableWorkload(catalog, { random: () => 0.99 });
-  assert.equal(selected.id, 'b');
   assert.equal(selectAvailableWorkload(catalog, { random: () => 0 }).id, 'a');
   assert.equal(selectAvailableWorkload(catalog, { random: () => 0.99 }).id, 'b');
 });

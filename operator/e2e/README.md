@@ -35,18 +35,31 @@ node operator/e2e/cli.mjs run operator/e2e/project.json
 ```
 
 When a specific Accepted Plan is needed, supply the UTF-8 document directly. The document is passed
-unchanged to the production Publisher; it does not need an E2E Markdown schema or H1. The default
-hard cap is 30 minutes, and a positive override may be supplied only with `--plan`:
+unchanged to the production Publisher; it does not need an E2E Markdown schema or H1. Provided-Plan
+runs have a default hard cap of 30 minutes, and a positive override may be supplied only with
+`--plan`:
 
 ```bash
 node operator/e2e/cli.mjs run operator/e2e/project.json --plan ./accepted-plan.md
 node operator/e2e/cli.mjs run operator/e2e/project.json --plan ./accepted-plan.md --hard-cap-ms 600000
 ```
 
+## Choose a catalog run or a scenario input
+
+Without `--plan`, a run randomly selects an Accepted Plan from `catalog.json`; use this default path
+to check the production lifecycle and PR delivery with a small repeatable workload. There is no
+catalog-id selector. Use `--plan PATH` when the Plan's particular task meaning is under test, and
+`--workflow PATH` when a particular workflow's rules are under test. Both inputs use the same
+production E2E path; `--workflow` alone still uses a randomly selected catalog Plan. Supply both
+options when a scenario depends on both a specific task and workflow.
+
+Each default run selects randomly from the full catalog. The selected entry is materialized with the
+next numeric H1 suffix, so a completed catalog workload remains eligible for later runs. Provided
+Plan scenarios remain separate through their workload provenance even when their text resembles a
+catalog Plan.
+
 Use `--workflow ./WORKFLOW.md` to supply one exact workflow document for a run. The workflow is
 resolved once before the production runtime starts and is copied verbatim into that run's evidence.
-There is no catalog-id selector; without `--plan`, catalog random remains the only default workload
-selection behavior.
 
 The implementation is grouped by responsibility:
 
@@ -71,6 +84,12 @@ Production Symphony execution history is captured in those evidence snapshots th
 `GET /api/v1/executions?issue_identifier=<identifier>`. E2E observation timestamps remain in the
 snapshot envelope; worker start/end/runtime, attempt, session, turn, and token values come from the
 production execution records. E2E lifecycle and whole-run durations remain E2E observations.
+
+To inspect the workload and observed timing for a run:
+
+```bash
+jq '{workload_source: .workload.source, catalog_entry: .workload.catalog_entry_id, hard_cap_ms: .workload.hard_cap_ms, workflow_source: .run_input.workflow.source, run_duration_ms: .timing.run.observed_duration_ms, symphony: .timing.symphony, lifecycle: .timing.lifecycle, chatgpt_shot: .timing.chatgpt_shot}' operator/e2e/runs/<run-id>/run.json
+```
 
 A terminal run is a useful result even when production stops before `Done`. Inspect
 `verified_through`, `verification_gaps`, `failures`, `finalization`, `cleanup` and the evidence

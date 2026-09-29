@@ -13,7 +13,7 @@ export class OperatorClient {
   async startConfiguredOperatorProject(projectPath, timeoutMs, notionDatabaseUrl) {
     const env = notionDatabaseUrl ? { ...process.env, LEESH_LOOP_NOTION_DATABASE_URL: notionDatabaseUrl } : process.env;
     const { stdout } = await this.commandRunner('node', [this.app, 'start', projectPath], { cwd: this.root, timeout: timeoutMs, env });
-    return parseJsonOutput(stdout, 'Operator start');
+    return parseJsonOutput(stdout.trim().split(/\r?\n/).at(-1) || '', 'Operator start');
   }
 
   async stopConfiguredOperatorProject(projectPath, timeoutMs, signal) {

@@ -52,7 +52,7 @@ test('catalog random input retains before/after materialization evidence', async
   const files = await fixtureFiles(t);
   const catalogEntry = validateWorkloadCatalog([{ id: 'catalog-entry', hard_cap_ms: 91, accepted_plan: '# Catalog task\n\nInspect it.\n' }])[0];
   const input = await resolveE2ERunInput({ config: files.config });
-  const resolved = resolveWorkloadForRun({ runInput: input, catalog: [catalogEntry], tasks: [{ title: 'Catalog task', state: 'Done' }], random: () => 0 });
+  const resolved = resolveWorkloadForRun({ runInput: input, catalog: [catalogEntry], tasks: [{ title: 'Catalog task', state: 'Cancelled' }], random: () => 0 });
   assert.equal(resolved.workload.source, 'catalog_random');
   assert.equal(resolved.workload.accepted_plan, '# Catalog task-2\n\nInspect it.\n');
   assert.equal(resolved.evidence.catalog_entry.id, 'catalog-entry');
@@ -60,6 +60,24 @@ test('catalog random input retains before/after materialization evidence', async
   assert.equal(resolved.evidence.materialization.execution_number, 2);
   assert.equal(resolved.evidence.publisher.accepted_plan, resolved.workload.accepted_plan);
   assert.equal(resolved.evidence.hard_cap.provenance, 'catalog_entry.hard_cap_ms');
+});
+
+test('catalog resolution can republish a completed entry with the next materialized identity', async t => {
+  const files = await fixtureFiles(t);
+  const input = await resolveE2ERunInput({ config: files.config });
+  const catalog = validateWorkloadCatalog([
+    { id: 'a', hard_cap_ms: 91, accepted_plan: '# A\n\nAdd a Git target example.\n' },
+    { id: 'b', hard_cap_ms: 92, accepted_plan: '# B\n\nAdd a workspace-files example.\n' }
+  ]);
+  const resolved = resolveWorkloadForRun({
+    runInput: input,
+    catalog,
+    tasks: [{ title: 'A-1', state: 'Done' }],
+    random: () => 0
+  });
+  assert.equal(resolved.workload.catalog_entry_id, 'a');
+  assert.equal(resolved.workload.execution_number, 2);
+  assert.equal(resolved.workload.accepted_plan, '# A-2\n\nAdd a Git target example.\n');
 });
 
 test('invalid UTF-8 and empty provided plans are rejected before production input is resolved', async t => {

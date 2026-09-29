@@ -117,8 +117,12 @@ export class E2ERunner {
 
       this.runTimingRecorder.recordSymphonyStartRequested(record, currentTimeIso());
       record.status = 'runtime_starting';
+      const runtimeStartTimeoutMs = workload.source === 'catalog_random'
+        ? Math.min(this.config.runtime_start_timeout_ms, Math.max(1, Date.parse(record.deadline_at) - Date.now()))
+        : this.config.runtime_start_timeout_ms;
+      record.run_input.runtime_options.runtime_start_timeout_ms = runtimeStartTimeoutMs;
       await this.runRecordStore.save(record);
-      const runtimeResult = await this.operatorClient.startConfiguredOperatorProject(paths.runtimeProject, this.config.runtime_start_timeout_ms, this.config.notion_database_url);
+      const runtimeResult = await this.operatorClient.startConfiguredOperatorProject(paths.runtimeProject, runtimeStartTimeoutMs, this.config.notion_database_url);
       this.runTimingRecorder.recordSymphonyStarted(record, currentTimeIso());
       dashboard = runtimeResult.dashboard || record.runtime.dashboard;
       record.runtime.dashboard = dashboard;

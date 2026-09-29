@@ -48,8 +48,9 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
     async appendWorkpad() {}
   };
   const startedDatabaseUrls = [];
+  const startedTimeouts = [];
   const runtime = {
-    async startConfiguredOperatorProject(_projectPath, _timeout, databaseUrl) { startedDatabaseUrls.push(databaseUrl); return { dashboard: 'http://127.0.0.1:4410', pid: 42 }; },
+    async startConfiguredOperatorProject(_projectPath, timeout, databaseUrl) { startedTimeouts.push(timeout); startedDatabaseUrls.push(databaseUrl); return { dashboard: 'http://127.0.0.1:4410', pid: 42 }; },
     async readSymphonyRuntimeStatus() { return { pid: 42, runtime_id: 'runtime-fixture', dispatch_capable: true }; },
     async stopConfiguredOperatorProject() { return { stopped: true }; }
   };
@@ -79,7 +80,7 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
   const store = new RunRecordStore(config);
   const finalized = [];
   const finalizer = { async finalizeRun({ record, reason, task: currentTask }) { finalized.push(reason); if (reason === 'reentered_human_review') { const cancelled = await notion.updateTaskState(config.notion_database_url, currentTask.id, 'Cancelled'); assert.equal(cancelled.state, 'Cancelled'); record.cleanup.task_terminalized = true; } record.status = 'finished'; record.finalization.reason = reason; record.finalization.complete = true; record.ended_at = new Date(clock()).toISOString(); await store.save(record); return record; } };
-  return { config, runInput, catalog: validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 5, accepted_plan: plan }]), notionClient: notion, operatorClient: runtime, gitClient: git, notionPublisherClient: publisher, githubClient: github, runEvidenceCollector: evidence, runFinalizer: finalizer, runRecordStore: store, finalized, transitions, publishedPlans, startedDatabaseUrls };
+  return { config, runInput, catalog: validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 5, accepted_plan: plan }]), notionClient: notion, operatorClient: runtime, gitClient: git, notionPublisherClient: publisher, githubClient: github, runEvidenceCollector: evidence, runFinalizer: finalizer, runRecordStore: store, finalized, transitions, publishedPlans, startedDatabaseUrls, startedTimeouts };
 }
 
 test('E2ERunner reaches terminal Done through injected production dependencies', async () => {
@@ -102,6 +103,8 @@ test('E2ERunner reaches terminal Done through injected production dependencies',
   assert.equal(record.runtime.runtime_id, 'runtime-fixture');
   assert.equal(persistedStartRequests.length, 1);
   assert.ok(persistedStartRequests[0]);
+  assert.ok(harness.startedTimeouts[0] > 0 && harness.startedTimeouts[0] <= record.workload.hard_cap_ms);
+  assert.equal(record.run_input.runtime_options.runtime_start_timeout_ms, harness.startedTimeouts[0]);
   assert.deepEqual(harness.startedDatabaseUrls, [harness.config.notion_database_url]);
   assert.equal(record.lifecycle.observations[0].state, 'Ready');
   assert.equal(record.workload.execution_number, 1);
@@ -143,6 +146,8 @@ test('E2ERunner publishes a provided H1-less Plan unchanged through the producti
   assert.equal(record.workload.source, 'provided');
   assert.equal(record.workload.accepted_plan, providedPlan);
   assert.equal(record.workload.hard_cap_ms, 1_800_000);
+  assert.deepEqual(harness.startedTimeouts, [harness.config.runtime_start_timeout_ms]);
+  assert.equal(record.run_input.runtime_options.runtime_start_timeout_ms, harness.config.runtime_start_timeout_ms);
   assert.equal(record.run_input.workload.catalog_entry, null);
   assert.equal(record.run_input.workload.supplied.accepted_plan, providedPlan);
   assert.equal(record.run_input.workload.publisher.accepted_plan, providedPlan);
