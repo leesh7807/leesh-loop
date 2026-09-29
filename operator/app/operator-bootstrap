@@ -121,11 +121,8 @@ github_repository_url=${SYMPHONY_GITHUB_REPOSITORY_URL:-}
 [ -n "$github_repository_url" ] || fail 'SYMPHONY_GITHUB_REPOSITORY_URL must be configured by the Project.'
 github_base_branch=${SYMPHONY_GITHUB_BASE_BRANCH:-}
 [ -n "$github_base_branch" ] || fail 'SYMPHONY_GITHUB_BASE_BRANCH must be configured by the Project.'
-case "$github_repository_url" in
-  https://github.com/*) git_transport=https ;;
-  git@github.com:*|ssh://git@github.com/*) git_transport=ssh ;;
-  *) fail "GitHub readiness requires an HTTPS or SSH repository URL: $github_repository_url" ;;
-esac
+git_transport=$(node "$repository_root/operator/app/github-repository-url.mjs" "$github_repository_url") ||
+  fail 'SYMPHONY_GITHUB_REPOSITORY_URL must be a valid HTTPS or SSH GitHub repository URL.'
 
 curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
   --output /dev/null https://github.com/ || fail 'GitHub network reachability check failed.'

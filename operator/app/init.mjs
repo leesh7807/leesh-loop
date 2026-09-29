@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { HOST_PREREQUISITES, listRuntimeSnapshotFiles, materializeRuntimeSnapshot } from './runtime-manifest.mjs';
+import { githubRepositoryTransport } from './github-repository-url.mjs';
 import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
 import { resolveProjectPath } from '../local-path.mjs';
 
@@ -17,20 +18,8 @@ function gitValue(cwd, args) {
 }
 
 function validateTargetUrl(remoteUrl) {
-  if (!remoteUrl || /[\r\n\0]/.test(remoteUrl)) throw new Error('the configured Git upstream has no usable remote URL');
-  if (remoteUrl.startsWith('https://')) {
-    let parsed;
-    try { parsed = new URL(remoteUrl); } catch { throw new Error('the configured Git upstream remote URL is invalid'); }
-    if (parsed.hostname !== 'github.com') throw new Error('the existing Operator Project contract requires a GitHub repository upstream URL');
-    if (parsed.username || parsed.password) throw new Error('the configured upstream URL contains credentials; remove them before running init');
-    if (parsed.search || parsed.hash || parsed.pathname.split('/').filter(Boolean).length < 2) {
-      throw new Error('the configured Git upstream URL does not identify a GitHub repository');
-    }
-    return remoteUrl;
-  }
-  if (/^git@github\.com:[^/\s]+\/[^/\s]+$/.test(remoteUrl)) return remoteUrl;
-  if (/^ssh:\/\/git@github\.com\/[^/\s]+\/[^/\s]+$/.test(remoteUrl)) return remoteUrl;
-  throw new Error('the existing Operator Project contract requires an HTTPS or SSH GitHub upstream URL');
+  githubRepositoryTransport(remoteUrl);
+  return remoteUrl;
 }
 
 export async function resolveTargetRepository(cwd) {

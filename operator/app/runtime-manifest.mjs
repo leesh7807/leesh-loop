@@ -14,6 +14,7 @@ export const RUNTIME_SNAPSHOT_PATHS = Object.freeze([
   'operator/app/run-symphony',
   'operator/app/workspace-files.mjs',
   'operator/app/git-target.mjs',
+  'operator/app/github-repository-url.mjs',
   'operator/app/prepare-runtime.mjs',
   'operator/external/chatgpt-shot/chatgpt-shot',
   'operator/local-environment.mjs',

@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import { initLoop } from '../init.mjs';
 import { RUNTIME_SNAPSHOT_PATHS, listRuntimeSnapshotFiles } from '../runtime-manifest.mjs';
+import { githubRepositoryTransport } from '../github-repository-url.mjs';
 
 const execFile = promisify(execute);
 const sourceRoot = resolve(import.meta.dirname, '../../..');
@@ -217,4 +218,13 @@ test('runtime snapshot selection is a tracked whitelist and preserves executable
   assert.ok(!files.some(file => file.startsWith('operator/symphony/test/')));
   assert.ok(!files.some(file => file.startsWith('operator/e2e/')));
   assert.ok(!files.some(file => file.startsWith('docs/plans/')));
+});
+
+test('one GitHub repository URL policy accepts the supported HTTPS and SSH transports', () => {
+  assert.equal(githubRepositoryTransport('https://github.com/example/repository.git'), 'https');
+  assert.equal(githubRepositoryTransport('git@github.com:example/repository.git'), 'ssh');
+  assert.equal(githubRepositoryTransport('ssh://git@github.com/example/repository.git'), 'ssh');
+  assert.throws(() => githubRepositoryTransport('https://user:token@github.com/example/repository.git'), /contains credentials/);
+  assert.throws(() => githubRepositoryTransport('https://gitlab.com/example/repository.git'), /requires a GitHub repository/);
+  assert.throws(() => githubRepositoryTransport('git@github.com:example'), /requires an HTTPS or SSH GitHub upstream URL/);
 });
