@@ -5,70 +5,47 @@
     "schema_version": 1,
     "kind": "database_reservation",
     "database_id": "3ea8a265-8625-8047-81e0-ead9c231fc10",
-    "status": "unavailable",
-    "reservation": {
-      "run_id": "a7062a84-1960-4c5a-b9d3-863cdd154089",
-      "acquired_at": "2026-09-29T14:23:57.593Z",
-      "origin": "worker-originated",
-      "run_process": {
-        "pid": 142952,
-        "process_start_ticks": "3037156",
-        "boot_id": "43f4e705-39f8-4dee-b528-e3c113adbd88",
-        "pid_namespace": "pid:[4026531836]",
-        "host": "lees"
-      },
-      "outer_execution_provenance": {
-        "operator_runtime_id": "e0dc553a-0c05-40a7-a8ee-35a7a478c536",
-        "issue_identifier": null,
-        "execution_id": null,
-        "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9"
-      },
-      "run_lifecycle": "failed",
-      "child_runtime": {
-        "runtime_id": "adbbcfe9-289d-4850-ae94-8a90f9bb090a",
-        "status": "stopped",
-        "dashboard": "http://127.0.0.1:40415",
-        "process_identity": {
-          "pid": 144929,
-          "process_start_ticks": "3048777",
-          "boot_id": "43f4e705-39f8-4dee-b528-e3c113adbd88",
-          "pid_namespace": "pid:[4026531836]",
-          "host": "lees"
-        },
-        "state_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/a7062a84-1960-4c5a-b9d3-863cdd154089/operator-state/runtime.json"
-      },
-      "base_branch": "base/a7062a84-1960-4c5a-b9d3-863cdd154089",
-      "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/workspaces/a7062a84-1960-4c5a-b9d3-863cdd154089",
-      "run_record_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/a7062a84-1960-4c5a-b9d3-863cdd154089/run.json",
-      "workflow_snapshot_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/a7062a84-1960-4c5a-b9d3-863cdd154089/workflow.md"
-    },
-    "recovery_marker": "330155e0-f412-4c5f-bf9d-093006a6e00c",
-    "unavailable": {
-      "marker": "330155e0-f412-4c5f-bf9d-093006a6e00c",
-      "at": "2026-09-29T14:34:51.192Z",
-      "reason": "current E2E run finalization or required cleanup did not complete",
-      "evidence": {
-        "lifecycle_status": "failed",
-        "child_runtime_id": "adbbcfe9-289d-4850-ae94-8a90f9bb090a",
-        "child_runtime_status": "stopped",
-        "finalization_complete": false,
-        "unresolved": [
-          "reread_task_after_runtime_stop"
-        ],
-        "cleanup_unresolved": [
-          "reread_task_after_runtime_stop"
-        ],
-        "ended_at": "2026-09-29T14:34:26.348Z"
-      }
-    },
+    "status": "available",
+    "reservation": null,
+    "recovery_marker": null,
+    "unavailable": null,
     "last_transition": {
-      "type": "recovery_started",
-      "at": "2026-09-29T14:42:25.865Z",
+      "type": "unavailable_to_available",
+      "at": "2026-09-29T14:42:43.179Z",
       "recovery_marker": "330155e0-f412-4c5f-bf9d-093006a6e00c",
-      "recovery_attempt_id": "4ea5b332-64b7-4315-85a1-da0389dedb7f"
+      "recovery_attempt_id": "4ea5b332-64b7-4315-85a1-da0389dedb7f",
+      "result": "recovered",
+      "evidence": {
+        "stable_database_id": "3ea8a265-8625-8047-81e0-ead9c231fc10",
+        "recovery_marker": "330155e0-f412-4c5f-bf9d-093006a6e00c",
+        "run_id": "a7062a84-1960-4c5a-b9d3-863cdd154089",
+        "child_runtime_id": "adbbcfe9-289d-4850-ae94-8a90f9bb090a",
+        "lifecycle": "run and child runtime are not active; process identity readback completed",
+        "cleanup": {
+          "listed_task_count": 2,
+          "cleaned": [
+            {
+              "id": "3ea8a265-8625-8136-b261-dcfbb0ee1585",
+              "identifier": "PLAN-E9C256AE9348",
+              "previous_state": "Merging",
+              "state": "Cancelled",
+              "provenance": "[E2E reconciliation]\nprevious_state: Merging\naction: stale task cancelled by E2E database recovery\ncleanup_time: 2026-09-29T14:34:51.192Z\nrecovery_identity: 330155e0-f412-4c5f-bf9d-093006a6e00c\nprevious_run_id: a7062a84-1960-4c5a-b9d3-863cdd154089\nprevious_child_runtime_id: adbbcfe9-289d-4850-ae94-8a90f9bb090a",
+              "verified_at": "2026-09-29T14:42:40.166Z"
+            }
+          ],
+          "preserved": [
+            {
+              "id": "3ea8a265-8625-8121-aa3e-c59fdc87b815",
+              "identifier": "PLAN-604DA4BEC2EE",
+              "state": "Cancelled"
+            }
+          ],
+          "readback_complete": true
+        }
+      }
     }
   },
-  "event_sequence": 19,
-  "previous_event_sha": "8af086e54e9819ee3e8d221420079f7bf431af10",
-  "recorded_at": "2026-09-29T14:42:28.214Z"
+  "event_sequence": 20,
+  "previous_event_sha": "ed618c71137a0118aa0c05fc5105cd99fde7007f",
+  "recorded_at": "2026-09-29T14:42:45.568Z"
 }
