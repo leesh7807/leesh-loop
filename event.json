@@ -44,17 +44,17 @@
     "unavailable": null,
     "last_transition": {
       "type": "active_run_protected",
-      "at": "2026-09-29T14:23:09.925Z",
+      "at": "2026-09-29T14:30:00.299Z",
       "run_id": "6e7752ed-37d1-49c8-bfbb-a6fe3396cd3e",
       "evidence": {
-        "run_lifecycle_status": "active",
+        "run_lifecycle_status": "failed",
         "run_process_state": "unknown",
         "child_runtime_id": "d08554a1-ad23-4f62-a991-4260b59138d2",
-        "child_process_state": "active"
+        "child_process_state": "unknown"
       }
     }
   },
-  "event_sequence": 7,
-  "previous_event_sha": "01f9c257f7b871a15938ea2bd46ba1f3254ab318",
-  "recorded_at": "2026-09-29T14:23:12.337Z"
+  "event_sequence": 8,
+  "previous_event_sha": "6487d32f53aca044269f2377055b3559dd25af0f",
+  "recorded_at": "2026-09-29T14:30:03.445Z"
 }
