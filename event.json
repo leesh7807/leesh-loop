@@ -26,7 +26,7 @@
       "run_lifecycle": "active",
       "child_runtime": {
         "runtime_id": "145db36e-b2a5-4fe1-8116-5164e4033092",
-        "status": "active",
+        "status": "stopped",
         "dashboard": "http://127.0.0.1:40419",
         "process_identity": {
           "pid": 1216,
@@ -45,18 +45,14 @@
     "recovery_marker": null,
     "unavailable": null,
     "last_transition": {
-      "type": "active_run_protected",
-      "at": "2026-09-29T14:42:54.220Z",
+      "type": "child_runtime_updated",
+      "at": "2026-09-29T14:43:23.339Z",
       "run_id": "77e09127-94b9-43c8-9156-cc25dca6a9f7",
-      "evidence": {
-        "run_lifecycle_status": "active",
-        "run_process_state": "unknown",
-        "child_runtime_id": "145db36e-b2a5-4fe1-8116-5164e4033092",
-        "child_process_state": "active"
-      }
+      "child_runtime_id": "145db36e-b2a5-4fe1-8116-5164e4033092",
+      "child_runtime_status": "stopped"
     }
   },
-  "event_sequence": 7,
-  "previous_event_sha": "1507d525368ffaf27d9b33b76e10d1b2eea474ca",
-  "recorded_at": "2026-09-29T14:42:56.999Z"
+  "event_sequence": 8,
+  "previous_event_sha": "9d4d40405a1d6b6c097c9b51187e4e1cabe9ee83",
+  "recorded_at": "2026-09-29T14:43:25.454Z"
 }
