@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GitHubClient } from '../systems/github/github-client.mjs';
+import { GitHubClient, isSameRepositoryDelivery } from '../systems/github/github-client.mjs';
+
+test('delivery ownership uses one same-repository predicate', () => {
+  assert.equal(isSameRepositoryDelivery({ isCrossRepository: false, headRepository: { nameWithOwner: 'owner/repo' } }, 'owner/repo'), true);
+  assert.equal(isSameRepositoryDelivery({ isCrossRepository: true, headRepository: { nameWithOwner: 'owner/repo' } }, 'owner/repo'), false);
+  assert.equal(isSameRepositoryDelivery({ isCrossRepository: false, headRepository: { nameWithOwner: 'other/repo' } }, 'owner/repo'), false);
+});
 
 test('delivery branch cleanup follows only the task-recorded PR identity', () => {
   const github = new GitHubClient({ repositoryUrl: 'git@github.com:owner/repo.git' });

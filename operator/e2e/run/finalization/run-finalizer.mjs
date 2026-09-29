@@ -2,6 +2,7 @@ import { RunTimingRecorder, runWithTimeout, currentTimeIso } from '../run-timing
 import { TERMINAL_STATES } from '../lifecycle/lifecycle-interpreter.mjs';
 import { addFailure, recordFinalizationAction } from '../../model/run-record-store.mjs';
 import { recordSnapshotWorkpadEvidence, recordRunWorkpadEvidence } from '../../model/run-workpad-evidence.mjs';
+import { isSameRepositoryDelivery } from '../../systems/github/github-client.mjs';
 import { readRunOwnedRuntime, recordedRunRuntimeId } from '../run-owned-runtime.mjs';
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/i;
@@ -162,7 +163,7 @@ export class RunFinalizer {
         if (!pr) {
           const readback = await this.runFinalizationAction(record, `read_run_owned_delivery_pr:${identity}`, async signal => {
             const observed = await this.githubClient.readPullRequest(identity, signal);
-            if (!observed?.headRefName || observed.isCrossRepository !== false || observed.headRepository?.nameWithOwner !== this.githubClient.repository) {
+            if (!observed?.headRefName || !isSameRepositoryDelivery(observed, this.githubClient.repository)) {
               throw new Error(`delivery PR ${identity} does not identify a same-repository run-owned head`);
             }
             record.artifacts.delivery_pr_url = observed.url || identity;
@@ -176,7 +177,7 @@ export class RunFinalizer {
           if (readback?.branch) ownedBranches.add(readback.branch);
           continue;
         }
-        if (pr.isCrossRepository !== false || pr.headRepository?.nameWithOwner !== this.githubClient.repository || !pr.headRefName) {
+        if (!isSameRepositoryDelivery(pr, this.githubClient.repository) || !pr.headRefName) {
           await this.runFinalizationAction(record, `read_run_owned_delivery_pr:${identity}`, async () => {
             throw new Error(`delivery PR ${identity} does not identify a same-repository run-owned head`);
           });
@@ -243,7 +244,7 @@ export class RunFinalizer {
             const commit = await this.gitClient.readRemoteBranchCommit(branch, { timeout: this.config.finalization_timeout_ms, signal });
             const currentDeliveryObserved = !requiresGitHubEvidence || Boolean(currentDeliveryPrs && deliveryPrs.some(identity => {
               const pr = this.githubClient.findDeliveryPullRequest?.(currentDeliveryPrs, identity);
-              return pr?.headRefName === branch && pr.isCrossRepository === false && pr.headRepository?.nameWithOwner === this.githubClient.repository;
+              return pr?.headRefName === branch && isSameRepositoryDelivery(pr, this.githubClient.repository);
             }));
             const deliveryEvidenceUnavailable = requiresGitHubEvidence && (!currentDeliveryObserved || !currentNotionReadbackAvailable);
             const status = !commit

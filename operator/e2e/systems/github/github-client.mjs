@@ -8,6 +8,10 @@ function repositorySlug(repositoryUrl) {
 
 const PULL_REQUEST_FIELDS = 'number,url,state,isDraft,headRefName,headRefOid,baseRefName,mergedAt,mergeCommit,createdAt,headRepository,headRepositoryOwner,isCrossRepository';
 
+export function isSameRepositoryDelivery(pr, repository) {
+  return pr?.isCrossRepository === false && pr.headRepository?.nameWithOwner === repository;
+}
+
 export class GitHubClient {
   constructor({ repositoryUrl, ghCommand = command } = {}) {
     this.repository = repositorySlug(repositoryUrl);
@@ -37,6 +41,10 @@ export class GitHubClient {
     return prs.find(pr => pr.url === deliveredPr || String(pr.number) === number) || null;
   }
 
+  isSameRepositoryDelivery(pr) {
+    return isSameRepositoryDelivery(pr, this.repository);
+  }
+
   deliveryPrIdentities(record) {
     const identities = new Set();
     if (record.artifacts?.delivery_pr_url) identities.add(record.artifacts.delivery_pr_url);
@@ -59,8 +67,7 @@ export class GitHubClient {
         continue;
       }
       const pr = this.findDeliveryPullRequest(prs, identity);
-      const headRepository = pr?.headRepository?.nameWithOwner || null;
-      if (pr?.headRefName && pr.isCrossRepository === false && headRepository === this.repository) branches.add(pr.headRefName);
+      if (pr?.headRefName && this.isSameRepositoryDelivery(pr)) branches.add(pr.headRefName);
     }
     if (identities.length > 0 && record.artifacts?.delivery_branch) branches.add(record.artifacts.delivery_branch);
     return [...branches];

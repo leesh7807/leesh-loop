@@ -5,6 +5,7 @@ import { RunCompletionVerifier } from './run-completion-verifier.mjs';
 import { RunDoneVerifier } from './run-done-verifier.mjs';
 import { RunFinalizer } from '../finalization/run-finalizer.mjs';
 import { recordRunWorkpadEvidence } from '../../model/run-workpad-evidence.mjs';
+import { isSameRepositoryDelivery } from '../../systems/github/github-client.mjs';
 
 export class RunLifecycleObserver {
   constructor({ config, notionClient, githubClient, runEvidenceCollector, runRecordStore, lifecycleInterpreter, runCompletionVerifier, runDoneVerifier, runFinalizer, runTimingRecorder, clock = () => Date.now(), waitForPoll = waitForNextPoll } = {}) {
@@ -53,8 +54,7 @@ export class RunLifecycleObserver {
           const deliveryPr = deliveryPrUrl && deliveryPrUrl !== 'none'
             ? this.githubClient.findDeliveryPullRequest(record.artifacts.delivery_prs, deliveryPrUrl)
             : null;
-          const sameRepositoryDelivery = deliveryPr?.isCrossRepository === false
-            && deliveryPr.headRepository?.nameWithOwner === this.githubClient.repository;
+          const sameRepositoryDelivery = isSameRepositoryDelivery(deliveryPr, this.githubClient.repository);
           record.artifacts.delivery_pr_url = deliveryPrUrl && deliveryPrUrl !== 'none' ? deliveryPrUrl : null;
           record.artifacts.delivery_branch = sameRepositoryDelivery ? deliveryPr.headRefName : null;
           record.artifacts.delivery_branches ||= [];
