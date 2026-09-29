@@ -98,17 +98,33 @@
             "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
             "error": "Notion GET /blocks/3e38a265-8625-81e5-9c31-cdb7a6655c92/children?page_size=100 failed with HTTP 429: {\"object\":\"error\",\"status\":429,\"code\":\"rate_limited\",\"message\":\"You have been rate limited. Please try again later.\",\"additional_data\":{\"rate_limit_reason\":\"public_api_request_rate_limit\",\"retry_after\":\"30\"},\"request_id\":\"bcf1164d-4e14-4cd8-b588-a07ed6ae39bf\"}"
           }
+        },
+        {
+          "at": "2026-09-29T14:42:05.837Z",
+          "attempt_id": "ed4178ee-f4b7-4baa-9bac-adcab47aed3e",
+          "result": "still unavailable",
+          "evidence": {
+            "stable_database_id": "3e08a265-8625-805c-ad23-fe1137be4a1e",
+            "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
+            "error": "Notion GET /blocks/3e38a265-8625-812f-b3b3-d0f82a7ebd17/children?page_size=100 rate-limit retry aborted: The operation was aborted due to timeout"
+          }
         }
       ]
     },
     "last_transition": {
-      "type": "recovery_started",
-      "at": "2026-09-29T14:41:17.209Z",
+      "type": "recovery_attempt_failed",
+      "at": "2026-09-29T14:42:05.837Z",
       "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
-      "recovery_attempt_id": "ed4178ee-f4b7-4baa-9bac-adcab47aed3e"
+      "recovery_attempt_id": "ed4178ee-f4b7-4baa-9bac-adcab47aed3e",
+      "result": "still unavailable",
+      "evidence": {
+        "stable_database_id": "3e08a265-8625-805c-ad23-fe1137be4a1e",
+        "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
+        "error": "Notion GET /blocks/3e38a265-8625-812f-b3b3-d0f82a7ebd17/children?page_size=100 rate-limit retry aborted: The operation was aborted due to timeout"
+      }
     }
   },
-  "event_sequence": 11,
-  "previous_event_sha": "c6aef0ae56944cb17c1a2b318121c551fb02757d",
-  "recorded_at": "2026-09-29T14:41:19.499Z"
+  "event_sequence": 12,
+  "previous_event_sha": "d636d07db30e5f6c522fa28223d96dcd5f39bde2",
+  "recorded_at": "2026-09-29T14:42:08.185Z"
 }
