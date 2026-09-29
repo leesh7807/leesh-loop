@@ -45,16 +45,42 @@
           "status": "available",
           "result": "available"
         }
-      }
+      },
+      "recovery_attempts": [
+        {
+          "at": "2026-09-29T13:52:43.610Z",
+          "attempt_id": "35ccc053-aed2-40cd-bdd5-be06d11a4582",
+          "result": "still unavailable",
+          "evidence": {
+            "reason": "previous E2E run or child runtime is active or unverified",
+            "lifecycle": {
+              "lifecycle_status": "active",
+              "run_process_state": "unknown",
+              "child_runtime_status": "not_started",
+              "child_process_state": "dead"
+            }
+          }
+        }
+      ]
     },
     "last_transition": {
-      "type": "recovery_started",
-      "at": "2026-09-29T13:52:35.077Z",
+      "type": "recovery_attempt_failed",
+      "at": "2026-09-29T13:52:43.610Z",
       "recovery_marker": "34e80d1d-e974-45db-b4aa-66466c0221ca",
-      "recovery_attempt_id": "35ccc053-aed2-40cd-bdd5-be06d11a4582"
+      "recovery_attempt_id": "35ccc053-aed2-40cd-bdd5-be06d11a4582",
+      "result": "still unavailable",
+      "evidence": {
+        "reason": "previous E2E run or child runtime is active or unverified",
+        "lifecycle": {
+          "lifecycle_status": "active",
+          "run_process_state": "unknown",
+          "child_runtime_status": "not_started",
+          "child_process_state": "dead"
+        }
+      }
     }
   },
-  "event_sequence": 3,
-  "previous_event_sha": "59f0de9cfe7a448680875a7ad58f41af76785b21",
-  "recorded_at": "2026-09-29T13:52:37.201Z"
+  "event_sequence": 4,
+  "previous_event_sha": "6a5b7182d11f7647db7de1b24f60ae54a03d6104",
+  "recorded_at": "2026-09-29T13:52:45.858Z"
 }
