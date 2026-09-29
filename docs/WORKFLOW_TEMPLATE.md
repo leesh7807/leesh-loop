@@ -36,7 +36,7 @@ Each prepared cycle has a fixed comment baseline. At the first `In Progress` or 
 
 ## Tracker state and task records
 
-At each dispatch, read the current task State, Accepted Plan, the matching Repository Plan, Workpad, and actual workspace/Git state. State controls whether work may proceed; the workspace is repository truth; the Workpad is live execution context. Keep the Workpad in Korean, record material progress and evidence promptly, and do not use it as a command log. Update the Repository Plan only for material contract changes, not routine history.
+At each dispatch, read the current task State, Accepted Plan, the matching Repository Plan, Workpad, and actual workspace/Git state. State controls whether work may proceed; the workspace is repository truth; the Workpad is live execution context. Follow the repository-owned workflow or task instructions for Workpad language. Record material progress and evidence promptly, and do not use it as a command log. Update the Repository Plan only for material contract changes, not routine history.
 
 `Ready` work moves to `In Progress` before implementation. `Human Review` is the human pause for a validated delivery or a concrete blocker. Comments alone never dispatch work, select `Rework` or `Merging`, or approve a merge. Workers never transition a task into `Rework` or `Merging`; those are human-selected states. A worker may move a task to `Done` only after the human-authorized PR merge has been verified on the configured remote base.
 
@@ -111,6 +111,6 @@ PASS | FINDINGS
 None. | findings with the fields above
 ```
 
-Record each review target, Job ID, completed result, findings, dispositions, fixes, post-fix verification, and any re-review in the Korean Workpad. Do not copy the full review transcript into the Repository Plan. Do not prepare human review until both review types are complete for the same exact PR and HEAD and every finding is dispositioned.
+Record each review target, Job ID, completed result, findings, dispositions, fixes, post-fix verification, and any re-review in the Workpad, following the repository-owned language policy. Do not copy the full review transcript into the Repository Plan. Do not prepare human review until both review types are complete for the same exact PR and HEAD and every finding is dispositioned.
 
 Do not define a Leesh Loop-specific human-decision taxonomy, publication-recovery lifecycle, binding checkpoint lifecycle, completion checkpoint lifecycle, or terminal reopen protocol here.

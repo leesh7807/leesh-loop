@@ -109,6 +109,8 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.match(workflow, /create the task branch from that fetched remote commit/);
   assert.match(workflow, /Create the PR with an explicit configured base/);
   assert.match(workflow, /never push or merge directly into the configured base/);
+  assert.match(workflow, /Follow the repository-owned workflow or task instructions for Workpad language/);
+  assert.doesNotMatch(workflow, /Korean Workpad|Workpad in Korean/);
   assert.doesNotMatch(workflow, /operator\/app\/workspace-files\.mjs|operator\/e2e|mise exec -- mix deps\.get/);
   assert.ok(files.includes('operator/notion_publisher/package-lock.json'));
   assert.ok(files.includes('operator/ui/package-lock.json'));
