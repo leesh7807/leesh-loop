@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { clearPublicationDraft, readPublicationDraft, writePublicationDraft } from './publication-draft.js';
+import { groupTasksForOperatorDisplay } from './operator-task-display-order.js';
 import './style.css';
 
 const REFRESH_INTERVAL_MS = 7500;
@@ -8,59 +9,91 @@ const formatTime = value => new Intl.DateTimeFormat(undefined, { hour: 'numeric'
 const draftKey = (plan, state, selectedBlockers) => JSON.stringify({ plan, state, blockedBy: selectedBlockers.map(task => task.taskId) });
 
 function TaskCard({ task, selected, selectionDisabled, onToggle }) {
+  const title = task.title || '(Untitled)';
   return (
-    <article className={`task-card${selected ? ' selected-blocker' : ''}`}>
-      <div className="task-heading">
+    <article className={`task-row${selected ? ' selected-blocker' : ''}`}>
+      <div className="task-row-primary">
         <div className="task-title-block">
-          <h3>{task.title || '(Untitled)'}</h3>
+          <h4><a href={task.taskUrl} target="_blank" rel="noreferrer" aria-label={`Open ${title} in Notion`}>{title}</a></h4>
           {task.identifier && <p className="task-identifier">{task.identifier}</p>}
+          {task.blockedBy.length > 0 && (
+            <p className="task-blocker-summary">
+              <span>Blocked By</span>
+              <a href={task.blockedBy[0].url} target="_blank" rel="noreferrer">{task.blockedBy[0].title}</a>
+              <span className="task-blocker-state">{task.blockedBy[0].state}</span>
+              {task.blockedBy.length > 1 && <span>+{task.blockedBy.length - 1}</span>}
+            </p>
+          )}
         </div>
-        <div className="task-actions">
-          <div className="task-state"><span className="meta-label">State</span><strong>{task.state}</strong></div>
+        <div className="task-row-controls">
+          <span className="task-state"><span className="task-state-label">State</span><strong>{task.state}</strong></span>
           <label className="blocker-choice">
             <input
               type="checkbox"
               checked={selected}
               disabled={selectionDisabled}
               onChange={() => onToggle(task)}
-              aria-label={`Use ${task.title || '(Untitled)'} in State ${task.state} as a Blocked By task`}
+              aria-label={`Use ${title} in State ${task.state} as a Blocked By task`}
             />
             <span>{selected ? 'Selected as blocker' : 'Use as Blocked By'}</span>
           </label>
         </div>
       </div>
 
-      <section className="blocker-section" aria-label={`Blocked By for ${task.title}`}>
-        <h4>Blocked By</h4>
-        {task.blockedBy.length ? (
-          <ul className="blocker-list">
-            {task.blockedBy.map(blocker => (
-              <li key={`${blocker.url}-${blocker.title}`}>
-                <a href={blocker.url} target="_blank" rel="noreferrer">{blocker.title}</a>
-                <span className="blocker-state">{blocker.state}</span>
-              </li>
-            ))}
-          </ul>
-        ) : <p className="quiet">No blockers</p>}
-      </section>
+      <details className="task-details">
+        <summary>{task.blockedBy.length > 1 ? `All ${task.blockedBy.length} Blocked By and details` : 'Details and links'}</summary>
+        <section className="blocker-section" aria-label={`Blocked By for ${title}`}>
+          <h5>Blocked By</h5>
+          {task.blockedBy.length ? (
+            <ul className="blocker-list">
+              {task.blockedBy.map(blocker => (
+                <li key={`${blocker.url}-${blocker.title}`}>
+                  <a href={blocker.url} target="_blank" rel="noreferrer">{blocker.title}</a>
+                  <span className="blocker-state">{blocker.state}</span>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="quiet">No blockers</p>}
+        </section>
 
-      {(task.priority !== null || task.labels.length > 0) && (
-        <div className="task-metadata" aria-label="Additional task details">
-          {task.priority !== null && <span>Priority {task.priority}</span>}
-          {task.labels.map(label => <span key={label}>{label}</span>)}
+        {(task.priority !== null || task.labels.length > 0) && (
+          <div className="task-metadata" aria-label="Additional task details">
+            {task.priority !== null && <span>Priority {task.priority}</span>}
+            {task.labels.map(label => <span key={label}>{label}</span>)}
+          </div>
+        )}
+
+        <div className="task-links">
+          <a href={task.taskUrl} target="_blank" rel="noreferrer">Open task in Notion ↗</a>
+          {task.planUrl && <a href={task.planUrl} target="_blank" rel="noreferrer">Open Accepted Plan ↗</a>}
         </div>
-      )}
-
-      <div className="task-links">
-        <a href={task.taskUrl} target="_blank" rel="noreferrer">Open task in Notion ↗</a>
-        {task.planUrl && <a href={task.planUrl} target="_blank" rel="noreferrer">Open Accepted Plan ↗</a>}
-      </div>
+      </details>
     </article>
   );
 }
 
 function TaskSurface({ tasks, selectedBlockers, selectionDisabled, loading, error, refreshedAt, onRetry, onToggleBlocker }) {
   const selectedIds = new Set(selectedBlockers.map(task => task.taskId));
+  const groups = groupTasksForOperatorDisplay(tasks);
+  const activeCount = groups.activeWork.length;
+  const otherCount = groups.remainingTasks.length;
+  const taskGroup = (name, description, items, attentionClass) => (
+    <section className={`task-group ${attentionClass}`} aria-labelledby={`${attentionClass}-heading`}>
+      <div className="task-group-heading">
+        <div>
+          <p className="eyebrow">{description}</p>
+          <h3 id={`${attentionClass}-heading`}>{name}</h3>
+        </div>
+        <span className="task-group-count" aria-label={`${items.length} tasks`}>{items.length}</span>
+      </div>
+      {items.length ? (
+        <div className="task-list">
+          {items.map(task => <TaskCard key={task.taskId || task.taskUrl} task={task} selected={selectedIds.has(task.taskId)} selectionDisabled={selectionDisabled} onToggle={onToggleBlocker} />)}
+        </div>
+      ) : <p className="group-empty">No tasks</p>}
+    </section>
+  );
+
   return (
     <section className="surface task-surface" aria-labelledby="tasks-heading" aria-busy={loading && !refreshedAt}>
       <div className="surface-header">
@@ -68,12 +101,22 @@ function TaskSurface({ tasks, selectedBlockers, selectionDisabled, loading, erro
           <p className="eyebrow">Current project work</p>
           <h2 id="tasks-heading">Tasks</h2>
         </div>
-        <p className="refresh-meta" aria-live="polite">
-          {loading && !refreshedAt ? 'Loading tasks' : refreshedAt ? `Updated ${formatTime(refreshedAt)}` : ''}
-        </p>
+        <div className="task-surface-meta">
+          <span className="task-total">{tasks.length} tasks</span>
+          <p className="refresh-meta" aria-live="polite">
+            {loading && !refreshedAt ? 'Loading tasks' : refreshedAt ? `Updated ${formatTime(refreshedAt)}` : ''}
+          </p>
+        </div>
       </div>
-      <p className="task-help">Choose one or more existing tasks here. Their title and State stay visible while you add them to this Plan’s publication context.</p>
-      <p className="selection-count" aria-live="polite">{selectedBlockers.length ? `${selectedBlockers.length} blocker${selectedBlockers.length === 1 ? '' : 's'} selected for this Plan` : 'No blockers selected'}</p>
+      <p className="task-help">Human Review appears first. Expand a task for Blocked By, metadata, and Plan links.</p>
+      <div className="task-overview" aria-label="Task State groups">
+        <div className="overview-group overview-review"><span>Human Review</span><strong>{groups.humanReview.length}</strong></div>
+        <div className="overview-group overview-active"><span>Active work</span><strong>{activeCount}</strong></div>
+        <div className="overview-group overview-remaining"><span>Other States</span><strong>{otherCount}</strong></div>
+      </div>
+      {selectedBlockers.length > 0 && (
+        <p className="selection-count" aria-live="polite">{selectedBlockers.length} blocker{selectedBlockers.length === 1 ? '' : 's'} selected for this Plan</p>
+      )}
       {error && (
         <div className="refresh-error" role="status">
           <p><strong>Refresh failed.</strong> Showing the last successful task read{refreshedAt ? ` from ${formatTime(refreshedAt)}` : ''}. The Operator will retry automatically.</p>
@@ -83,8 +126,17 @@ function TaskSurface({ tasks, selectedBlockers, selectionDisabled, loading, erro
       {!refreshedAt && loading ? <p className="empty-state">Reading the current task list…</p> : null}
       {!loading && !error && tasks.length === 0 ? <p className="empty-state">There are no current tasks.</p> : null}
       {tasks.length > 0 && (
-        <div className="task-list">
-          {tasks.map(task => <TaskCard key={task.taskId || task.taskUrl} task={task} selected={selectedIds.has(task.taskId)} selectionDisabled={selectionDisabled} onToggle={onToggleBlocker} />)}
+        <div className="task-groups">
+          {groups.humanReview.length > 0 && taskGroup('Needs your review', 'Highest attention', groups.humanReview, 'attention-review')}
+          {groups.activeWork.length > 0 && taskGroup('Active work', 'Merging and in progress first', groups.activeWork, 'attention-active')}
+          <details className="remaining-tasks">
+            <summary><span>Other tasks</span><span className="task-group-count" aria-label={`${otherCount} tasks`}>{otherCount}</span></summary>
+            {groups.remainingTasks.length ? (
+              <div className="task-list">
+                {groups.remainingTasks.map(task => <TaskCard key={task.taskId || task.taskUrl} task={task} selected={selectedIds.has(task.taskId)} selectionDisabled={selectionDisabled} onToggle={onToggleBlocker} />)}
+              </div>
+            ) : <p className="group-empty">No other tasks</p>}
+          </details>
         </div>
       )}
     </section>
@@ -129,13 +181,15 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
   }
 
   return (
-    <section className="surface publication-surface" aria-labelledby="publish-heading">
-      <div className="surface-header">
+    <details className="surface publication-surface">
+      <summary className="publication-summary">
         <div>
           <p className="eyebrow">Create project work</p>
           <h2 id="publish-heading">Publish a Plan</h2>
         </div>
-      </div>
+        <span className="publication-hint">Open form</span>
+      </summary>
+      <div className="publication-content">
       <form onSubmit={submit}>
         <div className="plan-field">
           <label htmlFor="plan">1. Review the Plan</label>
@@ -196,7 +250,8 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
           )}
         </section>
       )}
-    </section>
+      </div>
+    </details>
   );
 }
 
