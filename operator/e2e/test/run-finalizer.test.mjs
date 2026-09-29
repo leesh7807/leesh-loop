@@ -15,6 +15,7 @@ test('finalization preserves an external stop failure and still converges finite
   const record = createRunRecord({ config, runId: 'run-1', workload, paths: createRunPaths(config, 'run-1') });
   record.binding.base_branch = 'base/run-1';
   record.timing.symphony.started_at = new Date().toISOString();
+  record.runtime = { dashboard: 'http://127.0.0.1:4410', runtime_id: 'runtime-run-1' };
   record.evidence.workspace_paths = [directory + '/workspaces/page-1'];
   const notion = {
     async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'In Progress', accepted_plan: '# Fixture\n', workpad: '' }; },
@@ -35,6 +36,41 @@ test('finalization preserves an external stop failure and still converges finite
   assert.deepEqual(result.cleanup.workspaces_deleted, []);
 });
 
+test('finalization keeps a live run-owned runtime unresolved after the Operator stop command succeeds', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-live-runtime-'));
+  const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
+  const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
+  const record = createRunRecord({ config, runId: 'run-live-runtime', workload, paths: createRunPaths(config, 'run-live-runtime') });
+  record.binding.base_branch = 'base/run-live-runtime';
+  record.timing.symphony.started_at = new Date().toISOString();
+  record.runtime = { dashboard: 'http://127.0.0.1:4410', runtime_id: 'runtime-run-live' };
+  const notion = {
+    async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'In Progress', accepted_plan: '# Fixture\n', workpad: '' }; },
+    async updateTaskState() { throw new Error('must not mutate task while runtime remains live'); }
+  };
+  let stopCalls = 0;
+  let branchDeleteCalls = 0;
+  let workspaceDeleteCalls = 0;
+  const runtime = {
+    async stopConfiguredOperatorProject() { stopCalls += 1; return { stopped: true }; },
+    async readSymphonyRuntimeStatus() { return { runtime_id: 'runtime-run-live', dispatch_capable: true }; },
+    async removeWorkspaceRoot() { workspaceDeleteCalls += 1; return { removed: true }; }
+  };
+  const git = { async readRemoteBranchCommit() { return null; }, async deleteRemoteBranch() { branchDeleteCalls += 1; return { already_absent: true }; } };
+  const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'In Progress', accepted_plan: '# Fixture\n', workpad: '' }, github: { delivery_prs: [] }, symphony: {}, chatgpt_shot: null, errors: [] }; } };
+  const finalizer = new RunFinalizer({ config, runRecordStore: { async save() {} }, notionClient: notion, operatorClient: runtime, gitClient: git, githubClient: {}, runEvidenceCollector: evidence });
+
+  const result = await finalizer.finalizeRun({ record, reason: 'admission_reconciliation', task: await notion.readTask(), baseBranch: record.binding.base_branch, workspaceRoot: directory + '/workspaces' });
+
+  assert.equal(stopCalls, 1);
+  assert.equal(result.cleanup.runtime_stopped, false);
+  assert.equal(result.evidence.owned_runtime_cleanup.status, 'present');
+  assert.ok(result.finalization.unresolved.includes('stop_run_owned_symphony'));
+  assert.equal(result.finalization.complete, false);
+  assert.equal(branchDeleteCalls, 0);
+  assert.equal(workspaceDeleteCalls, 0);
+});
+
 test('successful reconciliation clears an earlier unresolved action', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-retry-'));
   const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
@@ -42,10 +78,11 @@ test('successful reconciliation clears an earlier unresolved action', async () =
   const record = createRunRecord({ config, runId: 'run-1', workload, paths: createRunPaths(config, 'run-1') });
   record.binding.base_branch = 'base/run-1';
   record.timing.symphony.started_at = new Date().toISOString();
+  record.runtime = { dashboard: 'http://127.0.0.1:4410', runtime_id: 'runtime-run-1' };
   let stopCalls = 0;
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
   const store = { async save() {} };
-  const runtime = { async stopConfiguredOperatorProject() { stopCalls += 1; if (stopCalls === 1) throw new Error('temporary stop failure'); return { stopped: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
+  const runtime = { async stopConfiguredOperatorProject() { stopCalls += 1; if (stopCalls === 1) throw new Error('temporary stop failure'); return { stopped: true }; }, async readSymphonyRuntimeStatus() { return { runtime_id: 'replacement-runtime', dispatch_capable: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
   const git = { async readRemoteBranchCommit() { return null; }, async deleteRemoteBranch() { return { already_absent: true }; } };
   const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }, github: { delivery_prs: [] }, symphony: {}, chatgpt_shot: null, errors: [] }; } };
   const finalizer = new RunFinalizer({ config, runRecordStore: store, notionClient: notion, operatorClient: runtime, gitClient: git, githubClient: {}, runEvidenceCollector: evidence });
@@ -57,24 +94,26 @@ test('successful reconciliation clears an earlier unresolved action', async () =
   assert.deepEqual(second.cleanup.unresolved, []);
 });
 
-test('reconciliation stops a runtime whose start was durably requested before a crash', async () => {
+test('reconciliation blocks cleanup when a durably requested runtime has no recorded identity', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-starting-'));
   const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
   const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
   const record = createRunRecord({ config, runId: 'run-starting', workload, paths: createRunPaths(config, 'run-starting') });
   record.binding.base_branch = 'base/run-starting';
   record.timing.symphony.start_requested_at = new Date().toISOString();
+  record.runtime = { dashboard: 'http://127.0.0.1:4410' };
   let stopCalls = 0;
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
   const store = { async save() {} };
-  const runtime = { async stopConfiguredOperatorProject() { stopCalls += 1; return { stopped: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
+  const runtime = { async stopConfiguredOperatorProject() { stopCalls += 1; return { stopped: true }; }, async readSymphonyRuntimeStatus() { return { runtime_id: 'runtime-unbound', dispatch_capable: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
   const git = { async readRemoteBranchCommit() { return null; }, async deleteRemoteBranch() { return { already_absent: true }; } };
   const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }, github: {}, symphony: {}, chatgpt_shot: null, errors: [] }; } };
   const finalizer = new RunFinalizer({ config, runRecordStore: store, notionClient: notion, operatorClient: runtime, gitClient: git, githubClient: {}, runEvidenceCollector: evidence });
   const result = await finalizer.finalizeRun({ record, reason: 'admission_reconciliation', task: await notion.readTask(), baseBranch: 'base/run-starting', workspaceRoot: directory + '/workspaces' });
   assert.equal(stopCalls, 1);
-  assert.equal(result.cleanup.runtime_stopped, true);
-  assert.equal(result.finalization.complete, true);
+  assert.equal(result.cleanup.runtime_stopped, false);
+  assert.equal(result.finalization.complete, false);
+  assert.ok(result.finalization.unresolved.includes('stop_run_owned_symphony'));
 });
 
 test('finalization cleans and verifies only run-owned branches when unrelated remote refs change', async () => {
@@ -85,6 +124,7 @@ test('finalization cleans and verifies only run-owned branches when unrelated re
   record.binding.base_branch = 'base/run-refs';
   record.binding.base_commit = 'd'.repeat(40);
   record.timing.symphony.started_at = new Date().toISOString();
+  record.runtime = { dashboard: 'http://127.0.0.1:4410', runtime_id: 'runtime-run-refs' };
   record.evidence.branch_refs_before = { 'refs/heads/main': 'a', 'refs/heads/deleted-before-run': 'd' };
   record.evidence.branch_refs_after = { 'refs/heads/feature': 'e'.repeat(40), 'refs/heads/previous-owned': 'f'.repeat(40), 'refs/heads/base/run-refs': 'd'.repeat(40) };
   record.evidence.branch_isolation = { unrelated_changes: ['refs/heads/main'], unrelated_deletions: ['refs/heads/deleted-before-run'], unresolved_new_refs: ['refs/heads/worker-leftover'], remaining_run_owned_refs: ['refs/heads/previous-owned'] };
@@ -95,7 +135,7 @@ test('finalization cleans and verifies only run-owned branches when unrelated re
   record.evidence.snapshots.push({ notion: { workpad: `Human Review\ncycle: 1\ndelivered_pr: ${deliveryUrl}\n` } });
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
   const store = { async save() {} };
-  const runtime = { async stopConfiguredOperatorProject() { return { stopped: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
+  const runtime = { async stopConfiguredOperatorProject() { return { stopped: true }; }, async readSymphonyRuntimeStatus() { return { runtime_id: 'replacement-runtime', dispatch_capable: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
   const remoteBranches = new Map([['main', 'b'.repeat(40)], ['operator-created-during-run', 'c'.repeat(40)], ['base/run-refs', 'd'.repeat(40)], ['feature', 'e'.repeat(40)], ['previous-owned', 'f'.repeat(40)]]);
   const deletionCalls = [];
   const readCalls = [];
@@ -125,8 +165,9 @@ test('finalization records and blocks admission on a run-owned branch that remai
   record.binding.base_branch = 'base/run-owned-residue';
   record.binding.base_commit = 'a'.repeat(40);
   record.timing.symphony.started_at = new Date().toISOString();
+  record.runtime = { dashboard: 'http://127.0.0.1:4410', runtime_id: 'runtime-run-owned-residue' };
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
-  const runtime = { async stopConfiguredOperatorProject() { return { stopped: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
+  const runtime = { async stopConfiguredOperatorProject() { return { stopped: true }; }, async readSymphonyRuntimeStatus() { return { runtime_id: 'replacement-runtime', dispatch_capable: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
   const git = { async deleteRemoteBranch() { return { branch: 'base/run-owned-residue', deleted: true }; }, async readRemoteBranchCommit() { return 'a'.repeat(40); } };
   const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { state: 'Cancelled' }, github: { delivery_prs: [] }, symphony: {}, errors: [] }; } };
   const finalizer = new RunFinalizer({ config, runRecordStore: { async save() {} }, notionClient: notion, operatorClient: runtime, gitClient: git, githubClient: {}, runEvidenceCollector: evidence });

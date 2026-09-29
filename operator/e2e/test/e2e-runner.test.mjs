@@ -48,7 +48,11 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
     async appendWorkpad() {}
   };
   const startedDatabaseUrls = [];
-  const runtime = { async startConfiguredOperatorProject(_projectPath, _timeout, databaseUrl) { startedDatabaseUrls.push(databaseUrl); return { dashboard: 'http://127.0.0.1:4410' }; }, async stopConfiguredOperatorProject() { return { stopped: true }; } };
+  const runtime = {
+    async startConfiguredOperatorProject(_projectPath, _timeout, databaseUrl) { startedDatabaseUrls.push(databaseUrl); return { dashboard: 'http://127.0.0.1:4410', pid: 42 }; },
+    async readSymphonyRuntimeStatus() { return { pid: 42, runtime_id: 'runtime-fixture', dispatch_capable: true }; },
+    async stopConfiguredOperatorProject() { return { stopped: true }; }
+  };
   const remoteBranches = new Map();
   const git = {
     async resolveSeedCommit() { return '0123456789012345678901234567890123456789'; },
@@ -95,6 +99,7 @@ test('E2ERunner reaches terminal Done through injected production dependencies',
   assert.equal(record.status, 'finished');
   assert.deepEqual(harness.finalized, ['production_done']);
   assert.equal(record.binding.seed_commit.length, 40);
+  assert.equal(record.runtime.runtime_id, 'runtime-fixture');
   assert.equal(persistedStartRequests.length, 1);
   assert.ok(persistedStartRequests[0]);
   assert.deepEqual(harness.startedDatabaseUrls, [harness.config.notion_database_url]);

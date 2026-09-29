@@ -122,6 +122,12 @@ export class E2ERunner {
       this.runTimingRecorder.recordSymphonyStarted(record, currentTimeIso());
       dashboard = runtimeResult.dashboard || record.runtime.dashboard;
       record.runtime.dashboard = dashboard;
+      const runtimeStatus = await this.operatorClient.readSymphonyRuntimeStatus(dashboard);
+      if (!runtimeStatus?.runtime_id || runtimeStatus.dispatch_capable !== true) {
+        throw new Error('Operator start did not return an authoritative dispatch-capable runtime identity readback');
+      }
+      record.runtime.pid = runtimeStatus.pid ?? runtimeResult.pid ?? null;
+      record.runtime.runtime_id = runtimeStatus.runtime_id;
       record.status = 'runtime_ready';
       await this.runRecordStore.save(record);
 

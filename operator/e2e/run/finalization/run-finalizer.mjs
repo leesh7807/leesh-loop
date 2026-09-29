@@ -2,6 +2,7 @@ import { RunTimingRecorder, runWithTimeout, currentTimeIso } from '../run-timing
 import { TERMINAL_STATES } from '../lifecycle/lifecycle-interpreter.mjs';
 import { addFailure, recordFinalizationAction } from '../../model/run-record-store.mjs';
 import { recordSnapshotWorkpadEvidence, recordRunWorkpadEvidence } from '../../model/run-workpad-evidence.mjs';
+import { readRunOwnedRuntime, recordedRunRuntimeId } from '../run-owned-runtime.mjs';
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/i;
 
@@ -58,15 +59,22 @@ export class RunFinalizer {
     record.finalization.reason = reason;
     if (!normalDone) {
       await this.runFinalizationAction(record, 'stop_run_owned_symphony', async signal => {
-        if (record.cleanup.runtime_stopped === true) return { skipped: true, already_stopped: true };
-        if (!record.timing?.symphony?.start_requested_at && !record.timing?.symphony?.started_at) {
+        if (!record.timing?.symphony?.start_requested_at && !record.timing?.symphony?.started_at && !recordedRunRuntimeId(record)) {
           record.cleanup.runtime_stopped = true;
           return { skipped: true };
         }
+        record.cleanup.runtime_stopped = false;
         const value = await this.operatorClient.stopConfiguredOperatorProject(record.paths.runtime_project, this.config.runtime_stop_timeout_ms, signal);
+        const runtimeReadback = await readRunOwnedRuntime(record, this.operatorClient, signal);
+        record.evidence.owned_runtime_cleanup = { ...runtimeReadback, checked_at: currentTimeIso() };
+        if (runtimeReadback.status !== 'absent') {
+          throw new Error(runtimeReadback.status === 'present'
+            ? `run-owned Symphony runtime ${runtimeReadback.runtime_id} still responds after stop`
+            : `run-owned Symphony runtime stop could not be confirmed: ${runtimeReadback.error}`);
+        }
         record.cleanup.runtime_stopped = true;
         this.runTimingRecorder.recordSymphonyStopped(record, currentTimeIso());
-        return value;
+        return { ...value, runtime_readback: runtimeReadback };
       });
       if (record.cleanup.runtime_stopped) {
         const reread = task?.id
@@ -89,15 +97,22 @@ export class RunFinalizer {
       }
     } else {
       await this.runFinalizationAction(record, 'stop_run_owned_symphony_after_done', async signal => {
-        if (record.cleanup.runtime_stopped === true) return { skipped: true, already_stopped: true };
-        if (!record.timing?.symphony?.start_requested_at && !record.timing?.symphony?.started_at) {
+        if (!record.timing?.symphony?.start_requested_at && !record.timing?.symphony?.started_at && !recordedRunRuntimeId(record)) {
           record.cleanup.runtime_stopped = true;
           return { skipped: true };
         }
+        record.cleanup.runtime_stopped = false;
         const value = await this.operatorClient.stopConfiguredOperatorProject(record.paths.runtime_project, this.config.runtime_stop_timeout_ms, signal);
+        const runtimeReadback = await readRunOwnedRuntime(record, this.operatorClient, signal);
+        record.evidence.owned_runtime_cleanup = { ...runtimeReadback, checked_at: currentTimeIso() };
+        if (runtimeReadback.status !== 'absent') {
+          throw new Error(runtimeReadback.status === 'present'
+            ? `run-owned Symphony runtime ${runtimeReadback.runtime_id} still responds after stop`
+            : `run-owned Symphony runtime stop could not be confirmed: ${runtimeReadback.error}`);
+        }
         record.cleanup.runtime_stopped = true;
         this.runTimingRecorder.recordSymphonyStopped(record, currentTimeIso());
-        return value;
+        return { ...value, runtime_readback: runtimeReadback };
       });
     }
 

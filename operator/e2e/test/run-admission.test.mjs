@@ -67,3 +67,55 @@ test('admission reconciles a verified merged base recorded as an identity-change
   assert.equal(result.workload, workload);
   assert.deepEqual(record.evidence.owned_branch_cleanup.remaining_refs, []);
 });
+
+test('admission rechecks a recorded runtime and blocks when it remains dispatch-capable', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-admission-live-runtime-'));
+  const config = {
+    notion_database_url: 'https://notion.example/database',
+    run_record_directory: directory + '/runs',
+    workspace_root: directory + '/workspaces'
+  };
+  const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
+  const record = createRunRecord({ config, runId: 'run-live-runtime', workload, paths: createRunPaths(config, 'run-live-runtime') });
+  record.status = 'finished';
+  record.runtime = { dashboard: 'http://127.0.0.1:4410', runtime_id: 'runtime-live' };
+  record.timing.symphony.started_at = new Date().toISOString();
+  record.artifacts.task_id = 'page-1';
+  record.artifacts.task_identifier = 'PLAN-FIXTURE';
+  record.finalization.complete = true;
+  record.cleanup.runtime_stopped = true;
+  const task = { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: workload.accepted_plan };
+  let reconciliationCalls = 0;
+  let taskListCalls = 0;
+  const admission = new RunAdmission({
+    config,
+    catalog: workload,
+    runRecordStore: { async listRecords() { return [record]; }, async save() {} },
+    notionClient: {
+      async readTask() { return task; },
+      async listTasks() { taskListCalls += 1; return []; }
+    },
+    operatorClient: {
+      async readSymphonyRuntimeStatus() { return { runtime_id: 'runtime-live', dispatch_capable: true }; },
+      async workspaceExists() { return false; }
+    },
+    runFinalizer: {
+      async finalizeRun({ record: previous }) {
+        reconciliationCalls += 1;
+        previous.cleanup.runtime_stopped = false;
+        previous.finalization.complete = false;
+        previous.finalization.unresolved.push('stop_run_owned_symphony');
+        previous.cleanup.unresolved.push('stop_run_owned_symphony');
+      }
+    }
+  });
+
+  await assert.rejects(admission.checkRunAdmission(), /previous E2E run run-live-runtime has unresolved owned runtime cleanup/);
+
+  assert.equal(reconciliationCalls, 1);
+  assert.equal(taskListCalls, 0);
+  assert.equal(record.evidence.owned_runtime_cleanup.status, 'present');
+  assert.ok(record.finalization.unresolved.includes('verify_run_owned_symphony_runtime'));
+  assert.ok(record.cleanup.unresolved.includes('verify_run_owned_symphony_runtime'));
+  assert.equal(record.finalization.complete, false);
+});
