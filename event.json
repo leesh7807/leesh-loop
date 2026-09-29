@@ -14,9 +14,11 @@
       "host": "lees"
     },
     "outer_execution_provenance": null,
-    "updated_at": "2026-09-29T18:50:00.380Z"
+    "updated_at": "2026-09-29T18:52:11.369Z",
+    "selected_database_id": "3e08a265-8625-805c-ad23-fe1137be4a1e",
+    "database_url": "https://app.notion.com/p/studyleesh/3e08a2658625805cad23fe1137be4a1e?v=3e08a26586258042a8e4000c945e56e7"
   },
-  "event_sequence": 1,
-  "previous_event_sha": null,
-  "recorded_at": "2026-09-29T18:50:00.998Z"
+  "event_sequence": 2,
+  "previous_event_sha": "975fac6bfbc59f81e27b685ef81acf0b2244809e",
+  "recorded_at": "2026-09-29T18:52:13.724Z"
 }
