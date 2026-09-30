@@ -15,6 +15,13 @@ function expectedOwnedBranchCommit(record, branch, baseBranch) {
   return latestObserved?.headRefOid || ownedDelivery?.head || null;
 }
 
+function assertRunScopedDeliveryBranch(record, branch) {
+  const runId = record.run_id;
+  if (!runId || !branch.startsWith(`e2e/${runId}/`)) {
+    throw new Error(`delivery branch ${branch} is not namespaced to E2E run ${runId || 'unknown'}`);
+  }
+}
+
 export class RunFinalizer {
   constructor({ config, runRecordStore, notionClient, operatorClient, gitClient, githubClient, runEvidenceCollector, runTimingRecorder, reservationAuthority }) {
     this.config = config;
@@ -130,6 +137,7 @@ export class RunFinalizer {
       const branches = new Set(ownedBranches);
       for (const branch of branches) {
         await this.runFinalizationAction(record, `delete_delivery_branch:${branch}`, async signal => {
+          assertRunScopedDeliveryBranch(record, branch);
           const expectedCommit = expectedOwnedBranchCommit(record, branch, baseBranch);
           await this.gitClient.deleteRemoteBranch(branch, { expectedCommit, timeout: this.config.finalization_timeout_ms, signal });
           record.cleanup.branches_deleted.push(branch);
