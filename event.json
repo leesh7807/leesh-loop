@@ -5,30 +5,24 @@
     "schema_version": 1,
     "kind": "database_reservation",
     "database_id": "3ea8a265-8625-8047-81e0-ead9c231fc10",
-    "status": "in use",
-    "reservation": {
-      "run_id": "c18d22f4-1021-4019-bc6a-ec714c6e6cdf",
-      "acquired_at": "2026-09-30T05:31:41.206Z",
-      "base_branch": "base/c18d22f4-1021-4019-bc6a-ec714c6e6cdf",
-      "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/workspaces/c18d22f4-1021-4019-bc6a-ec714c6e6cdf",
-      "run_record_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/c18d22f4-1021-4019-bc6a-ec714c6e6cdf/run.json",
-      "workflow_snapshot_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/c18d22f4-1021-4019-bc6a-ec714c6e6cdf/workflow.md"
-    },
+    "status": "available",
+    "reservation": null,
     "recovery_marker": null,
     "unavailable": null,
     "last_transition": {
-      "type": "reservation_metadata_updated",
-      "at": "2026-09-30T05:31:58.181Z",
+      "type": "in_use_to_available",
+      "at": "2026-09-30T05:44:54.260Z",
       "run_id": "c18d22f4-1021-4019-bc6a-ec714c6e6cdf",
-      "metadata": {
-        "base_branch": "base/c18d22f4-1021-4019-bc6a-ec714c6e6cdf",
-        "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/workspaces/c18d22f4-1021-4019-bc6a-ec714c6e6cdf",
-        "run_record_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/c18d22f4-1021-4019-bc6a-ec714c6e6cdf/run.json",
-        "workflow_snapshot_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/c18d22f4-1021-4019-bc6a-ec714c6e6cdf/workflow.md"
-      }
+      "lifecycle_status": "completed",
+      "child_runtime_id": "d2c82dfa-d108-462e-a8c6-49a1b2785a33",
+      "child_runtime_status": "stopped",
+      "finalization_complete": true,
+      "unresolved": [],
+      "cleanup_unresolved": [],
+      "ended_at": "2026-09-30T05:44:42.162Z"
     }
   },
-  "event_sequence": 35,
-  "previous_event_sha": "b194d1bbe07f9ca6527132a8fde640130baa708c",
-  "recorded_at": "2026-09-30T05:32:00.659Z"
+  "event_sequence": 36,
+  "previous_event_sha": "da69da8bce1161e92378bfbb4c5b0d3ca30967d8",
+  "recorded_at": "2026-09-30T05:44:56.522Z"
 }
