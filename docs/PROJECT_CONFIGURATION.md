@@ -30,5 +30,8 @@ These settings are part of the live runtime configuration. Changing a value or a
 while a compatible runtime is running makes that runtime incompatible; stop it explicitly before
 starting with the new Project configuration.
 
-The Production E2E Project accepts the same optional fields. Each run copies configured fields to
-its run-local Operator Project and leaves omitted fields absent.
+The independent E2E harness has no user-managed Project. It reads the production Project as authority
+for `github_repository_url`, `github_base_branch`, `codex_model`, and
+`codex_reasoning_effort`; it builds a run-local Operator Project using only those shared settings and
+E2E-owned sandbox paths, temporary ports, workflow, state, and readiness policy. Production
+`workspace_files`, workspace root, state directory, and fixed ports are not inherited.

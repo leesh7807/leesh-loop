@@ -8,10 +8,10 @@
 .env.*
 !.env.example
 operator/.runtime/
-operator/e2e/runs/*
-!operator/e2e/runs/.gitkeep
-operator/e2e/workspaces/*
-!operator/e2e/workspaces/.gitkeep
+e2e/runs/*
+!e2e/runs/.gitkeep
+e2e/workspaces/*
+!e2e/workspaces/.gitkeep
 
 # Legacy component locations moved beneath operator/
 /symphony/

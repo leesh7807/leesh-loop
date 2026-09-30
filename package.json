@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node operator/app/leesh-loop.mjs start operator/project.json",
     "stop": "node operator/app/leesh-loop.mjs stop operator/project.json",
-    "e2e": "node operator/e2e/cli.mjs run operator/e2e/project.json",
+    "e2e": "node e2e/cli.mjs run",
     "test": "node --test operator/app/test/init.test.mjs operator/app/test/operator_bootstrap.test.mjs"
   }
 }

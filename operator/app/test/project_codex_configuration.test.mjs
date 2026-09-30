@@ -10,7 +10,7 @@ const execFile = promisify(execute);
 const root = join(import.meta.dirname, '../../..');
 const workflows = [
   join(root, 'WORKFLOW.md'),
-  join(root, 'operator/e2e/WORKFLOW.md')
+  join(root, 'e2e/WORKFLOW.md')
 ];
 
 test('repository and E2E WORKFLOW codex.command use only configured Project overrides', async t => {
