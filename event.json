@@ -5,41 +5,21 @@
     "schema_version": 1,
     "kind": "database_reservation",
     "database_id": "3ea8a265-8625-805b-b64c-d3068d1794ef",
-    "status": "available",
-    "reservation": null,
+    "status": "in use",
+    "reservation": {
+      "run_id": "ce8ea3fa-74c1-4b41-9722-057af1e98311",
+      "acquired_at": "2026-09-30T08:00:55.241Z"
+    },
     "recovery_marker": null,
     "unavailable": null,
     "last_transition": {
-      "type": "unavailable_to_available",
-      "at": "2026-09-29T18:51:50.828Z",
-      "recovery_marker": "e05fcc4a-70a8-45eb-83b4-1978b2dd86ba",
-      "recovery_attempt_id": "bafd8ec3-7b42-4b21-820d-886fabd1f416",
-      "result": "recovered",
-      "evidence": {
-        "stable_database_id": "3ea8a265-8625-805b-b64c-d3068d1794ef",
-        "recovery_marker": "e05fcc4a-70a8-45eb-83b4-1978b2dd86ba",
-        "run_id": "e9f214d7-97f6-4a98-900a-4ea3dc4decd7",
-        "child_runtime_id": "9d9279e7-0837-42d6-8ad0-1eb9f2b413a7",
-        "lifecycle": "run and child runtime are not active; process identity readback completed",
-        "cleanup": {
-          "listed_task_count": 1,
-          "cleaned": [
-            {
-              "id": "3ea8a265-8625-81a0-ba3a-f5453ba60425",
-              "identifier": "PLAN-755CB06A937B",
-              "previous_state": "In Progress",
-              "state": "Cancelled",
-              "provenance": "[E2E reconciliation]\nprevious_state: In Progress\naction: stale task cancelled by E2E database recovery\ncleanup_time: 2026-09-29T14:43:49.248Z\nrecovery_identity: e05fcc4a-70a8-45eb-83b4-1978b2dd86ba\nprevious_run_id: e9f214d7-97f6-4a98-900a-4ea3dc4decd7\nprevious_child_runtime_id: 9d9279e7-0837-42d6-8ad0-1eb9f2b413a7",
-              "verified_at": "2026-09-29T18:51:49.243Z"
-            }
-          ],
-          "preserved": [],
-          "readback_complete": true
-        }
-      }
+      "type": "available_to_in_use",
+      "at": "2026-09-30T08:00:55.241Z",
+      "run_id": "ce8ea3fa-74c1-4b41-9722-057af1e98311",
+      "origin": "worker-originated"
     }
   },
-  "event_sequence": 10,
-  "previous_event_sha": "213a06fe94cba0762c2bd4ad0191ac0b5f16b84b",
-  "recorded_at": "2026-09-29T18:51:53.178Z"
+  "event_sequence": 11,
+  "previous_event_sha": "ef2327a12b4fc7c8118404a45885e32e9232295b",
+  "recorded_at": "2026-09-30T08:00:57.967Z"
 }
