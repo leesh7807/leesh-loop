@@ -70,13 +70,16 @@ test('unavailable transition never exposes available and recovery is bound to it
   assert.equal(history.at(-1).state.recovery_marker, secondUnavailable.recovery_marker);
 });
 
-test('release requires terminal run and stopped child runtime', async t => {
+test('release reads the authoritative run lifecycle and requires a stopped child runtime', async t => {
   const fixture = await gitFixture(t);
   const authority = new DatabaseReservationAuthority({ eventStore: fixture.store(join(fixture.root, 'workspace', 'runs')) });
   await authority.reserve(databaseId, { run_id: 'run-a', run_process: processIdentity, origin: 'direct' });
+  assert.deepEqual(Object.keys((await authority.read(databaseId)).reservation).sort(), ['acquired_at', 'run_id']);
+  await authority.writeRunLifecycle('run-a', { run_id: 'run-a', status: 'active', selected_database_id: databaseId, child_runtime: { status: 'not_started' } });
   assert.equal((await authority.release(databaseId, 'run-a')).committed, false);
-  await authority.updateRuntime(databaseId, 'run-a', { status: 'stopped' });
-  await authority.updateRunLifecycle(databaseId, 'run-a', 'completed');
+  await authority.updateRunLifecycleForReservation(databaseId, 'run-a', { child_runtime: { status: 'stopped' } });
+  assert.equal((await authority.release(databaseId, 'run-a')).committed, false);
+  await authority.updateRunLifecycleForReservation(databaseId, 'run-a', { status: 'completed', child_runtime: { status: 'stopped' } });
   assert.equal((await authority.release(databaseId, 'run-a', { cleanup: true })).committed, true);
   assert.equal((await authority.read(databaseId)).status, DATABASE_STATES.AVAILABLE);
 });

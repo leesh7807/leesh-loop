@@ -49,34 +49,23 @@ export class DatabaseReservationAuthority {
     return result.committed ? { committed: true, state: { ...result.current.event.state, sequence: result.current.sequence, sha: result.current.sha, ref: result.current.ref } } : { committed: false, state: result.current.event?.state || initialState(current.database_id) };
   }
 
-  async reserve(databaseId, { run_id, run_process, origin, outer_execution_provenance }) {
+  async reserve(databaseId, { run_id, origin }) {
     const current = await this.read(databaseId);
     if (current.status !== DATABASE_STATES.AVAILABLE) return { reserved: false, current };
     const reservation = {
       run_id,
-      acquired_at: this.now(),
-      origin,
-      run_process,
-      outer_execution_provenance: outer_execution_provenance || null,
-      run_lifecycle: 'active',
-      child_runtime: { status: 'not_started' }
+      acquired_at: this.now()
     };
     const result = await this.commit(current, { ...current, status: DATABASE_STATES.IN_USE, reservation, recovery_marker: null, unavailable: null }, 'available_to_in_use', { run_id, origin });
     return result.committed ? { reserved: true, state: result.state } : { reserved: false, current: result.state };
   }
 
-  async updateRuntime(databaseId, runId, childRuntime) {
+  async updateRunLifecycleForReservation(databaseId, runId, lifecycle) {
     const current = await this.read(databaseId);
     if (current.status !== DATABASE_STATES.IN_USE || current.reservation?.run_id !== runId) return { committed: false, state: current };
-    const next = { ...current, reservation: { ...current.reservation, child_runtime: childRuntime } };
-    return this.commit(current, next, 'child_runtime_updated', { run_id: runId, child_runtime_id: childRuntime?.runtime_id || null, child_runtime_status: childRuntime?.status || 'unknown' });
-  }
-
-  async updateRunLifecycle(databaseId, runId, lifecycle, evidence = {}) {
-    const current = await this.read(databaseId);
-    if (current.status !== DATABASE_STATES.IN_USE || current.reservation?.run_id !== runId) return { committed: false, state: current };
-    const next = { ...current, reservation: { ...current.reservation, run_lifecycle: lifecycle } };
-    return this.commit(current, next, 'run_lifecycle_updated', { run_id: runId, run_lifecycle: lifecycle, ...evidence });
+    if (lifecycle.selected_database_id !== undefined && lifecycle.selected_database_id !== databaseId) return { committed: false, state: current, reason: 'run lifecycle database identity does not match its reservation' };
+    const updated = await this.writeRunLifecycle(runId, { selected_database_id: databaseId, ...lifecycle });
+    return { committed: true, state: current, lifecycle: updated };
   }
 
   async updateReservationMetadata(databaseId, runId, metadata) {
@@ -97,7 +86,10 @@ export class DatabaseReservationAuthority {
   async release(databaseId, runId, evidence = {}) {
     const current = await this.read(databaseId);
     if (current.status !== DATABASE_STATES.IN_USE || current.reservation?.run_id !== runId) return { committed: false, state: current };
-    if (!['not_started', 'stopped'].includes(current.reservation.child_runtime?.status) || current.reservation.run_lifecycle === 'active') {
+    const lifecycle = await this.readRunLifecycle(runId);
+    if (!lifecycle || lifecycle.run_id !== runId || !['completed', 'failed'].includes(lifecycle.status)
+      || lifecycle.selected_database_id !== databaseId
+      || !['not_started', 'stopped'].includes(lifecycle.child_runtime?.status)) {
       return { committed: false, state: current, reason: 'run lifecycle or child runtime is still active' };
     }
     const next = { ...initialState(databaseId), status: DATABASE_STATES.AVAILABLE };

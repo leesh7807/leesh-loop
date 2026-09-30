@@ -33,12 +33,16 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
   const runLifecycles = new Map();
   const reservationAuthority = {
     async read() { return structuredClone(reservationState); },
-    async reserve(_databaseId, reservation) { if (reservationState.status !== 'available') return { reserved: false, current: structuredClone(reservationState) }; reservationState.status = 'in use'; reservationState.reservation = { ...reservation, child_runtime: { status: 'not_started' }, run_lifecycle: 'active' }; reservationState.sequence = ++reservationSequence; reservationState.sha = `sha-${reservationSequence}`; return { reserved: true, state: structuredClone(reservationState) }; },
+    async reserve(_databaseId, reservation) { if (reservationState.status !== 'available') return { reserved: false, current: structuredClone(reservationState) }; reservationState.status = 'in use'; reservationState.reservation = { run_id: reservation.run_id, acquired_at: new Date(clock()).toISOString() }; reservationState.sequence = ++reservationSequence; reservationState.sha = `sha-${reservationSequence}`; return { reserved: true, state: structuredClone(reservationState) }; },
     async updateReservationMetadata(_databaseId, runId, metadata) { reservationState.reservation = { ...reservationState.reservation, ...metadata }; reservationState.sequence = ++reservationSequence; reservationState.sha = `sha-${reservationSequence}`; return { committed: reservationState.reservation.run_id === runId, state: structuredClone(reservationState) }; },
-    async updateRuntime(_databaseId, runId, childRuntime) { if (reservationState.reservation?.run_id !== runId) return { committed: false }; reservationState.reservation.child_runtime = childRuntime; return { committed: true, state: structuredClone(reservationState) }; },
-    async updateRunLifecycle(_databaseId, runId, lifecycle) { if (reservationState.reservation?.run_id !== runId) return { committed: false }; reservationState.reservation.run_lifecycle = lifecycle; return { committed: true, state: structuredClone(reservationState) }; },
     async markUnavailable(_databaseId, runId, reason) { if (reservationState.reservation?.run_id !== runId) return { committed: false }; reservationState.status = 'unavailable'; reservationState.recovery_marker = `marker-${runId}`; reservationState.unavailable = { reason, marker: reservationState.recovery_marker }; return { committed: true, recovery_marker: reservationState.recovery_marker, state: structuredClone(reservationState) }; },
     async recordActiveRecoveryObservation() { return { committed: true }; },
+    async updateRunLifecycleForReservation(_databaseId, runId, lifecycle) {
+      if (reservationState.status !== 'in use' || reservationState.reservation?.run_id !== runId) return { committed: false };
+      const next = { ...(runLifecycles.get(runId) || {}), ...lifecycle, run_id: runId };
+      runLifecycles.set(runId, next);
+      return { committed: true, lifecycle: next };
+    },
     async writeRunLifecycle(runId, lifecycle) { runLifecycles.set(runId, { ...(runLifecycles.get(runId) || {}), ...lifecycle, run_id: runId }); return runLifecycles.get(runId); },
     async readRunLifecycle(runId) { return runLifecycles.get(runId) || null; }
   };
@@ -78,7 +82,7 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
       return { ...currentPorts, async release() {} };
     },
     async startConfiguredOperatorProject(_projectPath, _timeout, databaseUrl) {
-      runtimeStartingAtCall.push(structuredClone(reservationState.reservation?.child_runtime || null));
+      runtimeStartingAtCall.push(structuredClone([...runLifecycles.values()].at(-1)?.child_runtime || null));
       startedDatabaseUrls.push(databaseUrl);
       const conflict = portConflicts.shift();
       if (conflict) throw new Error(conflict);

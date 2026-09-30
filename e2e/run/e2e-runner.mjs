@@ -165,7 +165,10 @@ export class E2ERunner {
         const portAttempt = { attempt, ports: { symphony_port: ports.symphony_port, ui_port: ports.ui_port }, started_at: currentTimeIso(), result: 'starting' };
         record.runtime.port_start_attempts ||= [];
         record.runtime.port_start_attempts.push(portAttempt);
-        const startingRuntime = await this.reservationAuthority.updateRuntime(admission.database.database_id, runId, record.runtime.child_runtime);
+        const startingRuntime = await this.reservationAuthority.updateRunLifecycleForReservation(admission.database.database_id, runId, {
+          child_runtime_id: record.runtime.child_runtime.runtime_id || null,
+          child_runtime: record.runtime.child_runtime
+        });
         if (!startingRuntime.committed) throw new Error(`child runtime startup could not be bound to database reservation for E2E run ${runId}`);
         await this.runRecordStore.save(record);
         await portLease.release();
@@ -186,6 +189,12 @@ export class E2ERunner {
           await this.operatorClient.stopConfiguredOperatorProject(paths.runtimeProject, this.config.runtime_stop_timeout_ms);
           const stopped = await this.operatorClient.verifyRuntimeStopped(paths.runtimeState, record.runtime.child_runtime);
           if (!stopped.stopped) throw new Error(`port-conflict startup attempt ${attempt} did not leave its run-owned Operator stopped`);
+          record.runtime.child_runtime = { ...record.runtime.child_runtime, status: 'stopped', stopped_at: currentTimeIso() };
+          const stoppedRuntime = await this.reservationAuthority.updateRunLifecycleForReservation(admission.database.database_id, runId, {
+            child_runtime_id: record.runtime.child_runtime.runtime_id || null,
+            child_runtime: record.runtime.child_runtime
+          });
+          if (!stoppedRuntime.committed) throw new Error(`stopped child runtime could not be bound to database reservation for E2E run ${runId}`);
 
           portLease = await this.operatorClient.findAvailableRuntimePorts(this.config.runtime_port_attempts);
           ports = { symphony_port: portLease.symphony_port, ui_port: portLease.ui_port };
@@ -203,9 +212,11 @@ export class E2ERunner {
       record.status = 'runtime_ready';
       const childRuntime = await this.operatorClient.readOwnedRuntimeIdentity(paths.runtimeState, runtimeResult);
       record.runtime.child_runtime = childRuntime;
-      const runtimeSaved = await this.reservationAuthority.updateRuntime(admission.database.database_id, runId, childRuntime);
+      const runtimeSaved = await this.reservationAuthority.updateRunLifecycleForReservation(admission.database.database_id, runId, {
+        child_runtime_id: childRuntime.runtime_id,
+        child_runtime: childRuntime
+      });
       if (!runtimeSaved.committed) throw new Error(`child runtime ${childRuntime.runtime_id} could not be bound to its database reservation`);
-      await this.reservationAuthority.writeRunLifecycle(runId, { child_runtime_id: childRuntime.runtime_id, child_runtime: childRuntime, selected_database_id: admission.database.database_id });
       await this.runRecordStore.save(record);
 
       await this.notionPublisherClient.prepareProductionPublisher();
@@ -237,8 +248,8 @@ export class E2ERunner {
     } catch (error) {
       await portLease?.release().catch(() => {});
       if (!record) {
+        await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: currentTimeIso(), selected_database_id: admission.database.database_id, failure: String(error?.message || error) }).catch(() => {});
         await this.reservationAuthority.release(admission.database.database_id, runId, { result: 'failed before production workload setup', error: String(error?.message || error) }).catch(() => ({ committed: false }));
-        await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: currentTimeIso(), failure: String(error?.message || error) }).catch(() => {});
         await this.runRecordStore.saveAdmissionFailure(error, { runId, databasePool: [admission.database] }).catch(() => {});
         throw error;
       }

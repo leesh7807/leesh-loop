@@ -175,9 +175,16 @@ export class RunFinalizer {
     };
     let reservationEnded = false;
     try {
-      const runtime = await this.reservationAuthority.updateRuntime(databaseId, runId, childRuntime);
-      if (!runtime.committed) throw new Error('database reservation ownership changed before child runtime finalization readback');
-      const lifecycle = await this.reservationAuthority.updateRunLifecycle(databaseId, runId, lifecycleStatus, transitionEvidence);
+      const lifecycle = await this.reservationAuthority.updateRunLifecycleForReservation(databaseId, runId, {
+        status: lifecycleStatus,
+        ended_at: endedAt,
+        selected_database_id: databaseId,
+        child_runtime_id: childRuntime.runtime_id || null,
+        child_runtime: childRuntime,
+        finalization_complete: record.finalization.complete,
+        unresolved: [...record.finalization.unresolved],
+        cleanup_unresolved: [...record.cleanup.unresolved]
+      });
       if (!lifecycle.committed) throw new Error('database reservation ownership changed before run lifecycle finalization readback');
       if (record.finalization.complete && record.cleanup.runtime_stopped === true && record.cleanup.unresolved.length === 0) {
         const released = await this.reservationAuthority.release(databaseId, runId, transitionEvidence);
@@ -192,15 +199,6 @@ export class RunFinalizer {
         record.status = 'failed';
         addFailure(record, new Error(`database ${databaseId} is unavailable until required E2E recovery completes`), 'database_reservation_finalization');
       }
-      await this.reservationAuthority.writeRunLifecycle(runId, {
-        status: lifecycleStatus,
-        ended_at: endedAt,
-        selected_database_id: databaseId,
-        child_runtime_id: childRuntime.runtime_id || null,
-        child_runtime: childRuntime,
-        finalization_complete: record.finalization.complete,
-        unresolved: [...record.finalization.unresolved]
-      });
     } catch (error) {
       record.status = 'failed';
       if (!record.finalization.unresolved.includes('database_reservation_finalization')) record.finalization.unresolved.push('database_reservation_finalization');

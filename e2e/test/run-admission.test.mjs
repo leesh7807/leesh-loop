@@ -36,7 +36,7 @@ test('recovery preserves an in-use reservation while its run process is active',
   const authority = new DatabaseReservationAuthority({ eventStore: new MemoryEventStore() });
   const process = await currentProcessIdentity();
   await authority.reserve(databaseA.database_id, { run_id: 'old-run', run_process: process, origin: 'worker-originated' });
-  await authority.writeRunLifecycle('old-run', { run_id: 'old-run', status: 'active', run_process: process, origin: 'worker-originated' });
+  await authority.writeRunLifecycle('old-run', { run_id: 'old-run', status: 'active', run_process: process, origin: 'worker-originated', child_runtime: { status: 'not_started' } });
   let taskReads = 0;
   const admission = createAdmission({ authority, notionClient: { async listTasks() { taskReads += 1; return []; } } });
   const result = await admission.recoveryPass();
@@ -50,8 +50,7 @@ test('recovery does not treat a terminal lifecycle marker as dead while the run 
   const authority = new DatabaseReservationAuthority({ eventStore: new MemoryEventStore() });
   const process = await currentProcessIdentity();
   await authority.reserve(databaseA.database_id, { run_id: 'finishing-run', run_process: process, origin: 'direct' });
-  await authority.updateRuntime(databaseA.database_id, 'finishing-run', { status: 'stopped' });
-  await authority.writeRunLifecycle('finishing-run', { run_id: 'finishing-run', status: 'completed', run_process: process });
+  await authority.writeRunLifecycle('finishing-run', { run_id: 'finishing-run', status: 'completed', selected_database_id: databaseA.database_id, child_runtime: { status: 'stopped' }, run_process: process });
   let taskReads = 0;
   const admission = createAdmission({ authority, notionClient: { async listTasks() { taskReads += 1; return []; } } });
 
@@ -68,19 +67,18 @@ test('recovery preserves an in-use reservation when child runtime startup is unr
   const current = await currentProcessIdentity();
   const dead = { ...current, pid: 2_000_000_000 };
   await authority.reserve(databaseA.database_id, { run_id: 'starting-run', run_process: dead, origin: 'worker-originated' });
-  await authority.updateRuntime(databaseA.database_id, 'starting-run', {
+  await authority.writeRunLifecycle('starting-run', { run_id: 'starting-run', status: 'active', run_process: dead, selected_database_id: databaseA.database_id, child_runtime: {
     status: 'starting',
     state_path: '/worker-workspace/e2e/runs/starting-run/operator-state',
     process_identity: null
-  });
-  await authority.writeRunLifecycle('starting-run', { run_id: 'starting-run', status: 'active', run_process: dead });
+  } });
   let taskReads = 0;
   const admission = createAdmission({ authority, notionClient: { async listTasks() { taskReads += 1; return []; } } });
   const result = await admission.recoveryPass();
   assert.equal(result[0].status, DATABASE_STATES.IN_USE);
   assert.match(result[0].result, /active or cannot be authoritatively checked/);
   assert.equal(taskReads, 0);
-  assert.equal((await authority.read(databaseA.database_id)).reservation.child_runtime.status, 'starting');
+  assert.equal((await authority.readRunLifecycle('starting-run')).child_runtime.status, 'starting');
 });
 
 test('recovery trusts a matching live child runtime endpoint over a foreign PID namespace', async () => {
@@ -88,10 +86,9 @@ test('recovery trusts a matching live child runtime endpoint over a foreign PID 
   const current = await currentProcessIdentity();
   const deadRun = { ...current, pid: 2_000_000_000 };
   await authority.reserve(databaseA.database_id, { run_id: 'outer-dead', run_process: deadRun, origin: 'worker-originated' });
-  await authority.updateRuntime(databaseA.database_id, 'outer-dead', {
+  await authority.writeRunLifecycle('outer-dead', { run_id: 'outer-dead', status: 'active', run_process: deadRun, selected_database_id: databaseA.database_id, child_runtime: {
     status: 'active', runtime_id: 'child-runtime', dashboard: 'http://127.0.0.1:45183', process_identity: { ...deadRun, pid: 845, pid_namespace: 'pid:[foreign]' }
-  });
-  await authority.writeRunLifecycle('outer-dead', { run_id: 'outer-dead', status: 'active', run_process: deadRun });
+  } });
   const admission = createAdmission({ authority, operatorClient: { async inspectChildRuntimeLiveness() { return 'active'; } } });
   const result = await admission.recoveryPass();
   assert.equal(result[0].status, DATABASE_STATES.IN_USE);
@@ -105,7 +102,7 @@ test('dead run recovery cancels stale task only after Workpad provenance readbac
   const dead = { ...current, pid: 2_000_000_000 };
   await authority.reserve(databaseA.database_id, { run_id: 'old-run', run_process: dead, origin: 'direct' });
   await authority.updateReservationMetadata(databaseA.database_id, 'old-run', { base_branch: 'base/old-run' });
-  await authority.writeRunLifecycle('old-run', { run_id: 'old-run', status: 'active', run_process: dead, origin: 'direct' });
+  await authority.writeRunLifecycle('old-run', { run_id: 'old-run', status: 'active', run_process: dead, origin: 'direct', selected_database_id: databaseA.database_id, child_runtime: { status: 'not_started' } });
 
   const tasks = [
     { id: 'backlog', identifier: 'T-BACKLOG', state: 'Backlog', workpad: '' },
@@ -138,7 +135,7 @@ test('recovery classifies the authoritative task State instead of a stale list s
   const current = await currentProcessIdentity();
   const dead = { ...current, pid: 2_000_000_000 };
   await authority.reserve(databaseA.database_id, { run_id: 'old-run', run_process: dead, origin: 'direct' });
-  await authority.writeRunLifecycle('old-run', { run_id: 'old-run', status: 'active', run_process: dead });
+  await authority.writeRunLifecycle('old-run', { run_id: 'old-run', status: 'active', run_process: dead, selected_database_id: databaseA.database_id, child_runtime: { status: 'not_started' } });
   const task = { id: 'changed', identifier: 'T-CHANGED', state: 'Ready', workpad: 'existing notes\n' };
   const mutationOrder = [];
   const notionClient = {
@@ -159,8 +156,7 @@ test('recovery classifies the authoritative task State instead of a stale list s
 test('failed recovery remains unavailable while another clean database admits a run', async () => {
   const authority = new DatabaseReservationAuthority({ eventStore: new MemoryEventStore() });
   await authority.reserve(databaseA.database_id, { run_id: 'old-run', run_process: { pid: 2_000_000_000, process_start_ticks: '1', boot_id: (await currentProcessIdentity()).boot_id }, origin: 'direct' });
-  await authority.updateRuntime(databaseA.database_id, 'old-run', { status: 'stopped' });
-  await authority.writeRunLifecycle('old-run', { run_id: 'old-run', status: 'completed', ended_at: new Date().toISOString(), run_process: { pid: 2_000_000_000, process_start_ticks: '1', boot_id: (await currentProcessIdentity()).boot_id } });
+  await authority.writeRunLifecycle('old-run', { run_id: 'old-run', status: 'completed', ended_at: new Date().toISOString(), selected_database_id: databaseA.database_id, child_runtime: { status: 'stopped' }, run_process: { pid: 2_000_000_000, process_start_ticks: '1', boot_id: (await currentProcessIdentity()).boot_id } });
   await authority.markUnavailable(databaseA.database_id, 'old-run', 'cleanup failed');
   const notionClient = { async listTasks(url) { if (url === databaseA.database_url) throw new Error('Notion read unavailable'); return []; } };
   const admission = createAdmission({ authority, pool: [databaseA, databaseB], notionClient });
@@ -176,8 +172,7 @@ test('capacity contention ends as resource unavailable admission without databas
   const current = await currentProcessIdentity();
   for (const candidate of [databaseA, databaseB]) {
     await authority.reserve(candidate.database_id, { run_id: `active-${candidate.database_id}`, run_process: current, origin: 'direct' });
-    await authority.writeRunLifecycle(`active-${candidate.database_id}`, { run_id: `active-${candidate.database_id}`, status: 'active', run_process: current });
-    await authority.updateRuntime(candidate.database_id, `active-${candidate.database_id}`, { status: 'active', process_identity: current });
+    await authority.writeRunLifecycle(`active-${candidate.database_id}`, { run_id: `active-${candidate.database_id}`, status: 'active', run_process: current, selected_database_id: candidate.database_id, child_runtime: { status: 'active', process_identity: current } });
   }
   let taskReads = 0;
   let admissionRecord;

@@ -34,7 +34,8 @@ export class RunAdmission {
       origin,
       started_at: currentTimeIso(),
       run_process: runProcess,
-      outer_execution_provenance: outerExecutionProvenance
+      outer_execution_provenance: outerExecutionProvenance,
+      child_runtime: { status: 'not_started' }
     });
 
     const recovery = await this.recoveryPass();
@@ -52,9 +53,7 @@ export class RunAdmission {
         if (current.status !== DATABASE_STATES.AVAILABLE) continue;
         const result = await this.reservationAuthority.reserve(candidate.database_id, {
           run_id: runId,
-          run_process: runProcess,
-          origin,
-          outer_execution_provenance: outerExecutionProvenance
+          origin
         });
         if (!result.reserved) {
           contentionObserved = true;
@@ -153,9 +152,9 @@ export class RunAdmission {
     catch (error) { return { database_id: candidate.database_id, status: DATABASE_STATES.IN_USE, run_id: runId, result: 'preserved; run lifecycle could not be read', error: String(error?.message || error) }; }
     if (!lifecycle || lifecycle.run_id !== runId) return { database_id: candidate.database_id, status: DATABASE_STATES.IN_USE, run_id: runId, result: 'preserved; authoritative run lifecycle is missing or mismatched' };
 
-    const runProcess = lifecycle.run_process || state.reservation.run_process;
+    const runProcess = lifecycle.run_process;
     const runProcessState = await inspectProcessIdentity(runProcess);
-    const childRuntime = state.reservation.child_runtime || { status: 'unknown' };
+    const childRuntime = lifecycle.child_runtime || { status: 'unknown' };
     const childProcessState = this.operatorClient?.inspectChildRuntimeLiveness
       ? await this.operatorClient.inspectChildRuntimeLiveness(childRuntime)
       : childRuntime.status === 'not_started' || childRuntime.status === 'stopped'
@@ -176,7 +175,7 @@ export class RunAdmission {
       run_lifecycle_status: lifecycle.status,
       run_process: { identity: runProcess || null, result: runProcessState },
       child_runtime: { runtime_id: childRuntime.runtime_id || null, identity: childRuntime.process_identity || null, result: childProcessState },
-      outer_execution_provenance: lifecycle.outer_execution_provenance || state.reservation.outer_execution_provenance || null
+      outer_execution_provenance: lifecycle.outer_execution_provenance || null
     };
     if (!runTerminal) await this.reservationAuthority.writeRunLifecycle(runId, { status: 'interrupted', ended_at: currentTimeIso(), interruption_evidence: evidence });
     const transition = await this.reservationAuthority.markDeadRunUnavailable(state, evidence);
@@ -189,16 +188,17 @@ export class RunAdmission {
     const snapshot = await this.reservationAuthority.beginRecovery(candidate.database_id);
     if (!snapshot) return { database_id: candidate.database_id, status: state.status, result: 'state changed before recovery began' };
     const reservation = snapshot.reservation;
+    let lifecycle = null;
     try {
       if (reservation?.run_id) {
-        const lifecycle = await this.reservationAuthority.readRunLifecycle(reservation.run_id);
-        const child = reservation.child_runtime || { status: 'unknown' };
+        lifecycle = await this.reservationAuthority.readRunLifecycle(reservation.run_id);
+        const child = lifecycle?.child_runtime || { status: 'unknown' };
         const childState = this.operatorClient?.inspectChildRuntimeLiveness
           ? await this.operatorClient.inspectChildRuntimeLiveness(child)
           : child.status === 'not_started' || child.status === 'stopped'
             ? 'dead'
             : await inspectProcessIdentity(child.process_identity);
-        const runState = await inspectProcessIdentity(lifecycle?.run_process || reservation.run_process);
+        const runState = await inspectProcessIdentity(lifecycle?.run_process);
         const runDead = TERMINAL_RUN_STATES.has(lifecycle?.status) || runState === 'dead';
         if (!lifecycle || !runDead || !['not_started', 'stopped'].includes(child.status) && childState !== 'dead') {
           const evidence = { lifecycle_status: lifecycle?.status || 'unknown', run_process_state: runState, child_runtime_status: child.status, child_process_state: childState };
@@ -207,12 +207,12 @@ export class RunAdmission {
         }
       }
 
-      const cleanup = await this.reconcileStaleTasks(candidate, snapshot);
+      const cleanup = await this.reconcileStaleTasks(candidate, snapshot, lifecycle);
       const evidence = {
         stable_database_id: candidate.database_id,
         recovery_marker: snapshot.recovery_marker,
         run_id: reservation?.run_id || null,
-        child_runtime_id: reservation?.child_runtime?.runtime_id || null,
+        child_runtime_id: lifecycle?.child_runtime?.runtime_id || null,
         lifecycle: 'run and child runtime are not active; process identity readback completed',
         cleanup
       };
@@ -227,7 +227,7 @@ export class RunAdmission {
     }
   }
 
-  async reconcileStaleTasks(candidate, recovery) {
+  async reconcileStaleTasks(candidate, recovery, lifecycle) {
     const tasks = await this.notionClient.listTasks(candidate.database_url);
     const cleaned = [];
     const preserved = [];
@@ -247,7 +247,7 @@ export class RunAdmission {
         `cleanup_time: ${cleanedAt}`,
         `recovery_identity: ${recovery.recovery_marker}`,
         `previous_run_id: ${recovery.reservation?.run_id || 'unknown'}`,
-        `previous_child_runtime_id: ${recovery.reservation?.child_runtime?.runtime_id || 'unknown'}`
+        `previous_child_runtime_id: ${lifecycle?.child_runtime?.runtime_id || 'unknown'}`
       ].join('\n');
       if (!String(task.workpad || '').includes(provenance)) await this.notionClient.appendWorkpad(task.id, provenance);
       task = await this.notionClient.readTask(candidate.database_url, summary.id);

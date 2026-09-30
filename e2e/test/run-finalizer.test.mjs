@@ -7,14 +7,13 @@ import { RunFinalizer } from '../run/finalization/run-finalizer.mjs';
 import { createRunPaths } from '../model/e2e-runtime-config.mjs';
 import { createRunRecord } from '../model/run-record-store.mjs';
 
-test('terminal run lifecycle is published after its reservation has ended', async () => {
+test('terminal run lifecycle is the release authority and is published before reservation ends', async () => {
   const events = [];
   const reservationAuthority = {
-    async updateRuntime() { events.push('update_runtime'); return { committed: true }; },
-    async updateRunLifecycle() { events.push('reservation_lifecycle'); return { committed: true }; },
     async release() { events.push('release'); return { committed: true }; },
     async markUnavailable() { events.push('unavailable'); return { committed: true, recovery_marker: 'marker-1' }; },
-    async writeRunLifecycle() { events.push('run_lifecycle'); }
+    async updateRunLifecycleForReservation(_databaseId, _runId, lifecycle) { events.push(`run_lifecycle:${lifecycle.status}`); return { committed: true }; },
+    async writeRunLifecycle(_runId, lifecycle) { events.push(`run_lifecycle:${lifecycle.status}`); }
   };
   const finalizer = new RunFinalizer({ config: {}, reservationAuthority });
   const record = {
@@ -29,7 +28,7 @@ test('terminal run lifecycle is published after its reservation has ended', asyn
 
   await finalizer.settleDatabaseReservation(record);
 
-  assert.ok(events.indexOf('release') < events.indexOf('run_lifecycle'));
+  assert.ok(events.indexOf('run_lifecycle:completed') < events.indexOf('release'));
   assert.equal(events.includes('unavailable'), false);
   assert.equal(record.database_reservation.status, 'available');
 });
