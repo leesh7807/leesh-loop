@@ -11,7 +11,7 @@ const draftKey = (plan, state, selectedBlockers) => JSON.stringify({ plan, state
 function TaskCard({ task, selected, selectionDisabled, onToggle }) {
   const title = task.title || '(Untitled)';
   return (
-    <article className={`task-row${selected ? ' selected-blocker' : ''}`}>
+    <article className="task-row">
       <div className="task-row-primary">
         <div className="task-title-block">
           <h4><a href={task.taskUrl} target="_blank" rel="noreferrer" aria-label={`Open ${title} in Notion`}>{title}</a></h4>
@@ -35,7 +35,7 @@ function TaskCard({ task, selected, selectionDisabled, onToggle }) {
               onChange={() => onToggle(task)}
               aria-label={`Use ${title} in State ${task.state} as a Blocked By task`}
             />
-            <span>{selected ? 'Selected as blocker' : 'Use as Blocked By'}</span>
+            <span>Use as Blocked By</span>
           </label>
         </div>
       </div>
@@ -75,15 +75,11 @@ function TaskCard({ task, selected, selectionDisabled, onToggle }) {
 function TaskSurface({ tasks, selectedBlockers, selectionDisabled, loading, error, refreshedAt, onRetry, onToggleBlocker }) {
   const selectedIds = new Set(selectedBlockers.map(task => task.taskId));
   const groups = groupTasksForOperatorDisplay(tasks);
-  const activeCount = groups.activeWork.length;
   const otherCount = groups.remainingTasks.length;
-  const taskGroup = (name, description, items, attentionClass) => (
-    <section className={`task-group ${attentionClass}`} aria-labelledby={`${attentionClass}-heading`}>
+  const taskGroup = (name, items, groupClass) => (
+    <section className={`task-group ${groupClass}`} aria-labelledby={`${groupClass}-heading`}>
       <div className="task-group-heading">
-        <div>
-          <p className="eyebrow">{description}</p>
-          <h3 id={`${attentionClass}-heading`}>{name}</h3>
-        </div>
+        <h3 id={`${groupClass}-heading`}>{name}</h3>
         <span className="task-group-count" aria-label={`${items.length} tasks`}>{items.length}</span>
       </div>
       {items.length ? (
@@ -95,7 +91,7 @@ function TaskSurface({ tasks, selectedBlockers, selectionDisabled, loading, erro
   );
 
   return (
-    <section className="surface task-surface" aria-labelledby="tasks-heading" aria-busy={loading && !refreshedAt}>
+    <section className="task-surface" aria-labelledby="tasks-heading" aria-busy={loading && !refreshedAt}>
       <div className="surface-header">
         <div>
           <p className="eyebrow">Current project work</p>
@@ -107,12 +103,6 @@ function TaskSurface({ tasks, selectedBlockers, selectionDisabled, loading, erro
             {loading && !refreshedAt ? 'Loading tasks' : refreshedAt ? `Updated ${formatTime(refreshedAt)}` : ''}
           </p>
         </div>
-      </div>
-      <p className="task-help">Human Review appears first. Expand a task for Blocked By, metadata, and Plan links.</p>
-      <div className="task-overview" aria-label="Task State groups">
-        <div className="overview-group overview-review"><span>Human Review</span><strong>{groups.humanReview.length}</strong></div>
-        <div className="overview-group overview-active"><span>Active work</span><strong>{activeCount}</strong></div>
-        <div className="overview-group overview-remaining"><span>Other States</span><strong>{otherCount}</strong></div>
       </div>
       {selectedBlockers.length > 0 && (
         <p className="selection-count" aria-live="polite">{selectedBlockers.length} blocker{selectedBlockers.length === 1 ? '' : 's'} selected for this Plan</p>
@@ -127,8 +117,8 @@ function TaskSurface({ tasks, selectedBlockers, selectionDisabled, loading, erro
       {!loading && !error && tasks.length === 0 ? <p className="empty-state">There are no current tasks.</p> : null}
       {tasks.length > 0 && (
         <div className="task-groups">
-          {groups.humanReview.length > 0 && taskGroup('Needs your review', 'Highest attention', groups.humanReview, 'attention-review')}
-          {groups.activeWork.length > 0 && taskGroup('Active work', 'Merging and in progress first', groups.activeWork, 'attention-active')}
+          {groups.humanReview.length > 0 && taskGroup('Needs your review', groups.humanReview, 'review-work')}
+          {groups.activeWork.length > 0 && taskGroup('Active work', groups.activeWork, 'active-work')}
           <details className="remaining-tasks">
             <summary><span>Other tasks</span><span className="task-group-count" aria-label={`${otherCount} tasks`}>{otherCount}</span></summary>
             {groups.remainingTasks.length ? (
