@@ -1,0 +1,30 @@
+{
+  "kind": "e2e_run_lifecycle",
+  "run_id": "58106c47-66ed-470d-9571-2d2d5237ddb8",
+  "lifecycle": {
+    "run_id": "58106c47-66ed-470d-9571-2d2d5237ddb8",
+    "status": "active",
+    "origin": "worker-originated",
+    "started_at": "2026-09-30T14:17:56.326Z",
+    "run_process": {
+      "pid": 415593,
+      "process_start_ticks": "11648676",
+      "boot_id": "43f4e705-39f8-4dee-b528-e3c113adbd88",
+      "pid_namespace": "pid:[4026531836]",
+      "host": "lees"
+    },
+    "outer_execution_provenance": {
+      "operator_runtime_id": "e18f759e-e484-4b4b-8ea4-1b87a4581e67",
+      "issue_identifier": null,
+      "execution_id": null,
+      "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9"
+    },
+    "child_runtime": {
+      "status": "not_started"
+    },
+    "updated_at": "2026-09-30T14:17:56.981Z"
+  },
+  "event_sequence": 1,
+  "previous_event_sha": null,
+  "recorded_at": "2026-09-30T14:17:57.547Z"
+}
