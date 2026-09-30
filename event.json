@@ -8,18 +8,27 @@
     "status": "in use",
     "reservation": {
       "run_id": "a995237c-4d7b-45a6-86ac-a3c06c71d473",
-      "acquired_at": "2026-09-30T16:03:43.192Z"
+      "acquired_at": "2026-09-30T16:03:43.192Z",
+      "base_branch": "base/a995237c-4d7b-45a6-86ac-a3c06c71d473",
+      "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/workspaces/a995237c-4d7b-45a6-86ac-a3c06c71d473",
+      "run_record_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/a995237c-4d7b-45a6-86ac-a3c06c71d473/run.json",
+      "workflow_snapshot_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/a995237c-4d7b-45a6-86ac-a3c06c71d473/workflow.md"
     },
     "recovery_marker": null,
     "unavailable": null,
     "last_transition": {
-      "type": "available_to_in_use",
-      "at": "2026-09-30T16:03:43.192Z",
+      "type": "reservation_metadata_updated",
+      "at": "2026-09-30T16:04:03.551Z",
       "run_id": "a995237c-4d7b-45a6-86ac-a3c06c71d473",
-      "origin": "worker-originated"
+      "metadata": {
+        "base_branch": "base/a995237c-4d7b-45a6-86ac-a3c06c71d473",
+        "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/workspaces/a995237c-4d7b-45a6-86ac-a3c06c71d473",
+        "run_record_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/a995237c-4d7b-45a6-86ac-a3c06c71d473/run.json",
+        "workflow_snapshot_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/a995237c-4d7b-45a6-86ac-a3c06c71d473/workflow.md"
+      }
     }
   },
-  "event_sequence": 43,
-  "previous_event_sha": "c630797e3466979e48d232f4e3f1ccf9834918e9",
-  "recorded_at": "2026-09-30T16:03:46.568Z"
+  "event_sequence": 44,
+  "previous_event_sha": "9e07bf2f6a1a439bb672f09b2f623543e30d878e",
+  "recorded_at": "2026-09-30T16:04:06.126Z"
 }
