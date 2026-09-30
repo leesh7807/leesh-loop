@@ -67,7 +67,7 @@ Verify the representative intended flow through the repository's practical inter
 
 Use only the worker-facing `chatgpt-shot submit "<prompt>"` and `chatgpt-shot jobs <job-id>` commands. Do not start, stop, authenticate, repair, or otherwise manage the external Service.
 
-After implementation and repository verification, capture the exact delivery PR URL and `git rev-parse HEAD`. Run a code review and then a structural review for that same PR and HEAD. A raw `PASS` is not required when every reported finding has been checked against the Accepted Plan and existing repository contracts, and no valid finding remains. If an accepted fix changes HEAD, rerun affected verification and restart both reviews from code review on the new HEAD.
+After implementation and repository verification, capture the exact delivery PR URL and `git rev-parse HEAD`. Run a code review and then a structural review for that same PR and HEAD. A raw `PASS` is not required when every reported finding has been checked against the Accepted Plan and existing repository contracts, and no valid finding remains. If an accepted fix changes HEAD, rerun affected verification and restart both reviews from code review on the new HEAD. `chatgpt-shot submit` may take up to 3 minutes while waiting for acceptance; use an execution timeout longer than 3 minutes. On success, stdout is the Review Job ID, not the review result.
 
 Before recording a Review Job result, record its exact binding in the Workpad immediately before its Job ID:
 

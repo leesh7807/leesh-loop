@@ -105,6 +105,7 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.doesNotMatch(result.completionOutput, /npm (?:install|ci)|mix deps\.get/);
   assert.match(workflow, /chatgpt-shot submit/);
   assert.match(workflow, /chatgpt-shot jobs/);
+  assert.match(workflow, /take up to 3 minutes.*execution timeout longer than 3 minutes/);
   assert.match(workflow, /\{\{ issue\.identifier \}\}/);
   assert.match(workflow, /\{\{ issue\.title \}\}/);
   assert.match(workflow, /\{\{ issue\.state \}\}/);
