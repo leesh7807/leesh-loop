@@ -11,6 +11,7 @@ import { RunCompletionVerifier } from './lifecycle/run-completion-verifier.mjs';
 import { RunDoneVerifier } from './lifecycle/run-done-verifier.mjs';
 import { RunLifecycleObserver } from './lifecycle/run-lifecycle-observer.mjs';
 import { currentProcessIdentity } from '../model/process-identity.mjs';
+import { materializeRunScopedDefaultWorkflow } from '../model/run-scoped-delivery-branch.mjs';
 import { identifyE2ERunOrigin } from '../model/run-origin.mjs';
 import { isRuntimePortConflict } from '../systems/operator/operator-client.mjs';
 
@@ -99,10 +100,11 @@ export class E2ERunner {
       const workload = resolvedWorkload.workload;
       paths = createRunPaths(this.config, runId);
       branch = createRunScopedBaseBranchName(runId);
+      const workflow = materializeRunScopedDefaultWorkflow(this.runInput.workflow, branch);
       const seedCommit = await this.gitClient.resolveSeedCommit(this.config.seed_source_ref);
       const resolvedRunInput = {
         workload_evidence: resolvedWorkload.evidence,
-        workflow: { ...this.runInput.workflow, snapshot_path: paths.workflowSnapshot },
+        workflow: { ...workflow, snapshot_path: paths.workflowSnapshot },
         runtime_options: { ...resolvedRuntimeOptions(this.config), database_id: admission.database.database_id, origin }
       };
       record = createRunRecord({ config: this.config, database: admission.database, runId, workload, paths, runInput: resolvedRunInput });
@@ -114,7 +116,7 @@ export class E2ERunner {
       record.status = 'preparing';
       await this.runRecordStore.save(record);
 
-      await writeRunInputSnapshots(paths, resolvedWorkload.evidence, this.runInput.workflow);
+      await writeRunInputSnapshots(paths, resolvedWorkload.evidence, workflow);
       await this.runRecordStore.save(record);
       const metadata = await this.reservationAuthority.updateReservationMetadata(admission.database.database_id, runId, {
         base_branch: branch,

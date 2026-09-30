@@ -33,6 +33,32 @@ test('terminal run lifecycle is the release authority and is published before re
   assert.equal(record.database_reservation.status, 'available');
 });
 
+test('incomplete required cleanup atomically makes the current database unavailable', async () => {
+  const events = [];
+  const reservationAuthority = {
+    async updateRunLifecycleForReservation(_databaseId, _runId, lifecycle) { events.push(`run_lifecycle:${lifecycle.status}`); return { committed: true }; },
+    async markUnavailable(databaseId, runId, reason, evidence) { events.push('unavailable'); return { committed: true, recovery_marker: 'marker-2', databaseId, runId, reason, evidence }; },
+    async writeRunLifecycle() {}
+  };
+  const finalizer = new RunFinalizer({ config: {}, reservationAuthority });
+  const record = {
+    run_id: 'run-cleanup-failed',
+    binding: { database_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' },
+    runtime: { child_runtime: { runtime_id: 'child-2', status: 'stopped' } },
+    cleanup: { runtime_stopped: true, unresolved: ['delete_delivery_branch:foreign'] },
+    finalization: { complete: false, unresolved: ['delete_delivery_branch:foreign'], incomplete: true },
+    failures: [],
+    ended_at: new Date().toISOString()
+  };
+
+  await finalizer.settleDatabaseReservation(record);
+
+  assert.deepEqual(events, ['run_lifecycle:failed', 'unavailable']);
+  assert.equal(record.database_reservation.status, 'unavailable');
+  assert.equal(record.database_reservation.recovery_marker, 'marker-2');
+  assert.equal(record.status, 'failed');
+});
+
 test('finalization preserves an external stop failure and still converges finitely', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-'));
   const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
@@ -110,50 +136,6 @@ test('reconciliation stops a runtime whose start was durably requested before a 
   assert.equal(result.runtime.child_runtime.status, 'stopped');
   assert.ok(result.runtime.child_runtime.stopped_at);
   assert.equal(result.finalization.complete, true);
-});
-
-test('refuses to delete a delivery branch outside the current run namespace', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-branch-owner-'));
-  const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };
-  const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
-  const record = createRunRecord({ config, database: { database_id: 'db-branch-owner', database_url: config.notion_database_url }, runId: 'run-current', workload, paths: createRunPaths(config, 'run-current') });
-  record.binding.base_branch = 'base/run-current';
-  record.binding.base_commit = 'a'.repeat(40);
-  record.timing.symphony.started_at = new Date().toISOString();
-  record.artifacts.owned_deliveries = [{ pr_url: 'https://github.com/owner/repo/pull/7', branch: 'codex/PLAN-FIXTURE', head: 'b'.repeat(40) }];
-  const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
-  const store = { async save() {} };
-  const runtime = { async stopConfiguredOperatorProject() { return { stopped: true }; }, async verifyRuntimeStopped() { return { stopped: true }; }, async removeWorkspaceRoot(path) { return { path, removed: true }; } };
-  const deletedBranches = [];
-  const git = {
-    async listRemoteBranchRefs() { return {}; },
-    async deleteRemoteBranch(branch, options) { deletedBranches.push({ branch, options }); return { branch, deleted: true }; }
-  };
-  const evidence = {
-    async collectSnapshot() {
-      return {
-        observed_at: new Date().toISOString(),
-        notion: { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' },
-        github: { delivery_prs: [{ url: 'https://github.com/owner/repo/pull/7', baseRefName: 'base/run-current', headRefName: 'codex/PLAN-FIXTURE', headRefOid: 'c'.repeat(40) }] },
-        symphony: {}, git: { remote_refs: {} }, chatgpt_shot: null, errors: []
-      };
-    }
-  };
-  const unavailableTransitions = [];
-  const reservationAuthority = {
-    async updateRunLifecycleForReservation() { return { committed: true }; },
-    async markUnavailable(databaseId, runId, reason) { unavailableTransitions.push({ databaseId, runId, reason }); return { committed: true, recovery_marker: 'marker-1' }; }
-  };
-  const github = { findRunOwnedDeliveryBranches() { return ['codex/PLAN-FIXTURE']; } };
-  const finalizer = new RunFinalizer({ config, runRecordStore: store, notionClient: notion, operatorClient: runtime, gitClient: git, githubClient: github, runEvidenceCollector: evidence, reservationAuthority });
-
-  const result = await finalizer.finalizeRun({ record, reason: 'hard_cap_reached', task: await notion.readTask(), baseBranch: 'base/run-current', workspaceRoot: directory + '/workspaces' });
-
-  assert.equal(deletedBranches.some(({ branch }) => branch === 'codex/PLAN-FIXTURE'), false);
-  assert.ok(result.finalization.unresolved.includes('delete_delivery_branch:codex/PLAN-FIXTURE'));
-  assert.equal(result.finalization.complete, false);
-  assert.equal(result.database_reservation.status, 'unavailable');
-  assert.equal(unavailableTransitions.length, 1);
 });
 
 test('branch isolation distinguishes external changes from unresolved new refs', async () => {

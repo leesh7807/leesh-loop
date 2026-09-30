@@ -132,10 +132,10 @@ Before implementation, fetch and resolve the configured remote base branch named
 the target from the checkout, a default branch, or `main`.
 
 Each E2E run uses a base branch named `base/<run-id>`. Different databases can publish the same
-deterministic task Identifier, so a task branch must include this run identity: use
-`e2e/<run-id>/<task-identifier>`, where `<run-id>` is the final component of
-`SYMPHONY_GITHUB_BASE_BRANCH`. Preserve that branch through continuation and Merging. Do not create a
-delivery branch based on the task Identifier alone or reuse another run's branch.
+deterministic task Identifier, so a task branch must start with the run-specific prefix supplied here:
+`{{E2E_DELIVERY_BRANCH_PREFIX}}<task-identifier>`. Preserve that branch through continuation and
+Merging. Do not create a delivery branch based on the task Identifier alone or reuse another run's
+branch.
 
 Work against the repository according to the Accepted Plan and repository guidance. Keep plans under
 `docs/plans/active/` during execution and move the delivered plan to `docs/plans/completed/` only

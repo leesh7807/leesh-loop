@@ -1,26 +1,7 @@
 import { RunTimingRecorder, runWithTimeout, currentTimeIso } from '../run-timing.mjs';
 import { TERMINAL_STATES } from '../lifecycle/lifecycle-interpreter.mjs';
 import { addFailure, recordFinalizationAction } from '../../model/run-record-store.mjs';
-
-function expectedOwnedBranchCommit(record, branch, baseBranch) {
-  if (branch === baseBranch) {
-    return record.artifacts?.remote_base_commit || record.binding?.base_commit || null;
-  }
-  const observedPullRequests = (record.evidence?.snapshots || [])
-    .flatMap(snapshot => snapshot.github?.delivery_prs || [])
-    .filter(pullRequest => pullRequest.headRefName === branch && pullRequest.baseRefName === baseBranch);
-  const latestObserved = observedPullRequests.at(-1);
-  const ownedDelivery = [...(record.artifacts?.owned_deliveries || [])].reverse()
-    .find(delivery => delivery.branch === branch);
-  return latestObserved?.headRefOid || ownedDelivery?.head || null;
-}
-
-function assertRunScopedDeliveryBranch(record, branch) {
-  const runId = record.run_id;
-  if (!runId || !branch.startsWith(`e2e/${runId}/`)) {
-    throw new Error(`delivery branch ${branch} is not namespaced to E2E run ${runId || 'unknown'}`);
-  }
-}
+import { deleteRunOwnedDeliveryBranch } from './run-owned-delivery-branch.mjs';
 
 export class RunFinalizer {
   constructor({ config, runRecordStore, notionClient, operatorClient, gitClient, githubClient, runEvidenceCollector, runTimingRecorder, reservationAuthority }) {
@@ -137,16 +118,14 @@ export class RunFinalizer {
       const branches = new Set(ownedBranches);
       for (const branch of branches) {
         await this.runFinalizationAction(record, `delete_delivery_branch:${branch}`, async signal => {
-          assertRunScopedDeliveryBranch(record, branch);
-          const expectedCommit = expectedOwnedBranchCommit(record, branch, baseBranch);
-          await this.gitClient.deleteRemoteBranch(branch, { expectedCommit, timeout: this.config.finalization_timeout_ms, signal });
+          const result = await deleteRunOwnedDeliveryBranch({ record, branch, baseBranch, gitClient: this.gitClient, timeout: this.config.finalization_timeout_ms, signal });
           record.cleanup.branches_deleted.push(branch);
-          return { branch, expected_commit: expectedCommit };
+          return result;
         });
       }
       if (baseBranch) {
         await this.runFinalizationAction(record, `delete_run_scoped_base:${baseBranch}`, async signal => {
-          const expectedCommit = expectedOwnedBranchCommit(record, baseBranch, baseBranch);
+          const expectedCommit = record.artifacts?.remote_base_commit || record.binding?.base_commit || null;
           await this.gitClient.deleteRemoteBranch(baseBranch, { expectedCommit, timeout: this.config.finalization_timeout_ms, signal });
           record.cleanup.branches_deleted.push(baseBranch);
           return { branch: baseBranch, expected_commit: expectedCommit };
