@@ -3,7 +3,7 @@
   "run_id": "7aa889f5-a899-48ab-941e-9135c79ab501",
   "lifecycle": {
     "run_id": "7aa889f5-a899-48ab-941e-9135c79ab501",
-    "status": "active",
+    "status": "failed",
     "origin": "worker-originated",
     "started_at": "2026-09-30T05:25:21.910Z",
     "run_process": {
@@ -21,7 +21,7 @@
     },
     "child_runtime": {
       "runtime_id": "527d7d16-0dfc-4345-a014-99293f799b35",
-      "status": "active",
+      "status": "stopped",
       "dashboard": "http://127.0.0.1:34331",
       "process_identity": {
         "pid": 317288,
@@ -32,12 +32,16 @@
       },
       "state_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/7aa889f5-a899-48ab-941e-9135c79ab501/operator-state/runtime.json"
     },
-    "updated_at": "2026-09-30T05:26:52.524Z",
+    "updated_at": "2026-09-30T05:28:09.912Z",
     "selected_database_id": "3ea8a265-8625-8047-81e0-ead9c231fc10",
     "database_url": "https://app.notion.com/p/studyleesh/3ea8a2658625804781e0ead9c231fc10?v=d3a8a26586258361bab908ea713fdf9b",
-    "child_runtime_id": "527d7d16-0dfc-4345-a014-99293f799b35"
+    "child_runtime_id": "527d7d16-0dfc-4345-a014-99293f799b35",
+    "ended_at": "2026-09-30T05:28:06.435Z",
+    "finalization_complete": true,
+    "unresolved": [],
+    "cleanup_unresolved": []
   },
-  "event_sequence": 4,
-  "previous_event_sha": "2c041fcb2160fc85513fcb2d52a97950f18cdd8c",
-  "recorded_at": "2026-09-30T05:26:54.842Z"
+  "event_sequence": 5,
+  "previous_event_sha": "3cce445ec3011bedf2c310c0c6dd6e79f7e9111a",
+  "recorded_at": "2026-09-30T05:28:12.260Z"
 }
