@@ -6,10 +6,12 @@ relative to the Project file, or start with `~` for the current user's home dire
 read a database URL from Project JSON. This repository's Project sets the Git target with
 `github_repository_url` and `github_base_branch`; Operator uses those values together.
 
-The optional `workspace_files` list uses the same path rules. A configured file is copied by basename
-to each newly created Symphony workspace. In particular, `../.env` refers to the repository-root
-`.env` when the Project file is under `operator/`; the file contents are copied into new worker
-workspaces. The repository `.gitignore` excludes `.env` and `.env.*`, except `.env.example`.
+### `workspace_files`
+
+Operator resolves each configured host-file path to an absolute path, then copies the file by
+basename into the root of each newly created workspace. If the destination already exists, the copy
+fails without overwriting it. Continuations preserve their current workspace and do not copy the
+files again.
 
 Projects may set either or both of these optional values:
 
