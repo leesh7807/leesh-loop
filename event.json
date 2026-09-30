@@ -22,9 +22,11 @@
     "child_runtime": {
       "status": "not_started"
     },
-    "updated_at": "2026-09-30T07:59:53.729Z"
+    "updated_at": "2026-09-30T08:01:05.279Z",
+    "selected_database_id": "3ea8a265-8625-805b-b64c-d3068d1794ef",
+    "database_url": "https://app.notion.com/p/studyleesh/3ea8a2658625805bb64cd3068d1794ef?v=4a78a265862583f0b4718836810b2beb"
   },
-  "event_sequence": 1,
-  "previous_event_sha": null,
-  "recorded_at": "2026-09-30T07:59:54.254Z"
+  "event_sequence": 2,
+  "previous_event_sha": "7c4851c38dccb2664222a7a78255a8456ea327c7",
+  "recorded_at": "2026-09-30T08:01:07.870Z"
 }
