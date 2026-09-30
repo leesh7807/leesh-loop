@@ -110,7 +110,9 @@ The repository state vocabulary is:
 
 Every dispatch—initial, continuation, retry, and either return from Human Review—begins by reading current task State and Accepted Plan, resolving the deterministic Repository Plan, reading `notion_task_read_workpad`, inspecting the actual workspace/Git state, and reconciling the latest relevant markers. State is lifecycle authority; the workspace is concrete repository truth; the Workpad is live execution context; the Repository Plan is the durable execution contract. If Workpad and workspace differ, reconcile from the workspace and write a concise Korean current-state entry when that materially clarifies work. Do not repeat completed work merely because a worker restarted.
 
-Write the Workpad promptly at meaningful milestones: a material approach choice/change, substantial implementation, material finding/constraint, representative validation, review result/disposition/fix, blocker, remaining work, Human Review preparation/entry, Review Input consumption, Rework reset, or Merging result. Keep it concise and concrete in Korean so the completed work, decisions, verification, current state, blockers, and next work are clear before lifecycle details. Avoid repeating facts or narrating commands. Preserve required markers and exact identities as protocol metadata alongside ordinary context; do not let marker names or workflow explanations replace the task record, and do not add a fixed format. Update the Repository Plan only for material contract changes, never routine execution history.
+If reconstruction shows that the previous execution yielded to a `Blocked By` dependency and the same active task is now dispatched again with its preserved workspace, treat it as a blocked-work continuation. Before continuing implementation, fetch the latest configured remote base and rebase the preserved task branch onto it; resolve rebase conflicts under the same semantic authority boundary as Merging conflict resolution.
+
+Write the Workpad promptly at meaningful milestones: a material approach choice/change, substantial implementation, material finding/constraint, representative validation, review result/disposition/fix, blocker, remaining work, Human Review preparation/entry, Review Input consumption, Rework reset, or Merging result. Keep it concise and concrete in Korean so the completed work, decisions, verification, current state, blockers, and next work are clear before lifecycle details. Lead with the work, result, decision, or remaining task; use files, functions, types, and internal abstractions as supporting detail when useful. Avoid repeating facts or narrating commands. Preserve required markers and exact identities as protocol metadata alongside ordinary context; do not let marker names or workflow explanations replace the task record, and do not add a fixed format. Update the Repository Plan only for material contract changes, never routine execution history.
 
 Use only these lifecycle entries, retaining ordinary context around them:
 
@@ -170,7 +172,7 @@ The Operator owns branch bootstrap before dispatch: it validates the configured 
 
 Treat code review followed by structure review as one delivery-review cycle for the same exact PR and HEAD. A raw `PASS` is not required: each finding must be dispositioned under the existing evidence-based validity rules, with no valid finding left. If an accepted fix changes HEAD, restart the cycle with code review on the new HEAD. Prepare `Human Review` with `reason: review` only after both reviews are complete for the same exact PR and HEAD; if a review cannot complete, use the existing blocker handoff.
 
-After implementation and ordinary repository verification, obtain the current PR URL and `git rev-parse HEAD`, then submit this request through `chatgpt-shot submit "<prompt>"`. Treat the command's stdout as the Review Job ID, not as the review Result.
+After implementation and ordinary repository verification, obtain the current PR URL and `git rev-parse HEAD`, then run `chatgpt-shot submit "<prompt>"`. The command may take up to 3 minutes while waiting for acceptance; let it complete and use an execution timeout longer than 3 minutes. On success, stdout is the Review Job ID, not the review Result.
 
 ```text
 PR <PR_URL>의 HEAD <HEAD_SHA>를 코드 리뷰하라.
@@ -234,7 +236,7 @@ Job ID: <UUID>
 * `pending`: wait 30 seconds and poll the same Job again.
 * `in_progress`: wait 30 seconds and poll the same Job again.
 * `completed`: use the Job's `result` as the independent review Result.
-* `failed`: use the existing independent-review blocker handoff described below.
+* `failed`: record the Job Error and current implementation/verification state in the Korean Workpad, move the task to `Human Review` with `reason: blocker`, confirm authoritative readback, and stop.
 
 Do not submit another Review Job for the same review target while the current Job is `pending` or `in_progress`.
 
@@ -242,9 +244,7 @@ Give the request enough Accepted Plan and changed-result context to judge the ob
 
 Treat findings as review input, not automatic edit commands. Independently validate each finding against the current HEAD and its execution path. Fix only a material actionable finding with concrete evidence and observable impact; rerun affected verification, commit/push, and submit a new Review Job for the new HEAD. Record a rejection reason without editing for findings that are not valid. If a completed Review Job targeted the wrong PR, HEAD, or other review identity, correct the review target and submit a new Review Job. Treat this as a new review request, not as retry or recovery of the completed Job. Repeat until the Result is `PASS`, or all findings are resolved/rejected and no accepted fix produced a new HEAD.
 
-If the Review Job reaches `failed`, it has not passed this gate. Record the Job Error and current implementation/verification state in the Korean Workpad, move the task to `Human Review` with `reason: blocker`, confirm authoritative readback, and stop.
-
-If `chatgpt-shot submit` fails before returning a Job ID, use the existing submission-failure blocker handoff: record the failure reason and current implementation/verification state in the Korean Workpad, move the task to `Human Review` with `reason: blocker`, confirm authoritative readback, and stop. Do not create an automatic recovery or failure-code retry policy.
+If `chatgpt-shot submit` fails before returning a Job ID, record the failure and current implementation/verification state in the Korean Workpad, move the task to `Human Review` with `reason: blocker`, confirm authoritative readback, and stop.
 
 After the independent code review gate is settled, run one structural review against the same delivered PR and exact HEAD before moving the task to `Human Review`. Use the same `chatgpt-shot` submission, polling, result-recording, and failure-handling contract defined above.
 
@@ -325,7 +325,7 @@ Reuse the independent review flow above for submission, polling, terminal result
 
 Record the Candidate Plan identity, Review Job ID and result, and finding dispositions in ordinary Workpad context. Do not copy the prompt transcript or label a review as targeting a PR or HEAD when none was submitted.
 
-After review, publish the complete Candidate Plan with `notion_task_publish_plan` and retain its returned canonical `identifier` and `page_id`. Before calling `notion_task_add_blocked_by` with that `page_id`, record the review disposition and published identity in the Workpad and finish other needed recording and cleanup. A successful relation update is the current execution's last normal lifecycle mutation; do not append further lifecycle or Workpad entries after it. If publication succeeds but relation update fails, record the published task and incomplete relation, then use the existing blocker handoff; do not report the follow-up as fully linked.
+After review, publish the complete Candidate Plan with `notion_task_publish_plan` and retain its returned canonical `identifier` and `page_id`. Before calling `notion_task_add_blocked_by` with that `page_id`, record the review disposition, published identity, and that the current task is yielding to that blocker in the Workpad, then finish other needed recording and cleanup. A successful relation update is the current execution's last normal lifecycle mutation; do not append further lifecycle or Workpad entries after it. If publication succeeds but relation update fails, record the published task and incomplete relation, then use the existing blocker handoff; do not report the follow-up as fully linked.
 
 If the task returns to `In Progress` or `Rework`, follow the existing continuation/reset contract and repeat the required verification and review cycle before returning to `Human Review`.
 
