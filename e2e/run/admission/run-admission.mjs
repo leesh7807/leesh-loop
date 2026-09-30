@@ -187,33 +187,45 @@ export class RunAdmission {
   async recoverUnavailable(candidate, state) {
     const snapshot = await this.reservationAuthority.beginRecovery(candidate.database_id);
     if (!snapshot) return { database_id: candidate.database_id, status: state.status, result: 'state changed before recovery began' };
-    const reservation = snapshot.reservation;
+    const previousRunId = snapshot.unavailable?.run_id || snapshot.reservation?.run_id || null;
     let lifecycle = null;
+    let lifecycleBoundElsewhere = false;
     try {
-      if (reservation?.run_id) {
-        lifecycle = await this.reservationAuthority.readRunLifecycle(reservation.run_id);
-        const child = lifecycle?.child_runtime || { status: 'unknown' };
-        const childState = this.operatorClient?.inspectChildRuntimeLiveness
-          ? await this.operatorClient.inspectChildRuntimeLiveness(child)
-          : child.status === 'not_started' || child.status === 'stopped'
-            ? 'dead'
-            : await inspectProcessIdentity(child.process_identity);
-        const runState = await inspectProcessIdentity(lifecycle?.run_process);
-        const runDead = TERMINAL_RUN_STATES.has(lifecycle?.status) || runState === 'dead';
-        if (!lifecycle || !runDead || !['not_started', 'stopped'].includes(child.status) && childState !== 'dead') {
-          const evidence = { lifecycle_status: lifecycle?.status || 'unknown', run_process_state: runState, child_runtime_status: child.status, child_process_state: childState };
-          const result = await this.reservationAuthority.recordRecoveryFailure(snapshot, { reason: 'previous E2E run or child runtime is active or unverified', lifecycle: evidence });
-          return { database_id: candidate.database_id, status: DATABASE_STATES.UNAVAILABLE, recovery_marker: snapshot.recovery_marker, result: 'still unavailable', evidence: result.state?.unavailable || evidence };
+      if (previousRunId) {
+        lifecycle = await this.reservationAuthority.readRunLifecycle(previousRunId);
+        if (!lifecycle || lifecycle.run_id !== previousRunId) throw new Error('previous E2E run lifecycle is missing or mismatched');
+        lifecycleBoundElsewhere = typeof lifecycle.selected_database_id === 'string'
+          && lifecycle.selected_database_id !== candidate.database_id;
+        if (!lifecycleBoundElsewhere) {
+          const child = lifecycle.child_runtime || { status: 'unknown' };
+          const childState = this.operatorClient?.inspectChildRuntimeLiveness
+            ? await this.operatorClient.inspectChildRuntimeLiveness(child)
+            : child.status === 'not_started' || child.status === 'stopped'
+              ? 'dead'
+              : await inspectProcessIdentity(child.process_identity);
+          const runState = await inspectProcessIdentity(lifecycle.run_process);
+          const runDead = TERMINAL_RUN_STATES.has(lifecycle.status) || runState === 'dead';
+          if (!runDead || !['not_started', 'stopped'].includes(child.status) && childState !== 'dead') {
+            const evidence = { lifecycle_status: lifecycle.status, run_process_state: runState, child_runtime_status: child.status, child_process_state: childState };
+            const result = await this.reservationAuthority.recordRecoveryFailure(snapshot, { reason: 'previous E2E run or child runtime is active or unverified', lifecycle: evidence });
+            return { database_id: candidate.database_id, status: DATABASE_STATES.UNAVAILABLE, recovery_marker: snapshot.recovery_marker, result: 'still unavailable', evidence: result.state?.unavailable || evidence };
+          }
         }
       }
 
-      const cleanup = await this.reconcileStaleTasks(candidate, snapshot, lifecycle);
+      const lifecycleForDatabase = lifecycleBoundElsewhere ? null : lifecycle;
+      const cleanup = await this.reconcileStaleTasks(candidate, snapshot, lifecycleForDatabase);
       const evidence = {
         stable_database_id: candidate.database_id,
         recovery_marker: snapshot.recovery_marker,
-        run_id: reservation?.run_id || null,
-        child_runtime_id: lifecycle?.child_runtime?.runtime_id || null,
-        lifecycle: 'run and child runtime are not active; process identity readback completed',
+        run_id: previousRunId,
+        run_lifecycle_status: lifecycle?.status || null,
+        run_lifecycle_database_id: lifecycle?.selected_database_id || null,
+        run_lifecycle_bound_to_database: Boolean(lifecycle && lifecycle.selected_database_id === candidate.database_id),
+        child_runtime_id: lifecycleForDatabase?.child_runtime?.runtime_id || null,
+        lifecycle: lifecycleBoundElsewhere
+          ? 'previous run lifecycle is bound to another database; this database has no active child runtime'
+          : 'run and child runtime are not active; process identity readback completed',
         cleanup
       };
       const result = await this.reservationAuthority.completeRecovery(snapshot, evidence);
@@ -246,7 +258,7 @@ export class RunAdmission {
         'action: stale task cancelled by E2E database recovery',
         `cleanup_time: ${cleanedAt}`,
         `recovery_identity: ${recovery.recovery_marker}`,
-        `previous_run_id: ${recovery.reservation?.run_id || 'unknown'}`,
+        `previous_run_id: ${recovery.unavailable?.run_id || recovery.reservation?.run_id || 'unknown'}`,
         `previous_child_runtime_id: ${lifecycle?.child_runtime?.runtime_id || 'unknown'}`
       ].join('\n');
       if (!String(task.workpad || '').includes(provenance)) await this.notionClient.appendWorkpad(task.id, provenance);

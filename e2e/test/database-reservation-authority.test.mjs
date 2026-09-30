@@ -50,6 +50,8 @@ test('unavailable transition never exposes available and recovery is bound to it
   let current = await authority.read(databaseId);
   assert.equal(current.status, DATABASE_STATES.UNAVAILABLE);
   assert.equal(current.recovery_marker, unavailable.recovery_marker);
+  assert.equal(current.reservation, null);
+  assert.equal(current.unavailable.run_id, 'run-a');
 
   const oldRecovery = await authority.beginRecovery(databaseId);
   const recovered = await authority.completeRecovery(oldRecovery, { readback: true, cleanup: [] });
@@ -65,6 +67,8 @@ test('unavailable transition never exposes available and recovery is bound to it
   current = await authority.read(databaseId);
   assert.equal(current.status, DATABASE_STATES.UNAVAILABLE);
   assert.equal(current.recovery_marker, secondUnavailable.recovery_marker);
+  assert.equal(current.reservation, null);
+  assert.equal(current.unavailable.run_id, 'run-b');
   const history = await authority.recoveryHistory(databaseId);
   assert.ok(history.some(event => event.state?.last_transition?.type === 'stale_recovery_rejected'));
   assert.equal(history.at(-1).state.recovery_marker, secondUnavailable.recovery_marker);

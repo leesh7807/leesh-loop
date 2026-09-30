@@ -167,6 +167,62 @@ test('failed recovery remains unavailable while another clean database admits a 
   assert.equal((await authority.read(databaseB.database_id)).reservation.run_id, 'new-run');
 });
 
+test('recovery releases an unavailable candidate when its former run is now bound to another active database', async () => {
+  const authority = new DatabaseReservationAuthority({ eventStore: new MemoryEventStore() });
+  const current = await currentProcessIdentity();
+  const residue = { id: 'residue-a', identifier: 'T-RESIDUE-A', state: 'Ready', workpad: '' };
+  const mutationOrder = [];
+  const notionClient = {
+    async listTasks(url) {
+      return url === databaseA.database_url ? [{ id: residue.id, identifier: residue.identifier, state: residue.state }] : [];
+    },
+    async readTask(url, id) {
+      assert.equal(url, databaseA.database_url);
+      assert.equal(id, residue.id);
+      return structuredClone(residue);
+    },
+    async appendWorkpad(id, text) {
+      mutationOrder.push(`workpad:${id}`);
+      residue.workpad += `${residue.workpad.endsWith('\n') ? '' : '\n'}${text}\n`;
+    },
+    async updateTaskState(url, id, state) {
+      mutationOrder.push(`state:${id}`);
+      assert.equal(url, databaseA.database_url);
+      residue.state = state;
+      return structuredClone(residue);
+    }
+  };
+  const admission = createAdmission({ authority, pool: [databaseA, databaseB], notionClient });
+
+  const firstRun = await admission.checkRunAdmission({ runId: 'run-on-database-b', runProcess: current, origin: 'direct' });
+  assert.equal(firstRun.admitted, true);
+  assert.equal(firstRun.database.database_id, databaseB.database_id);
+  assert.equal((await authority.read(databaseA.database_id)).status, DATABASE_STATES.UNAVAILABLE);
+  assert.equal((await authority.read(databaseA.database_id)).reservation, null);
+  assert.equal((await authority.read(databaseA.database_id)).unavailable.run_id, firstRun.run_id);
+  await authority.updateRunLifecycleForReservation(databaseB.database_id, firstRun.run_id, {
+    child_runtime_id: 'runtime-b',
+    child_runtime: { status: 'active', runtime_id: 'runtime-b', process_identity: current }
+  });
+
+  const recovery = await admission.recoveryPass();
+  assert.equal(recovery.find(item => item.database_id === databaseA.database_id).result, 'recovered');
+  const recoveredDatabase = await authority.read(databaseA.database_id);
+  assert.equal(recoveredDatabase.status, DATABASE_STATES.AVAILABLE);
+  assert.equal(recoveredDatabase.last_transition.evidence.run_lifecycle_database_id, databaseB.database_id);
+  assert.equal(recoveredDatabase.last_transition.evidence.run_lifecycle_bound_to_database, false);
+  assert.equal((await authority.read(databaseB.database_id)).reservation.run_id, firstRun.run_id);
+  assert.equal(residue.state, 'Cancelled');
+  assert.match(residue.workpad, /previous_child_runtime_id: unknown/);
+  assert.ok(mutationOrder.indexOf('workpad:residue-a') < mutationOrder.indexOf('state:residue-a'));
+
+  const secondRun = await admission.checkRunAdmission({ runId: 'next-run', runProcess: current, origin: 'worker-originated' });
+  assert.equal(secondRun.admitted, true);
+  assert.equal(secondRun.database.database_id, databaseA.database_id);
+  assert.equal((await authority.read(databaseA.database_id)).reservation.run_id, 'next-run');
+  assert.equal((await authority.read(databaseB.database_id)).reservation.run_id, firstRun.run_id);
+});
+
 test('capacity contention ends as resource unavailable admission without database task reads', async () => {
   const authority = new DatabaseReservationAuthority({ eventStore: new MemoryEventStore() });
   const current = await currentProcessIdentity();

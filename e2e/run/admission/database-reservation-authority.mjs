@@ -100,8 +100,8 @@ export class DatabaseReservationAuthority {
     const current = await this.read(databaseId);
     if (current.status !== DATABASE_STATES.IN_USE || current.reservation?.run_id !== runId) return { committed: false, state: current };
     const marker = this.identity();
-    const unavailable = { marker, at: this.now(), reason, evidence };
-    const result = await this.commit(current, { ...current, status: DATABASE_STATES.UNAVAILABLE, recovery_marker: marker, unavailable }, 'in_use_to_unavailable', { run_id: runId, recovery_marker: marker, reason, evidence });
+    const unavailable = { marker, at: this.now(), reason, run_id: runId, evidence };
+    const result = await this.commit(current, { ...current, status: DATABASE_STATES.UNAVAILABLE, reservation: null, recovery_marker: marker, unavailable }, 'in_use_to_unavailable', { run_id: runId, recovery_marker: marker, reason, evidence });
     return result.committed ? { ...result, recovery_marker: marker } : result;
   }
 
@@ -110,8 +110,9 @@ export class DatabaseReservationAuthority {
     if (current.status !== DATABASE_STATES.IN_USE || current.reservation?.run_id !== expected.reservation?.run_id || current.sha !== expected.sha) return { committed: false, state: current };
     const marker = this.identity();
     const reason = 'previous E2E run and child runtime are authoritatively inactive';
-    const unavailable = { marker, at: this.now(), reason, evidence };
-    const result = await this.commit(current, { ...current, status: DATABASE_STATES.UNAVAILABLE, recovery_marker: marker, unavailable }, 'dead_run_to_unavailable', { run_id: expected.reservation.run_id, recovery_marker: marker, reason, evidence });
+    const runId = expected.reservation.run_id;
+    const unavailable = { marker, at: this.now(), reason, run_id: runId, evidence };
+    const result = await this.commit(current, { ...current, status: DATABASE_STATES.UNAVAILABLE, reservation: null, recovery_marker: marker, unavailable }, 'dead_run_to_unavailable', { run_id: runId, recovery_marker: marker, reason, evidence });
     return result.committed ? { ...result, recovery_marker: marker } : result;
   }
 
