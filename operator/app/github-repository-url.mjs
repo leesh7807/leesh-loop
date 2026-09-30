@@ -9,7 +9,7 @@ export function githubRepositoryTransport(remoteUrl) {
     try { parsed = new URL(remoteUrl); } catch { throw new Error('the configured Git upstream remote URL is invalid'); }
     if (parsed.hostname !== 'github.com') throw new Error('the existing Operator Project contract requires a GitHub repository upstream URL');
     if (parsed.username || parsed.password) throw new Error('the configured upstream URL contains credentials; remove them before running init');
-    if (parsed.search || parsed.hash || parsed.pathname.split('/').filter(Boolean).length < 2) {
+    if (parsed.search || parsed.hash || parsed.pathname.split('/').filter(Boolean).length !== 2) {
       throw new Error('the configured Git upstream URL does not identify a GitHub repository');
     }
     return 'https';

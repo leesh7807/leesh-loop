@@ -234,5 +234,6 @@ test('one GitHub repository URL policy accepts the supported HTTPS and SSH trans
   assert.equal(githubRepositoryTransport('ssh://git@github.com/example/repository.git'), 'ssh');
   assert.throws(() => githubRepositoryTransport('https://user:token@github.com/example/repository.git'), /contains credentials/);
   assert.throws(() => githubRepositoryTransport('https://gitlab.com/example/repository.git'), /requires a GitHub repository/);
+  assert.throws(() => githubRepositoryTransport('https://github.com/example/repository/tree/main'), /does not identify a GitHub repository/);
   assert.throws(() => githubRepositoryTransport('git@github.com:example'), /requires an HTTPS or SSH GitHub upstream URL/);
 });
