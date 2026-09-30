@@ -59,6 +59,35 @@ test('incomplete required cleanup atomically makes the current database unavaila
   assert.equal(record.status, 'failed');
 });
 
+test('authority read failure still attempts the current run conditional unavailable transition', async () => {
+  const events = [];
+  let unavailableEvidence;
+  const reservationAuthority = {
+    async updateRunLifecycleForReservation() { events.push('update_lifecycle'); throw new Error('lifecycle update unavailable'); },
+    async read() { events.push('read'); throw new Error('reservation read unavailable'); },
+    async markUnavailable(_databaseId, _runId, _reason, evidence) { events.push('mark_unavailable'); unavailableEvidence = evidence; return { committed: true, recovery_marker: 'marker-read-failure' }; },
+    async writeRunLifecycle() { events.push('write_failed_lifecycle'); }
+  };
+  const finalizer = new RunFinalizer({ config: {}, reservationAuthority });
+  const record = {
+    run_id: 'run-read-failure',
+    binding: { database_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' },
+    runtime: { child_runtime: { runtime_id: 'child-3', status: 'stopped' } },
+    cleanup: { runtime_stopped: true, unresolved: ['finalization'] },
+    finalization: { complete: false, unresolved: ['finalization'], incomplete: true },
+    failures: [],
+    ended_at: new Date().toISOString()
+  };
+
+  await finalizer.settleDatabaseReservation(record);
+
+  assert.deepEqual(events, ['update_lifecycle', 'read', 'mark_unavailable', 'write_failed_lifecycle']);
+  assert.equal(record.database_reservation.status, 'unavailable');
+  assert.equal(record.database_reservation.recovery_marker, 'marker-read-failure');
+  assert.ok(record.failures.some(failure => failure.phase === 'database_reservation_readback'));
+  assert.equal(unavailableEvidence.reservation_state_read_error, 'reservation read unavailable');
+});
+
 test('finalization preserves an external stop failure and still converges finitely', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-finalize-'));
   const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: directory + '/runs', workspace_root: directory + '/workspaces', finalization_timeout_ms: 20, runtime_stop_timeout_ms: 20 };

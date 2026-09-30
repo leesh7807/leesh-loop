@@ -216,11 +216,22 @@ export class RunFinalizer {
       record.finalization.incomplete = true;
       addFailure(record, error, 'database_reservation_finalization');
       if (!reservationEnded) {
-        const current = await this.reservationAuthority.read(databaseId).catch(() => null);
-        if (current?.status !== 'in use' || current.reservation?.run_id !== runId) {
+        let current = null;
+        let reservationReadError = null;
+        try {
+          current = await this.reservationAuthority.read(databaseId);
+        } catch (readError) {
+          reservationReadError = String(readError?.message || readError);
+          addFailure(record, readError, 'database_reservation_readback');
+        }
+        if (current && (current.status !== 'in use' || current.reservation?.run_id !== runId)) {
           reservationEnded = true;
         } else {
-          const unavailable = await this.reservationAuthority.markUnavailable(databaseId, runId, 'current E2E run finalization or required cleanup did not complete', { ...transitionEvidence, error: String(error?.message || error) }).catch(() => ({ committed: false }));
+          const unavailable = await this.reservationAuthority.markUnavailable(databaseId, runId, 'current E2E run finalization or required cleanup did not complete', {
+            ...transitionEvidence,
+            error: String(error?.message || error),
+            ...(reservationReadError ? { reservation_state_read_error: reservationReadError } : {})
+          }).catch(() => ({ committed: false }));
           if (unavailable.committed) {
             reservationEnded = true;
             record.database_reservation = { database_id: databaseId, status: 'unavailable', recovery_marker: unavailable.recovery_marker };
