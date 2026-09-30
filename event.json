@@ -20,22 +20,24 @@
       "workspace_root": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9"
     },
     "child_runtime": {
-      "runtime_id": null,
-      "status": "starting",
-      "state_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/9c28b3c3-8cab-49f1-827b-628e991f6a11/operator-state",
-      "process_identity": null,
-      "requested_at": "2026-09-30T04:59:15.296Z",
-      "ports": {
-        "symphony_port": 45087,
-        "ui_port": 43371
-      }
+      "runtime_id": "4d8c79ee-bfd0-4f8c-96a2-b57ca50703f1",
+      "status": "active",
+      "dashboard": "http://127.0.0.1:45087",
+      "process_identity": {
+        "pid": 308306,
+        "process_start_ticks": "8297678",
+        "boot_id": "43f4e705-39f8-4dee-b528-e3c113adbd88",
+        "pid_namespace": "pid:[4026531836]",
+        "host": "lees"
+      },
+      "state_path": "/home/lees/.leesh-loop/workspaces/PLAN-E21BE9FBACE9/e2e/runs/9c28b3c3-8cab-49f1-827b-628e991f6a11/operator-state/runtime.json"
     },
-    "updated_at": "2026-09-30T04:59:18.704Z",
+    "updated_at": "2026-09-30T04:59:33.186Z",
     "selected_database_id": "3ea8a265-8625-8047-81e0-ead9c231fc10",
     "database_url": "https://app.notion.com/p/studyleesh/3ea8a2658625804781e0ead9c231fc10?v=d3a8a26586258361bab908ea713fdf9b",
-    "child_runtime_id": null
+    "child_runtime_id": "4d8c79ee-bfd0-4f8c-96a2-b57ca50703f1"
   },
-  "event_sequence": 3,
-  "previous_event_sha": "97589f16b8ab182c9e92afc7f2ed4d0cdc45b2b9",
-  "recorded_at": "2026-09-30T04:59:20.997Z"
+  "event_sequence": 4,
+  "previous_event_sha": "8a9dd30eba8a44bf3d9728ae1b9d3940ee3accdd",
+  "recorded_at": "2026-09-30T04:59:35.226Z"
 }
