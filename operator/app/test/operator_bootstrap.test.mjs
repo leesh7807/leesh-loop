@@ -174,6 +174,18 @@ test('skip external readiness reaches the child without reading or preparing ext
   assert.equal(await readFile(fixtureValue.status, 'utf8'), 'starting Symphony process\n');
 });
 
+test('GitHub SSH upstreams use SSH Git authentication while preserving the Operator readiness path', async t => {
+  const fixtureValue = await fixture(t);
+  const env = environment(fixtureValue);
+  env.SYMPHONY_GITHUB_REPOSITORY_URL = 'git@github.com:example/repository.git';
+  const result = await execFile('sh', [bootstrap, '--skip-external-readiness', '--', fixtureValue.child, 'symphony'], { env });
+  assert.match(result.stdout, /Operator core readiness passed/);
+  const log = await readFile(fixtureValue.log, 'utf8');
+  assert.match(log, /ls-remote git@github\.com:example\/repository\.git HEAD/);
+  assert.doesNotMatch(log, /credential fill/);
+  assert.match(log, /child symphony/);
+});
+
 test('external readiness remains required unless explicitly skipped', async t => {
   const fixtureValue = await fixture(t);
   await assert.rejects(

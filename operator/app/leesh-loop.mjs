@@ -412,4 +412,4 @@ if (directExecution && !['start', 'stop', 'stop-owned', 'serve', 'serve-prepared
   }).then(value => { if (value) console.log(JSON.stringify(value)); }).catch(error => { console.error(`Operator failed: ${error.message}`); process.exitCode = 1; });
 }
 
-export { acknowledgeBrowser, compatible, dispatchBrowser, effective, ensurePublisher, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, projectWindowNeedsOpening, readRequestBody, runPublisherCommand, uiIdentity, uiRuntimeSourceFiles };
+export { acknowledgeBrowser, compatible, dispatchBrowser, effective, ensureOperatorUi, ensurePublisher, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, projectWindowNeedsOpening, readRequestBody, runPublisherCommand, uiIdentity, uiRuntimeSourceFiles };

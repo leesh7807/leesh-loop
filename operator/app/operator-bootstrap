@@ -121,10 +121,8 @@ github_repository_url=${SYMPHONY_GITHUB_REPOSITORY_URL:-}
 [ -n "$github_repository_url" ] || fail 'SYMPHONY_GITHUB_REPOSITORY_URL must be configured by the Project.'
 github_base_branch=${SYMPHONY_GITHUB_BASE_BRANCH:-}
 [ -n "$github_base_branch" ] || fail 'SYMPHONY_GITHUB_BASE_BRANCH must be configured by the Project.'
-case "$github_repository_url" in
-  https://github.com/*) ;;
-  *) fail "GitHub readiness requires an HTTPS repository URL: $github_repository_url" ;;
-esac
+git_transport=$(node "$repository_root/operator/app/github-repository-url.mjs" "$github_repository_url") ||
+  fail 'SYMPHONY_GITHUB_REPOSITORY_URL must be a valid HTTPS or SSH GitHub repository URL.'
 
 curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
   --output /dev/null https://github.com/ || fail 'GitHub network reachability check failed.'
@@ -133,27 +131,28 @@ if ! GH_PROMPT_DISABLED=1 gh auth status --hostname github.com >/dev/null 2>&1; 
   fail 'GitHub authentication is absent or invalid; interactive login is not allowed during bootstrap.'
 fi
 
-github_helpers=$(git config --global --get-all credential.https://github.com.helper 2>/dev/null || true)
-if ! printf '%s\n' "$github_helpers" | grep -Fq 'gh auth git-credential'; then
-  GH_PROMPT_DISABLED=1 gh auth setup-git --hostname github.com >/dev/null 2>&1 ||
-    fail 'gh auth setup-git could not establish the HTTPS Git credential helper.'
-fi
+if [ "$git_transport" = https ]; then
+  github_helpers=$(git config --global --get-all credential.https://github.com.helper 2>/dev/null || true)
+  if ! printf '%s\n' "$github_helpers" | grep -Fq 'gh auth git-credential'; then
+    GH_PROMPT_DISABLED=1 gh auth setup-git --hostname github.com >/dev/null 2>&1 ||
+      fail 'gh auth setup-git could not establish the HTTPS Git credential helper.'
+  fi
 
-credential_response=$(printf '%s\n' 'protocol=https' 'host=github.com' '' | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null) || fail 'Git HTTPS credential helper could not provide a GitHub credential.'
-credential_username=$(printf '%s\n' "$credential_response" | sed -n 's/^username=//p' | head -n 1)
-credential_password=$(printf '%s\n' "$credential_response" | sed -n 's/^password=//p' | head -n 1)
-[ -n "$credential_username" ] && [ -n "$credential_password" ] || fail 'Git HTTPS credential helper returned no complete credential.'
+  credential_response=$(printf '%s\n' 'protocol=https' 'host=github.com' '' | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null) || fail 'Git HTTPS credential helper could not provide a GitHub credential.'
+  credential_username=$(printf '%s\n' "$credential_response" | sed -n 's/^username=//p' | head -n 1)
+  credential_password=$(printf '%s\n' "$credential_response" | sed -n 's/^password=//p' | head -n 1)
+  [ -n "$credential_username" ] && [ -n "$credential_password" ] || fail 'Git HTTPS credential helper returned no complete credential.'
 
-# A public repository can make ls-remote succeed without GitHub accepting the
-# credential selected by Git. Validate that exact helper output separately,
-# then exercise the HTTPS Git path below.
-if ! GH_HOST=github.com GH_PROMPT_DISABLED=1 GH_TOKEN="$credential_password" gh api user >/dev/null 2>&1; then
-  fail 'Git HTTPS credential helper returned a credential rejected by GitHub.'
+  # A public repository can make ls-remote succeed without GitHub accepting
+  # the credential selected by Git. Validate that exact helper output as well.
+  if ! GH_HOST=github.com GH_PROMPT_DISABLED=1 GH_TOKEN="$credential_password" gh api user >/dev/null 2>&1; then
+    fail 'Git HTTPS credential helper returned a credential rejected by GitHub.'
+  fi
+  unset credential_response credential_username credential_password github_helpers
 fi
-unset credential_response credential_username credential_password github_helpers
 
 GH_PROMPT_DISABLED=1 gh api --hostname github.com user >/dev/null 2>&1 || fail 'authenticated GitHub API probe failed.'
-GIT_TERMINAL_PROMPT=0 git -c credential.interactive=never ls-remote "$github_repository_url" HEAD >/dev/null 2>&1 || fail 'authenticated HTTPS Git probe failed.'
+GIT_TERMINAL_PROMPT=0 git -c credential.interactive=never ls-remote "$github_repository_url" HEAD >/dev/null 2>&1 || fail 'configured GitHub repository Git probe failed.'
 
 report 'ensuring configured base branch exists'
 github_base_commit=$(node "$repository_root/operator/app/git-target.mjs" "$github_repository_url" "$github_base_branch") ||
