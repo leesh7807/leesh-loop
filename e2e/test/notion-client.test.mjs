@@ -63,3 +63,31 @@ test('Notion requests stop after the bounded rate-limit retry count', async () =
   await assert.rejects(() => notion.request('POST', '/data_sources/tasks/query', {}), /failed with HTTP 429/);
   assert.equal(calls, 3);
 });
+
+test('Notion GET and read-only query retry one transient transport failure', async () => {
+  for (const [method, path, body] of [
+    ['GET', '/pages/page-1'],
+    ['POST', '/data_sources/tasks/query', {}]
+  ]) {
+    let calls = 0;
+    const notion = new NotionClient({ token: 'test-token', fetcher: async () => {
+      calls += 1;
+      if (calls === 1) throw new TypeError('fetch failed');
+      return response({ id: 'page-1', results: [], has_more: false });
+    } });
+
+    assert.deepEqual(await notion.request(method, path, body), { id: 'page-1', results: [], has_more: false });
+    assert.equal(calls, 2);
+  }
+});
+
+test('Notion writes do not retry a transient transport failure', async () => {
+  let calls = 0;
+  const notion = new NotionClient({ token: 'test-token', fetcher: async () => {
+    calls += 1;
+    throw new TypeError('fetch failed');
+  } });
+
+  await assert.rejects(() => notion.request('PATCH', '/pages/page-1', { properties: {} }), /transport failed: fetch failed/);
+  assert.equal(calls, 1);
+});

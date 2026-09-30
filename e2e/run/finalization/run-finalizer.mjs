@@ -84,6 +84,14 @@ export class RunFinalizer {
       });
     }
 
+    if (record.cleanup.runtime_stopped === true && record.runtime?.child_runtime) {
+      record.runtime.child_runtime = {
+        ...record.runtime.child_runtime,
+        status: 'stopped',
+        stopped_at: record.runtime.child_runtime.stopped_at || currentTimeIso()
+      };
+    }
+
     await this.runFinalizationAction(record, 'final_evidence_snapshot', async signal => {
       const snapshot = await this.runEvidenceCollector.collectSnapshot({ databaseUrl, identifier: record.artifacts.task_identifier, dashboard, baseBranch, workspaceRoot, signal });
       record.evidence.snapshots.push(snapshot);

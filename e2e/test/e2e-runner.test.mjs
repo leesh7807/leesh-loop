@@ -23,6 +23,7 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
     run_record_directory: root + '/e2e/runs',
     workspace_root: root + '/e2e/workspaces',
     poll_interval_ms: 1,
+    evidence_snapshot_timeout_ms: 30_000,
     finalization_timeout_ms: 100,
     runtime_start_timeout_ms: 100,
     runtime_stop_timeout_ms: 100,
@@ -557,4 +558,47 @@ test('Done rejects a configured base advanced after the approved merge', async (
   const result = await new E2ERunner({ ...harness, random: () => 0, clock: () => current++ }).completionVerifier.verifyDoneDelivery(record, 'e2e-base');
   assert.equal(result.ok, false);
   assert.match(result.reason, /contains changes after/);
+});
+
+test('a timed-out evidence snapshot is aborted and the run continues on its next poll', async () => {
+  const clock = () => Date.now();
+  const harness = fixture({ states: ['Ready', 'In Progress', 'Human Review', 'Merging', 'Done'], clock });
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-snapshot-timeout-'));
+  harness.config.run_record_directory = directory + '/runs';
+  harness.config.workspace_root = directory + '/workspaces';
+  harness.config.evidence_snapshot_timeout_ms = 5;
+  harness.catalog = validateWorkloadCatalog([{ id: 'representative', hard_cap_ms: 60_000, accepted_plan: plan }]);
+
+  const collectSnapshot = harness.runEvidenceCollector.collectSnapshot.bind(harness.runEvidenceCollector);
+  let snapshotAttempts = 0;
+  let aborted = false;
+  let polls = 0;
+  harness.runEvidenceCollector.collectSnapshot = async input => {
+    snapshotAttempts += 1;
+    if (snapshotAttempts === 1) {
+      return new Promise((resolve, reject) => {
+        input.signal.addEventListener('abort', () => {
+          aborted = true;
+          reject(input.signal.reason || new Error('snapshot aborted'));
+        }, { once: true });
+      });
+    }
+    return collectSnapshot(input);
+  };
+
+  const record = await new E2ERunner({
+    ...harness,
+    random: () => 0,
+    clock,
+    waitForPoll: async () => { polls += 1; }
+  }).runProductionE2E();
+
+  assert.equal(aborted, true);
+  assert.ok(polls > 0);
+  assert.ok(snapshotAttempts > 1);
+  assert.equal(record.evidence.snapshot_timeouts.length, 1);
+  assert.equal(record.evidence.snapshot_timeouts[0].timeout_ms, 5);
+  assert.equal(record.failures.length, 0);
+  assert.deepEqual(harness.finalized, ['production_done']);
+  assert.equal(record.finalization.complete, true);
 });

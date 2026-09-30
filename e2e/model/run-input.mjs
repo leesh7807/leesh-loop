@@ -126,6 +126,7 @@ export function resolvedRuntimeOptions(config) {
   return {
     skip_external_readiness: true,
     poll_interval_ms: config.poll_interval_ms,
+    evidence_snapshot_timeout_ms: config.evidence_snapshot_timeout_ms,
     finalization_timeout_ms: config.finalization_timeout_ms,
     runtime_start_timeout_ms: config.runtime_start_timeout_ms,
     runtime_stop_timeout_ms: config.runtime_stop_timeout_ms,

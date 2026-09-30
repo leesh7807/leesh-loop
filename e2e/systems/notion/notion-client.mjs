@@ -4,6 +4,9 @@ const API = 'https://api.notion.com/v1';
 const PLAN_PROPERTY = 'Plan';
 const PAGE_SIZE = 100;
 const RATE_LIMIT_RETRIES = 2;
+const READ_ONLY_TRANSPORT_RETRIES = 1;
+const NOTION_ATTEMPT_TIMEOUT_MS = 15_000;
+const NOTION_READ_TIMEOUT_MS = 30_000;
 
 function retryAfterMs(response, responseText) {
   const header = response.headers?.get?.('retry-after');
@@ -47,17 +50,27 @@ export class NotionClient {
   }
 
   async request(method, path, body, signal) {
-    const requestSignal = signal || AbortSignal.timeout(15_000);
-    for (let retry = 0; ; retry += 1) {
+    const readOnly = method === 'GET' || (method === 'POST' && path.split('?')[0].endsWith('/query'));
+    const requestSignal = signal || AbortSignal.timeout(readOnly ? NOTION_READ_TIMEOUT_MS : NOTION_ATTEMPT_TIMEOUT_MS);
+    let rateLimitRetries = 0;
+    let transportRetries = 0;
+    for (;;) {
+      const attemptSignal = readOnly
+        ? AbortSignal.any([requestSignal, AbortSignal.timeout(NOTION_ATTEMPT_TIMEOUT_MS)])
+        : requestSignal;
       let response;
       try {
         response = await this.fetcher(`${API}${path}`, {
           method,
           headers: { Authorization: `Bearer ${this.token}`, 'Notion-Version': '2025-09-03', 'Content-Type': 'application/json' },
           body: body === undefined ? undefined : JSON.stringify(body),
-          signal: requestSignal
+          signal: attemptSignal
         });
       } catch (error) {
+        if (readOnly && !requestSignal.aborted && transportRetries < READ_ONLY_TRANSPORT_RETRIES) {
+          transportRetries += 1;
+          continue;
+        }
         throw new Error(`Notion ${method} ${path} transport failed: ${error instanceof Error ? error.message : error}`);
       }
       if (response.ok) {
@@ -65,7 +78,8 @@ export class NotionClient {
         catch { throw new Error(`Notion ${method} ${path} returned invalid JSON`); }
       }
       const responseText = (await response.text()).slice(0, 500);
-      if (response.status === 429 && retry < RATE_LIMIT_RETRIES) {
+      if (response.status === 429 && rateLimitRetries < RATE_LIMIT_RETRIES) {
+        rateLimitRetries += 1;
         const delay = retryAfterMs(response, responseText);
         try { await waitForRetry(delay, requestSignal); }
         catch (error) { throw new Error(`Notion ${method} ${path} rate-limit retry aborted: ${error instanceof Error ? error.message : error}`); }

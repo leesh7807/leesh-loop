@@ -44,6 +44,7 @@ export function createRunRecord({ config, database, runId, workload, paths, runI
       runtime_options: runInput?.runtime_options || {
         skip_external_readiness: true,
         poll_interval_ms: config.poll_interval_ms,
+        evidence_snapshot_timeout_ms: config.evidence_snapshot_timeout_ms,
         finalization_timeout_ms: config.finalization_timeout_ms,
         runtime_start_timeout_ms: config.runtime_start_timeout_ms,
         runtime_stop_timeout_ms: config.runtime_stop_timeout_ms,
@@ -62,7 +63,7 @@ export function createRunRecord({ config, database, runId, workload, paths, runI
     artifacts: { task_id: null, task_url: null, task_identifier: null, publisher_result: null, publisher_failure: null, plan_binding: null, delivery_prs: [], delivered_head: null, delivered_head_locked: false, merged_head: null, remote_base_commit: null },
     lifecycle: { observations: [], verified_through: null, verification_gaps: [], terminal_state: null, mechanical_human_review_transition: { performed: false, observed_at: null } },
     timing: { run: { started_at: startedAt, ended_at: null, observed_duration_ms: null }, lifecycle: {}, symphony: { start_requested_at: null, started_at: null, stopped_at: null }, chatgpt_shot: { job_id: null, first_observed_at: null, last_observed_at: null, observations: [], terminal_state: null, observed_duration_ms: null } },
-    evidence: { snapshots: [], errors: [], branch_refs_before: null, branch_refs_after: null, branch_isolation: null, workspace_paths: [] },
+    evidence: { snapshots: [], snapshot_timeouts: [], errors: [], branch_refs_before: null, branch_refs_after: null, branch_isolation: null, workspace_paths: [] },
     failures: [],
     finalization: { reason: null, actor: 'e2e-harness', actions: [], complete: false, incomplete: false, unresolved: [] },
     cleanup: { task_terminalized: false, runtime_stopped: false, branches_deleted: [], workspaces_deleted: [], unresolved: [] },

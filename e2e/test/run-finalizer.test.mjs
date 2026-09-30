@@ -94,6 +94,7 @@ test('reconciliation stops a runtime whose start was durably requested before a 
   const record = createRunRecord({ config, database: { database_id: 'db-run-starting', database_url: config.notion_database_url }, runId: 'run-starting', workload, paths: createRunPaths(config, 'run-starting') });
   record.binding.base_branch = 'base/run-starting';
   record.timing.symphony.start_requested_at = new Date().toISOString();
+  record.runtime = { child_runtime: { runtime_id: 'child-starting', status: 'active', dashboard: 'http://127.0.0.1:12345' } };
   let stopCalls = 0;
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };
   const store = { async save() {} };
@@ -104,6 +105,8 @@ test('reconciliation stops a runtime whose start was durably requested before a 
   const result = await finalizer.finalizeRun({ record, reason: 'admission_reconciliation', task: await notion.readTask(), baseBranch: 'base/run-starting', workspaceRoot: directory + '/workspaces' });
   assert.equal(stopCalls, 1);
   assert.equal(result.cleanup.runtime_stopped, true);
+  assert.equal(result.runtime.child_runtime.status, 'stopped');
+  assert.ok(result.runtime.child_runtime.stopped_at);
   assert.equal(result.finalization.complete, true);
 });
 

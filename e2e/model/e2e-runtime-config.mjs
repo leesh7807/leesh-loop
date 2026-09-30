@@ -16,6 +16,7 @@ export const INITIAL_EMPTY_E2E_DATABASE_URLS = Object.freeze([
 
 const E2E_POLICY = Object.freeze({
   poll_interval_ms: 15_000,
+  evidence_snapshot_timeout_ms: 30_000,
   finalization_timeout_ms: 30_000,
   runtime_start_timeout_ms: 1_800_000,
   runtime_stop_timeout_ms: 30_000,

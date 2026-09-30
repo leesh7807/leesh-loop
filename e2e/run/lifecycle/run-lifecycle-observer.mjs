@@ -41,7 +41,22 @@ export class RunLifecycleObserver {
     const databaseUrl = record.binding?.notion_database_url;
     if (!databaseUrl) throw new Error(`E2E run ${record.run_id} has no selected database binding`);
     while (true) {
-      const snapshot = await runWithTimeout(() => this.runEvidenceCollector.collectSnapshot({ databaseUrl, identifier: record.artifacts.task_identifier, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root }), 30_000, 'E2E evidence snapshot');
+      let snapshot;
+      try {
+        snapshot = await runWithTimeout(signal => this.runEvidenceCollector.collectSnapshot({ databaseUrl, identifier: record.artifacts.task_identifier, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, signal }), this.config.evidence_snapshot_timeout_ms || 30_000, 'E2E evidence snapshot');
+      } catch (error) {
+        if (!new RegExp(`^E2E evidence snapshot timed out after ${this.config.evidence_snapshot_timeout_ms || 30_000}ms$`).test(String(error?.message || error))) throw error;
+        record.evidence.snapshot_timeouts ||= [];
+        record.evidence.snapshot_timeouts.push({ observed_at: currentTimeIso(), timeout_ms: this.config.evidence_snapshot_timeout_ms || 30_000, error: String(error.message) });
+        await this.runRecordStore.save(record);
+        if (this.clock() >= Date.parse(record.deadline_at)) {
+          record.status = 'finalizing';
+          await this.runRecordStore.save(record);
+          return this.runFinalizer.finalizeRun({ record, reason: 'hard_cap_reached', task, dashboard, baseBranch, workspaceRoot: record.paths.workspace_root, normalDone: false });
+        }
+        await this.waitForPoll(this.config.poll_interval_ms);
+        continue;
+      }
       record.evidence.snapshots.push(snapshot);
       this.runTimingRecorder.recordEvidenceSnapshot(record, snapshot);
       const observedTask = snapshot.notion ? await this.notionClient.readTask(databaseUrl, record.artifacts.task_id) : task;
