@@ -106,8 +106,9 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
   };
   const publisher = { async publishAcceptedPlan({ plan: acceptedPlan, databaseUrl }) { publishedPlan = acceptedPlan; publishedPlans.push(acceptedPlan); publishedDatabaseUrls.push(databaseUrl); return { page_id: 'page-1', url: 'https://notion/page-1', identifier: taskIdentifier, plan_identifier: derivePlanIdentifier(acceptedPlan) }; }, async prepareProductionPublisher() {} };
   const github = {
+    repository: 'owner/repo',
     async pullRequestsForBase(baseBranch) {
-      return [{ number: 4, url: deliveryUrl, baseRefName: baseBranch, headRefName: 'feature', headRefOid: deliveryHead, mergedAt: observedState === 'Done' ? new Date(clock()).toISOString() : null, mergeCommit: observedState === 'Done' ? { oid: mergeCommit } : null }];
+      return [{ number: 4, url: deliveryUrl, baseRefName: baseBranch, headRefName: 'feature', headRefOid: deliveryHead, isCrossRepository: false, headRepository: { nameWithOwner: 'owner/repo' }, mergedAt: observedState === 'Done' ? new Date(clock()).toISOString() : null, mergeCommit: observedState === 'Done' ? { oid: mergeCommit } : null }];
     },
     findRunOwnedDeliveryBranches() { return ['feature']; },
     findDeliveryPullRequest(prs, deliveredPr) { return prs.find(pr => pr.url === deliveredPr || String(pr.number) === String(deliveredPr).split('/').at(-1)); }

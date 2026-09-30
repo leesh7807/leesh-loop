@@ -68,6 +68,7 @@ test('successful reconciliation clears an earlier unresolved action', async () =
   const selectedDatabaseUrl = 'https://notion.example/selected-database';
   record.binding.notion_database_url = selectedDatabaseUrl;
   record.binding.base_branch = 'base/run-1';
+  record.binding.base_commit = 'a'.repeat(40);
   record.timing.symphony.started_at = new Date().toISOString();
   let stopCalls = 0;
   const observedDatabaseUrls = [];
@@ -93,6 +94,7 @@ test('reconciliation stops a runtime whose start was durably requested before a 
   const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
   const record = createRunRecord({ config, database: { database_id: 'db-run-starting', database_url: config.notion_database_url }, runId: 'run-starting', workload, paths: createRunPaths(config, 'run-starting') });
   record.binding.base_branch = 'base/run-starting';
+  record.binding.base_commit = 'a'.repeat(40);
   record.timing.symphony.start_requested_at = new Date().toISOString();
   record.runtime = { child_runtime: { runtime_id: 'child-starting', status: 'active', dashboard: 'http://127.0.0.1:12345' } };
   let stopCalls = 0;
@@ -116,6 +118,7 @@ test('branch isolation distinguishes external changes from unresolved new refs',
   const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
   const record = createRunRecord({ config, database: { database_id: 'db-run-refs', database_url: config.notion_database_url }, runId: 'run-refs', workload, paths: createRunPaths(config, 'run-refs') });
   record.binding.base_branch = 'base/run-refs';
+  record.binding.base_commit = 'a'.repeat(40);
   record.timing.symphony.started_at = new Date().toISOString();
   record.evidence.branch_refs_before = { 'refs/heads/main': 'a', 'refs/heads/deleted-before-run': 'd' };
   const notion = { async readTask() { return { id: 'page-1', identifier: 'PLAN-FIXTURE', state: 'Cancelled', accepted_plan: '# Fixture\n', workpad: '' }; } };

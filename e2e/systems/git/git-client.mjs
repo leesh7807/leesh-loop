@@ -57,18 +57,24 @@ export class GitClient {
     return resolved;
   }
 
-  async deleteRemoteBranch(branch, { timeout = 60_000, signal } = {}) {
+  async deleteRemoteBranch(branch, { expectedCommit, timeout = 60_000, signal } = {}) {
     assertBranch(branch);
-    const before = await this.listRemoteBranchRefs({ timeout, signal });
-    if (!before[`refs/heads/${branch}`]) return { branch, already_absent: true };
-    await this.gitCommand('git', ['push', this.repositoryUrl, '--delete', `refs/heads/${branch}`], { timeout, signal });
-    const refs = await this.listRemoteBranchRefs({ timeout, signal });
-    if (refs[`refs/heads/${branch}`]) throw new Error(`run-scoped branch ${branch} remained after deletion`);
-    return { branch, deleted: true };
+    const ref = `refs/heads/${branch}`;
+    const current = await this.readRemoteBranchCommit(branch, { timeout, signal });
+    if (!current) return { branch, already_absent: true };
+    if (!/^[0-9a-f]{40}$/i.test(expectedCommit || '')) throw new Error(`run-scoped branch ${branch} deletion requires its recorded commit`);
+    if (current.toLowerCase() !== expectedCommit.toLowerCase()) throw new Error(`run-scoped branch ${branch} changed before deletion`);
+    await this.gitCommand('git', ['push', `--force-with-lease=${ref}:${expectedCommit}`, this.repositoryUrl, '--delete', ref], { timeout, signal });
+    const after = await this.readRemoteBranchCommit(branch, { timeout, signal });
+    if (after) throw new Error(`run-scoped branch ${branch} remained after deletion`);
+    return { branch, deleted: true, expected_commit: expectedCommit };
   }
 
-  async readRemoteBranchCommit(branch) {
-    return (await this.listRemoteBranchRefs())[`refs/heads/${branch}`] || null;
+  async readRemoteBranchCommit(branch, { timeout = 30_000, signal } = {}) {
+    assertBranch(branch);
+    const ref = `refs/heads/${branch}`;
+    const { stdout } = await this.gitCommand('git', ['ls-remote', '--heads', this.repositoryUrl, ref], { timeout, signal });
+    return parseLsRemote(stdout).get(ref) || null;
   }
 
   async verifyCommitOnRemoteBranch(branch, commit) {

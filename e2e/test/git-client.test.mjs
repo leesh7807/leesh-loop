@@ -53,6 +53,18 @@ test('branch deletion preserves a ref whose commit changed after its ownership r
   assert.deepEqual(calls, [['ls-remote', '--heads', 'https://github.com/owner/repo.git', ref]]);
 });
 
+test('branch deletion confirms absence without requiring a commit for an absent ref', async () => {
+  const branch = 'e2e/task-delivery';
+  const calls = [];
+  const git = new GitClient({
+    repositoryUrl: 'https://github.com/owner/repo.git',
+    gitCommand: async (_command, args) => { calls.push(args); return { stdout: '' }; }
+  });
+
+  assert.deepEqual(await git.deleteRemoteBranch(branch), { branch, already_absent: true });
+  assert.deepEqual(calls, [['ls-remote', '--heads', 'https://github.com/owner/repo.git', `refs/heads/${branch}`]]);
+});
+
 test('compare-and-delete lease preserves a branch updated between read and delete', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-branch-lease-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

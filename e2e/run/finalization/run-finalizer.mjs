@@ -2,6 +2,19 @@ import { RunTimingRecorder, runWithTimeout, currentTimeIso } from '../run-timing
 import { TERMINAL_STATES } from '../lifecycle/lifecycle-interpreter.mjs';
 import { addFailure, recordFinalizationAction } from '../../model/run-record-store.mjs';
 
+function expectedOwnedBranchCommit(record, branch, baseBranch) {
+  if (branch === baseBranch) {
+    return record.artifacts?.remote_base_commit || record.binding?.base_commit || null;
+  }
+  const observedPullRequests = (record.evidence?.snapshots || [])
+    .flatMap(snapshot => snapshot.github?.delivery_prs || [])
+    .filter(pullRequest => pullRequest.headRefName === branch && pullRequest.baseRefName === baseBranch);
+  const latestObserved = observedPullRequests.at(-1);
+  const ownedDelivery = [...(record.artifacts?.owned_deliveries || [])].reverse()
+    .find(delivery => delivery.branch === branch);
+  return latestObserved?.headRefOid || ownedDelivery?.head || null;
+}
+
 export class RunFinalizer {
   constructor({ config, runRecordStore, notionClient, operatorClient, gitClient, githubClient, runEvidenceCollector, runTimingRecorder, reservationAuthority }) {
     this.config = config;
@@ -117,16 +130,18 @@ export class RunFinalizer {
       const branches = new Set(ownedBranches);
       for (const branch of branches) {
         await this.runFinalizationAction(record, `delete_delivery_branch:${branch}`, async signal => {
-          await this.gitClient.deleteRemoteBranch(branch, { timeout: this.config.finalization_timeout_ms, signal });
+          const expectedCommit = expectedOwnedBranchCommit(record, branch, baseBranch);
+          await this.gitClient.deleteRemoteBranch(branch, { expectedCommit, timeout: this.config.finalization_timeout_ms, signal });
           record.cleanup.branches_deleted.push(branch);
-          return { branch };
+          return { branch, expected_commit: expectedCommit };
         });
       }
       if (baseBranch) {
         await this.runFinalizationAction(record, `delete_run_scoped_base:${baseBranch}`, async signal => {
-          await this.gitClient.deleteRemoteBranch(baseBranch, { timeout: this.config.finalization_timeout_ms, signal });
+          const expectedCommit = expectedOwnedBranchCommit(record, baseBranch, baseBranch);
+          await this.gitClient.deleteRemoteBranch(baseBranch, { expectedCommit, timeout: this.config.finalization_timeout_ms, signal });
           record.cleanup.branches_deleted.push(baseBranch);
-          return { branch: baseBranch };
+          return { branch: baseBranch, expected_commit: expectedCommit };
         });
       }
       await this.runFinalizationAction(record, 'verify_remote_branch_isolation', async signal => {
