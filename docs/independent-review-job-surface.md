@@ -16,4 +16,4 @@ E2E는 결과를 run record의 `timing.chatgpt_shot`에 보존한다. `terminal_
 cd operator/e2e && node --test test/chatgpt-shot-client.test.mjs
 ```
 
-2026-09-30 실행 결과: **PASS**, 3 tests passed, 0 failed. 테스트는 terminal state와 duration 보존, 최신 실행 중 Job의 상태 사용, 무관한 workspace UUID 제외를 확인했다. 실제 외부 Review Job은 제출하지 않았다.
+2026-09-30 실행 결과: **PASS**, 3 tests passed, 0 failed. 테스트는 terminal state와 duration 보존, 최신 실행 중 Job의 상태 사용, 무관한 workspace UUID 제외를 확인하며, 이 focused unit test 자체는 실제 외부 Review Job을 제출하지 않는다.
