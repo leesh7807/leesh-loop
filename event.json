@@ -5,24 +5,21 @@
     "schema_version": 1,
     "kind": "database_reservation",
     "database_id": "3ea8a265-8625-8047-81e0-ead9c231fc10",
-    "status": "available",
-    "reservation": null,
+    "status": "in use",
+    "reservation": {
+      "run_id": "c18d22f4-1021-4019-bc6a-ec714c6e6cdf",
+      "acquired_at": "2026-09-30T05:31:41.206Z"
+    },
     "recovery_marker": null,
     "unavailable": null,
     "last_transition": {
-      "type": "in_use_to_available",
-      "at": "2026-09-30T05:28:18.778Z",
-      "run_id": "7aa889f5-a899-48ab-941e-9135c79ab501",
-      "lifecycle_status": "failed",
-      "child_runtime_id": "527d7d16-0dfc-4345-a014-99293f799b35",
-      "child_runtime_status": "stopped",
-      "finalization_complete": true,
-      "unresolved": [],
-      "cleanup_unresolved": [],
-      "ended_at": "2026-09-30T05:28:06.435Z"
+      "type": "available_to_in_use",
+      "at": "2026-09-30T05:31:41.206Z",
+      "run_id": "c18d22f4-1021-4019-bc6a-ec714c6e6cdf",
+      "origin": "worker-originated"
     }
   },
-  "event_sequence": 33,
-  "previous_event_sha": "a7262853acc1e21d3d59b848a5fa0d9c32e2bc20",
-  "recorded_at": "2026-09-30T05:28:20.863Z"
+  "event_sequence": 34,
+  "previous_event_sha": "44fb77797e7d92a30c52738c2f65f03ba8d16ef3",
+  "recorded_at": "2026-09-30T05:31:43.374Z"
 }
