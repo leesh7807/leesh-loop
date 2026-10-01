@@ -120,7 +120,7 @@ function TaskSurface({ tasks, selectedBlockers, selectionDisabled, loading, erro
           {groups.humanReview.length > 0 && taskGroup('Needs your review', groups.humanReview, 'review-work')}
           {groups.activeWork.length > 0 && taskGroup('Active work', groups.activeWork, 'active-work')}
           <details className="remaining-tasks">
-            <summary><span>Other tasks</span><span className="task-group-count" aria-label={`${otherCount} tasks`}>{otherCount}</span></summary>
+            <summary><span className="remaining-tasks-label"><span className="disclosure-indicator" aria-hidden="true" />Other tasks</span><span className="task-group-count" aria-label={`${otherCount} tasks`}>{otherCount}</span></summary>
             {groups.remainingTasks.length ? (
               <div className="task-list">
                 {groups.remainingTasks.map(task => <TaskCard key={task.taskId || task.taskUrl} task={task} selected={selectedIds.has(task.taskId)} selectionDisabled={selectionDisabled} onToggle={onToggleBlocker} />)}
