@@ -26,7 +26,7 @@ function TaskCard({ task, selected, selectionDisabled, onToggle }) {
           )}
         </div>
         <div className="task-row-controls">
-          <span className="task-state"><span className="task-state-label">State</span><strong>{task.state}</strong></span>
+          <span className="task-state" role="group" aria-label={`State: ${task.state}`}><strong>{task.state}</strong></span>
           <label className="blocker-choice">
             <input
               type="checkbox"
@@ -41,20 +41,21 @@ function TaskCard({ task, selected, selectionDisabled, onToggle }) {
       </div>
 
       <details className="task-details">
-        <summary>{task.blockedBy.length > 1 ? `All ${task.blockedBy.length} Blocked By and details` : 'Details and links'}</summary>
-        <section className="blocker-section" aria-label={`Blocked By for ${title}`}>
-          <h5>Blocked By</h5>
-          {task.blockedBy.length ? (
+        <summary>{task.blockedBy.length > 1 ? `+${task.blockedBy.length - 1} more blockers and task details` : 'More task details'}</summary>
+        {task.blockedBy.length > 1 && (
+          <section className="blocker-section" aria-label={`Other blockers for ${title}`}>
+            <h5>Other blockers</h5>
             <ul className="blocker-list">
-              {task.blockedBy.map(blocker => (
+              {task.blockedBy.slice(1).map(blocker => (
                 <li key={`${blocker.url}-${blocker.title}`}>
                   <a href={blocker.url} target="_blank" rel="noreferrer">{blocker.title}</a>
                   <span className="blocker-state">{blocker.state}</span>
                 </li>
               ))}
             </ul>
-          ) : <p className="quiet">No blockers</p>}
-        </section>
+          </section>
+        )}
+        {task.blockedBy.length === 0 && <p className="quiet blocker-section">No blockers</p>}
 
         {(task.priority !== null || task.labels.length > 0) && (
           <div className="task-metadata" aria-label="Additional task details">
@@ -64,7 +65,6 @@ function TaskCard({ task, selected, selectionDisabled, onToggle }) {
         )}
 
         <div className="task-links">
-          <a href={task.taskUrl} target="_blank" rel="noreferrer">Open task in Notion ↗</a>
           {task.planUrl && <a href={task.planUrl} target="_blank" rel="noreferrer">Open Accepted Plan ↗</a>}
         </div>
       </details>
@@ -94,7 +94,6 @@ function TaskSurface({ tasks, selectedBlockers, selectionDisabled, loading, erro
     <section className="task-surface" aria-labelledby="tasks-heading" aria-busy={loading && !refreshedAt}>
       <div className="surface-header">
         <div>
-          <p className="eyebrow">Current project work</p>
           <h2 id="tasks-heading">Tasks</h2>
         </div>
         <div className="task-surface-meta">
@@ -174,7 +173,6 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
     <details className="surface publication-surface">
       <summary className="publication-summary">
         <div>
-          <p className="eyebrow">Create project work</p>
           <h2 id="publish-heading">Publish a Plan</h2>
         </div>
         <span className="publication-hint">Open form</span>
@@ -183,13 +181,12 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
       <form onSubmit={submit}>
         <div className="plan-field">
           <label htmlFor="plan">1. Review the Plan</label>
-          <p className="field-help">The Publisher keeps the accepted Plan and task details in Notion.</p>
           <textarea id="plan" name="plan" value={plan} onChange={event => onDraftChange({ plan: event.target.value })} spellCheck="false" aria-label="Plan Markdown" disabled={publishing} />
         </div>
         <section className="publication-blockers" aria-labelledby="publication-blockers-heading">
           <div className="context-heading">
             <h3 id="publication-blockers-heading">2. Confirm Blocked By</h3>
-            <p className="field-help">Selected from the current Tasks list; included when this Plan is published.</p>
+            <p className="field-help">Selected tasks become this Plan’s Blocked By relation.</p>
           </div>
           {selectedBlockers.length ? (
             <ul className="selected-blockers">
@@ -329,13 +326,12 @@ function App() {
     <div className="page-shell">
       <header className="page-header">
         <div>
-          <p className="eyebrow">Leesh Loop · Operator</p>
           <h1>Project work</h1>
-          <p className="lede">Review current tasks and publish the next Plan in one place.</p>
         </div>
-        <nav className="related-work" aria-label="Related work">
-          <a href={config?.notionTasksUrl || '#'} target="_blank" rel="noreferrer">Notion Tasks ↗</a>
-          <a href={config?.dashboardUrl || '#'} target="_blank" rel="noreferrer">Symphony Dashboard ↗</a>
+        <nav className="related-work" aria-label="Project navigation">
+          {config?.githubRepositoryUrl && <a href={config.githubRepositoryUrl} target="_blank" rel="noreferrer">GitHub repository ↗</a>}
+          {config?.notionTasksUrl && <a href={config.notionTasksUrl} target="_blank" rel="noreferrer">Notion Tasks ↗</a>}
+          {config?.dashboardUrl && <a href={config.dashboardUrl} target="_blank" rel="noreferrer">Symphony Dashboard ↗</a>}
         </nav>
       </header>
       <main className="work-layout">
@@ -354,7 +350,6 @@ function App() {
           />
         ) : <section className="surface"><p className="empty-state">Loading Publisher configuration…</p></section>}
       </main>
-      <footer className="page-footer"><span>Task and Plan details remain in Notion.</span><span>Runtime details remain in Symphony.</span></footer>
     </div>
   );
 }

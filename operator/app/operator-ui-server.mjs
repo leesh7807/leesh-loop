@@ -82,6 +82,7 @@ export async function createOperatorUiServer({ root, config, stateDirectory, pub
         sendJson(response, 200, {
           states: publisherState.states,
           defaultState: publisherState.defaultState,
+          githubRepositoryUrl: config.github_repository_url,
           notionTasksUrl: config.notion_database_url,
           dashboardUrl: `http://127.0.0.1:${Number(config.symphony_port || 4100)}`
         });

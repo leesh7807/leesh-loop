@@ -43,7 +43,7 @@ test('task refresh errors do not own or block the independent publication route'
   let reads = 0;
   const server = await createOperatorUiServer({
     root,
-    config: { notion_database_url: 'https://www.notion.so/example', ui_port: 4310, symphony_port: 4100 },
+    config: { github_repository_url: 'https://github.com/example/project.git', notion_database_url: 'https://www.notion.so/example', ui_port: 4310, symphony_port: 4100 },
     stateDirectory: directory,
     publisherConfigPath: join(root, 'operator/notion_publisher/examples/publisher-config.json'),
     publisherState: { states: ['Backlog', 'Ready', 'Human Review'], defaultState: 'Ready' },
@@ -67,6 +67,7 @@ test('task refresh errors do not own or block the independent publication route'
   const config = await fetch(`${base}/api/v1/config`).then(response => response.json());
   assert.deepEqual(config.states, ['Backlog', 'Ready', 'Human Review']);
   assert.equal(config.defaultState, 'Ready');
+  assert.equal(config.githubRepositoryUrl, 'https://github.com/example/project.git');
   assert.equal(config.dashboardUrl, 'http://127.0.0.1:4100');
 
   const first = await fetch(`${base}/api/v1/tasks`);
