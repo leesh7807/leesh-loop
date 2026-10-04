@@ -134,6 +134,7 @@ function TaskSurface({ tasks, selectedBlockers, selectionDisabled, loading, erro
 
 function PublicationSurface({ config, plan, state, selectedBlockers, publishing, setPublishing, onDraftChange, onRemoveBlocker, onReset }) {
   const [result, setResult] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
 
   useEffect(() => {
     const currentKey = draftKey(plan, state, selectedBlockers);
@@ -170,12 +171,12 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
   }
 
   return (
-    <details className="surface publication-surface">
+    <details className="surface publication-surface" onToggle={event => setFormOpen(event.currentTarget.open)}>
       <summary className="publication-summary">
         <div>
           <h2 id="publish-heading">Publish a Plan</h2>
         </div>
-        <span className="publication-hint">Open form</span>
+        <span className="publication-hint">{formOpen ? 'Close form' : 'Open form'}</span>
       </summary>
       <div className="publication-content">
       <form onSubmit={submit}>
