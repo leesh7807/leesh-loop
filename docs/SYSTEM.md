@@ -45,6 +45,10 @@ The Notion database URL comes from `LEESH_LOOP_NOTION_DATABASE_URL`; the integra
 
 Treat `workspace_files` carefully: each configured file is copied into new worker workspaces. Do not use it for credentials or files that workers do not need. Continuations keep their existing workspace files.
 
+### Changing settings while the Loop is running
+
+An acknowledged task runtime records the effective settings that define its identity: `github_repository_url`, `github_base_branch`, `workflow_path`, `LEESH_LOOP_NOTION_DATABASE_URL`, `symphony_workspace_root`, `allow_workspace_root_inside_repository`, `workspace_files`, `codex_model`, `codex_reasoning_effort`, `skip_external_readiness`, `worker_interface_identity`, `symphony_command`, and `symphony_port`. Changing one while that runtime is running does not replace it. `npm start` reports that the Loop is running with different settings; run `npm stop`, then `npm start` to use the updated configuration. This also applies when changing either Codex override.
+
 ## Notion publication contract
 
 The Publisher writes a task to the task data source and its complete Accepted Plan to a related Plan data source.

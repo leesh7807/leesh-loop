@@ -130,7 +130,7 @@ function runtimeStopFailure(result) {
 async function reconcile(config, desired) {
   const p = paths(config); const state = await json(p.state); if (!state) return null;
   if (state.status === 'running' && await runtimeObserved(state) && compatible(state.effective, desired)) return state;
-  if (state.status === 'running' && await runtimeObserved(state) && !compatible(state.effective, desired)) throw new Error('a live acknowledged runtime has incompatible configuration; run stop explicitly');
+  if (state.status === 'running' && await runtimeObserved(state) && !compatible(state.effective, desired)) throw new Error('The Loop is already running with different settings. Run npm stop, then npm start again.');
   const stopped = await stopRuntimeAndClear(config, state);
   if (!stopped.stopped) throw new Error(runtimeStopFailure(stopped));
   return null;

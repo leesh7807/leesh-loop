@@ -175,7 +175,7 @@ test('Operator UI reuse identity follows imported modules and served Publisher/U
   assert.equal(uiIdentity({ notion_database_url: 'https://notion.example/db', ui_port: 4310, symphony_port: 4101 }).dashboard_port, 4101);
 });
 
-test('start skips desktop dispatch without recording an opening, then opens the Operator UI once when enabled', async t => {
+test('start reuses compatible runtimes, explains incompatible settings, and opens the Operator UI once', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-surface-policy-'));
   const stateDirectory = join(directory, 'state');
   const workspaceRoot = join(directory, 'workspaces');
@@ -269,4 +269,15 @@ test('start skips desktop dispatch without recording an opening, then opens the 
   await new Promise(done => setTimeout(done, 30));
   launches = (await readFile(browserLog, 'utf8')).trim().split('\n').filter(Boolean);
   assert.equal(launches.length, 1);
+
+  project.codex_model = 'changed-model';
+  await writeFile(configPath, JSON.stringify(project));
+  await assert.rejects(
+    execFile(process.execPath, [cli, 'start', configPath], { env: environment, timeout: 60_000 }),
+    error => {
+      assert.equal(error.stdout, '');
+      assert.match(error.stderr, /The Loop is already running with different settings\. Run npm stop, then npm start again\./);
+      return true;
+    }
+  );
 });
