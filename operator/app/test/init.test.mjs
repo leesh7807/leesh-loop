@@ -81,6 +81,10 @@ test('init uses only the current branch configured upstream and creates an indep
   const project = JSON.parse(await readFile(join(target.destination, 'operator/project.json'), 'utf8'));
   const generatedPackage = JSON.parse(await readFile(join(target.destination, 'package.json'), 'utf8'));
   const workflow = await readFile(join(target.destination, 'WORKFLOW.md'), 'utf8');
+  const template = (await readFile(join(sourceRoot, 'docs/WORKFLOW_TEMPLATE.md'), 'utf8')).trim();
+  const templateStart = workflow.indexOf(template);
+  assert.notEqual(templateStart, -1, 'generated workflow must include the trimmed reusable template');
+  const bootstrap = workflow.slice(0, templateStart).trimEnd();
   const files = await walk(target.destination);
   const manifestFiles = listRuntimeSnapshotFiles(sourceRoot);
 
@@ -103,21 +107,11 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.match(result.completionOutput, /set LEESH_LOOP_NOTION_DATABASE_URL/);
   assert.match(result.completionOutput, /npm start/);
   assert.doesNotMatch(result.completionOutput, /npm (?:install|ci)|mix deps\.get/);
-  assert.match(workflow, /chatgpt-shot submit/);
-  assert.match(workflow, /chatgpt-shot jobs/);
-  assert.match(workflow, /take up to 3 minutes.*execution timeout longer than 3 minutes/);
-  assert.match(workflow, /\{\{ issue\.identifier \}\}/);
-  assert.match(workflow, /\{\{ issue\.title \}\}/);
-  assert.match(workflow, /\{\{ issue\.state \}\}/);
-  assert.match(workflow, /\{\{ issue\.url \}\}/);
-  assert.match(workflow, /\{\{ issue\.description \}\}/);
-  assert.match(workflow, /git clone --branch "\$SYMPHONY_GITHUB_BASE_BRANCH"/);
-  assert.match(workflow, /create the task branch from that fetched remote commit/);
-  assert.match(workflow, /Create the PR with an explicit configured base/);
-  assert.match(workflow, /never push or merge directly into the configured base/);
-  assert.match(workflow, /Follow the repository-owned workflow or task instructions for Workpad language/);
-  assert.doesNotMatch(workflow, /Korean Workpad|Workpad in Korean/);
-  assert.doesNotMatch(workflow, /operator\/app\/workspace-files\.mjs|operator\/e2e|mise exec -- mix deps\.get/);
+  assert.match(bootstrap, /^---\ntracker:\n  kind: notion/m);
+  assert.match(bootstrap, /database_url: \$LEESH_LOOP_NOTION_DATABASE_URL/);
+  assert.match(bootstrap, /root: \$SYMPHONY_WORKSPACE_ROOT/);
+  assert.match(bootstrap, /git clone --branch "\$SYMPHONY_GITHUB_BASE_BRANCH" "\$SYMPHONY_GITHUB_REPOSITORY_URL"/);
+  assert.match(bootstrap, /env PATH="\$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:\$PATH"/);
   assert.ok(files.includes('operator/notion_publisher/package-lock.json'));
   assert.ok(files.includes('operator/ui/package-lock.json'));
   assert.ok(files.includes('operator/symphony/mix.lock'));

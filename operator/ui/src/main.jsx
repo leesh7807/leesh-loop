@@ -14,58 +14,48 @@ function TaskCard({ task, selected, selectionDisabled, onToggle }) {
     <article className="task-row">
       <div className="task-row-primary">
         <div className="task-title-block">
-          <h4><a href={task.taskUrl} target="_blank" rel="noreferrer" aria-label={`Open ${title} in Notion`}>{title}</a></h4>
-          {task.identifier && <p className="task-identifier">{task.identifier}</p>}
-          {task.blockedBy.length > 0 && (
-            <p className="task-blocker-summary">
-              <span>Blocked By</span>
-              <a href={task.blockedBy[0].url} target="_blank" rel="noreferrer">{task.blockedBy[0].title}</a>
-              <span className="task-blocker-state">{task.blockedBy[0].state}</span>
-              {task.blockedBy.length > 1 && <span>+{task.blockedBy.length - 1}</span>}
-            </p>
-          )}
-        </div>
-        <div className="task-row-controls">
-          <span className="task-state"><span className="task-state-label">State</span><strong>{task.state}</strong></span>
-          <label className="blocker-choice">
-            <input
-              type="checkbox"
-              checked={selected}
-              disabled={selectionDisabled}
-              onChange={() => onToggle(task)}
-              aria-label={`Use ${title} in State ${task.state} as a Blocked By task`}
-            />
-            <span>Use as Blocked By</span>
-          </label>
+          <h4><a href={task.taskUrl} target="_blank" rel="noreferrer" aria-label={`Open ${title} in Notion`}>{title}<span className="task-link-cue" aria-hidden="true">↗</span></a></h4>
+          <p className="task-state" role="group" aria-label={`State: ${task.state}`}>{task.state}</p>
         </div>
       </div>
 
       <details className="task-details">
-        <summary>{task.blockedBy.length > 1 ? `All ${task.blockedBy.length} Blocked By and details` : 'Details and links'}</summary>
-        <section className="blocker-section" aria-label={`Blocked By for ${title}`}>
-          <h5>Blocked By</h5>
-          {task.blockedBy.length ? (
-            <ul className="blocker-list">
-              {task.blockedBy.map(blocker => (
-                <li key={`${blocker.url}-${blocker.title}`}>
-                  <a href={blocker.url} target="_blank" rel="noreferrer">{blocker.title}</a>
-                  <span className="blocker-state">{blocker.state}</span>
-                </li>
-              ))}
-            </ul>
-          ) : <p className="quiet">No blockers</p>}
-        </section>
-
-        {(task.priority !== null || task.labels.length > 0) && (
-          <div className="task-metadata" aria-label="Additional task details">
-            {task.priority !== null && <span>Priority {task.priority}</span>}
-            {task.labels.map(label => <span key={label}>{label}</span>)}
+        <summary>Details and links</summary>
+        <div className="task-details-content">
+          <div className="task-blocker-action">
+            <button
+              type="button"
+              className="text-button blocker-toggle"
+              aria-label={`${selected ? 'Remove' : 'Use'} ${title} in State ${task.state} as a Blocked By task`}
+              disabled={selectionDisabled}
+              onClick={() => onToggle(task)}
+            >
+              {selected ? 'Remove from Blocked By' : 'Use as Blocked By'}
+            </button>
           </div>
-        )}
+          {task.blockedBy.length > 0 && (
+            <section className="blocker-section" aria-label={`Blockers for ${title}`}>
+              <h5>Blocked By</h5>
+              <ul className="blocker-list">
+                {task.blockedBy.map(blocker => (
+                  <li key={`${blocker.url}-${blocker.title}`}>
+                    <a href={blocker.url} target="_blank" rel="noreferrer">{blocker.title}</a>
+                    <span className="blocker-state">{blocker.state}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {task.blockedBy.length === 0 && <p className="quiet blocker-section">No blockers</p>}
 
-        <div className="task-links">
-          <a href={task.taskUrl} target="_blank" rel="noreferrer">Open task in Notion ↗</a>
-          {task.planUrl && <a href={task.planUrl} target="_blank" rel="noreferrer">Open Accepted Plan ↗</a>}
+          {(task.priority !== null || task.labels.length > 0) && (
+            <div className="task-metadata" aria-label="Additional task details">
+              {task.priority !== null && <span>Priority {task.priority}</span>}
+              {task.labels.map(label => <span key={label}>{label}</span>)}
+            </div>
+          )}
+
+          {task.planUrl && <div className="task-links"><a href={task.planUrl} target="_blank" rel="noreferrer">Open Accepted Plan ↗</a></div>}
         </div>
       </details>
     </article>
@@ -94,7 +84,6 @@ function TaskSurface({ tasks, selectedBlockers, selectionDisabled, loading, erro
     <section className="task-surface" aria-labelledby="tasks-heading" aria-busy={loading && !refreshedAt}>
       <div className="surface-header">
         <div>
-          <p className="eyebrow">Current project work</p>
           <h2 id="tasks-heading">Tasks</h2>
         </div>
         <div className="task-surface-meta">
@@ -135,6 +124,7 @@ function TaskSurface({ tasks, selectedBlockers, selectionDisabled, loading, erro
 
 function PublicationSurface({ config, plan, state, selectedBlockers, publishing, setPublishing, onDraftChange, onRemoveBlocker, onReset }) {
   const [result, setResult] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
 
   useEffect(() => {
     const currentKey = draftKey(plan, state, selectedBlockers);
@@ -171,25 +161,23 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
   }
 
   return (
-    <details className="surface publication-surface">
+    <details className="surface publication-surface" onToggle={event => setFormOpen(event.currentTarget.open)}>
       <summary className="publication-summary">
         <div>
-          <p className="eyebrow">Create project work</p>
           <h2 id="publish-heading">Publish a Plan</h2>
         </div>
-        <span className="publication-hint">Open form</span>
+        <span className="publication-hint">{formOpen ? 'Close form' : 'Open form'}</span>
       </summary>
       <div className="publication-content">
       <form onSubmit={submit}>
         <div className="plan-field">
           <label htmlFor="plan">1. Review the Plan</label>
-          <p className="field-help">The Publisher keeps the accepted Plan and task details in Notion.</p>
           <textarea id="plan" name="plan" value={plan} onChange={event => onDraftChange({ plan: event.target.value })} spellCheck="false" aria-label="Plan Markdown" disabled={publishing} />
         </div>
         <section className="publication-blockers" aria-labelledby="publication-blockers-heading">
           <div className="context-heading">
             <h3 id="publication-blockers-heading">2. Confirm Blocked By</h3>
-            <p className="field-help">Selected from the current Tasks list; included when this Plan is published.</p>
+            <p className="field-help">Selected tasks become this Plan’s Blocked By relation.</p>
           </div>
           {selectedBlockers.length ? (
             <ul className="selected-blockers">
@@ -329,13 +317,12 @@ function App() {
     <div className="page-shell">
       <header className="page-header">
         <div>
-          <p className="eyebrow">Leesh Loop · Operator</p>
           <h1>Project work</h1>
-          <p className="lede">Review current tasks and publish the next Plan in one place.</p>
         </div>
-        <nav className="related-work" aria-label="Related work">
-          <a href={config?.notionTasksUrl || '#'} target="_blank" rel="noreferrer">Notion Tasks ↗</a>
-          <a href={config?.dashboardUrl || '#'} target="_blank" rel="noreferrer">Symphony Dashboard ↗</a>
+        <nav className="related-work" aria-label="Project navigation">
+          {config?.githubRepositoryUrl && <a href={config.githubRepositoryUrl} target="_blank" rel="noreferrer">GitHub repository ↗</a>}
+          {config?.notionTasksUrl && <a href={config.notionTasksUrl} target="_blank" rel="noreferrer">Notion Tasks ↗</a>}
+          {config?.dashboardUrl && <a href={config.dashboardUrl} target="_blank" rel="noreferrer">Symphony Dashboard ↗</a>}
         </nav>
       </header>
       <main className="work-layout">
@@ -354,7 +341,6 @@ function App() {
           />
         ) : <section className="surface"><p className="empty-state">Loading Publisher configuration…</p></section>}
       </main>
-      <footer className="page-footer"><span>Task and Plan details remain in Notion.</span><span>Runtime details remain in Symphony.</span></footer>
     </div>
   );
 }
