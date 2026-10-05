@@ -51,7 +51,7 @@ h2 { margin-bottom: 0; font-size: 1.45rem; line-height: 1.2; letter-spacing: -.0
 .task-details > summary { width: fit-content; color: #555550; font-size: .76rem; cursor: pointer; }
 .task-details > summary:hover { color: var(--accent); text-decoration: underline; text-underline-offset: .2em; }
 .task-details[open] { margin-top: .65rem; }
-.task-details-content { margin-top: .65rem; padding: .85rem .95rem; background: #efefec; }
+.task-details-content { width: fit-content; max-width: 100%; margin-top: .65rem; padding: .85rem .95rem; background: #efefec; }
 .task-blocker-action { margin: 0 0 .7rem; }
 .blocker-toggle { display: inline-flex; min-height: 2rem; align-items: center; color: #333330; font-size: .78rem; font-weight: 600; text-decoration-color: #aaa9a3; }
 .blocker-toggle:hover:not(:disabled) { color: var(--accent); }
