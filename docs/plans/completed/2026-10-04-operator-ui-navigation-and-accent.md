@@ -113,6 +113,7 @@ UI 변경의 성공 여부는 source code나 CSS 값만으로 판단하지 않�
    - 최종 상태의 Operator UI를 representative data로 wide와 narrow viewport에서 렌더링하고 screenshots를 생성한다.
    - 생성한 screenshots를 `docs/ui-evidence/`에 commit하여 repository만으로 현재 rendered UI를 다시 검토할 수 있게 한다.
    - screenshots에는 Project navigation, primary task hierarchy, State, Blocked By context, task-level navigation 및 publication surface가 실제 화면에서 어떻게 관계를 이루는지 판단할 수 있을 만큼 충분한 영역이 포함되어야 한다.
+   - wide와 narrow 각각에서 task-list overview, task details disclosure(실제 Blocked By가 있는 task 포함), open publication form을 별도 screenshot으로 남겨 한 viewport당 한 장에 한정하지 않는다.
    - wide와 narrow evidence 모두에서 동일한 정보 우선순위와 interaction 의미가 유지되는지 확인한다.
    - 기존 screenshots 중 현재 결과로 오인될 수 있는 파일은 제거하거나 명확히 current evidence가 아님을 구분한다.
    - repository에 committed된 screenshots를 별도의 UI-only review에 직접 입력하여 visual hierarchy, composition, balance, density, spacing, typography, grouping, surface treatment, affordance, scanability, responsiveness 및 overall coherence를 판단한다.
@@ -127,7 +128,7 @@ UI 변경의 성공 여부는 source code나 CSS 값만으로 판단하지 않�
 ## Verification Tools
 
 - **Operator UI browser surface**: Project navigation, 실제 interaction, hierarchy, semantic duplication, responsive UX 확인.
-- **Wide/narrow browser screenshots 및 `docs/ui-evidence/`**: repository에 남는 authoritative rendered evidence이며 최종 UI-only review의 primary input.
+- **Wide/narrow browser screenshots 및 `docs/ui-evidence/`**: overview, expanded task details/Blocked By, publication form states를 포함하는 repository의 authoritative rendered evidence이며 최종 UI-only review의 primary input.
 - **Independent UI-only review**: committed screenshots를 기준으로 실제 visual hierarchy, composition, balance, typography, density, affordance, scanability, responsiveness 및 coherence를 평가.
 - **Operator `/api/v1/config` readback**: GitHub repository navigation이 canonical Project configuration을 사용하는지 확인.
 - **Operator `/api/v1/tasks` 및 server read model**: PR navigation을 위해 새로운 추론 또는 Workpad coupling이 추가되지 않았는지 확인.

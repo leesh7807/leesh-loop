@@ -15,15 +15,6 @@ function TaskCard({ task, selected, selectionDisabled, onToggle }) {
       <div className="task-row-primary">
         <div className="task-title-block">
           <h4><a href={task.taskUrl} target="_blank" rel="noreferrer" aria-label={`Open ${title} in Notion`}>{title}</a></h4>
-          {task.identifier && <p className="task-identifier">{task.identifier}</p>}
-          {task.blockedBy.length > 0 && (
-            <p className="task-blocker-summary">
-              <span>Blocked By</span>
-              <a href={task.blockedBy[0].url} target="_blank" rel="noreferrer">{task.blockedBy[0].title}</a>
-              <span className="task-blocker-state">{task.blockedBy[0].state}</span>
-              {task.blockedBy.length > 1 && <span>+{task.blockedBy.length - 1}</span>}
-            </p>
-          )}
         </div>
         <div className="task-row-controls">
           <span className="task-state" role="group" aria-label={`State: ${task.state}`}><strong>{task.state}</strong></span>
@@ -41,31 +32,31 @@ function TaskCard({ task, selected, selectionDisabled, onToggle }) {
       </div>
 
       <details className="task-details">
-        <summary>{task.blockedBy.length > 1 ? `+${task.blockedBy.length - 1} more blockers and task details` : 'More task details'}</summary>
-        {task.blockedBy.length > 1 && (
-          <section className="blocker-section" aria-label={`Other blockers for ${title}`}>
-            <h5>Other blockers</h5>
-            <ul className="blocker-list">
-              {task.blockedBy.slice(1).map(blocker => (
-                <li key={`${blocker.url}-${blocker.title}`}>
-                  <a href={blocker.url} target="_blank" rel="noreferrer">{blocker.title}</a>
-                  <span className="blocker-state">{blocker.state}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {task.blockedBy.length === 0 && <p className="quiet blocker-section">No blockers</p>}
+        <summary>Details and links</summary>
+        <div className="task-details-content">
+          {task.blockedBy.length > 0 && (
+            <section className="blocker-section" aria-label={`Blockers for ${title}`}>
+              <h5>Blocked By</h5>
+              <ul className="blocker-list">
+                {task.blockedBy.map(blocker => (
+                  <li key={`${blocker.url}-${blocker.title}`}>
+                    <a href={blocker.url} target="_blank" rel="noreferrer">{blocker.title}</a>
+                    <span className="blocker-state">{blocker.state}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {task.blockedBy.length === 0 && <p className="quiet blocker-section">No blockers</p>}
 
-        {(task.priority !== null || task.labels.length > 0) && (
-          <div className="task-metadata" aria-label="Additional task details">
-            {task.priority !== null && <span>Priority {task.priority}</span>}
-            {task.labels.map(label => <span key={label}>{label}</span>)}
-          </div>
-        )}
+          {(task.priority !== null || task.labels.length > 0) && (
+            <div className="task-metadata" aria-label="Additional task details">
+              {task.priority !== null && <span>Priority {task.priority}</span>}
+              {task.labels.map(label => <span key={label}>{label}</span>)}
+            </div>
+          )}
 
-        <div className="task-links">
-          {task.planUrl && <a href={task.planUrl} target="_blank" rel="noreferrer">Open Accepted Plan ↗</a>}
+          {task.planUrl && <div className="task-links"><a href={task.planUrl} target="_blank" rel="noreferrer">Open Accepted Plan ↗</a></div>}
         </div>
       </details>
     </article>
