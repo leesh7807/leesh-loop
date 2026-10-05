@@ -69,7 +69,7 @@ reset protocol.
 
 {% endif %}
 
-Read `AGENTS.md`, then apply [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md). The template
+Read `AGENTS.md`, then apply [`docs/WORKFLOW_TEMPLATE.md`](../docs/WORKFLOW_TEMPLATE.md). The template
 is the reusable Plan-based execution policy; this file supplies the repository's tracker, workspace,
 bootstrap, and Codex execution settings. The E2E workload boundary below is an explicit exception to
 the template's H1 identity rule.

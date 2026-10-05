@@ -1,6 +1,6 @@
 # 2026-09-27-project-bootstrap
 
-> Historical record only. The clone-based Project bootstrap described here was removed by [2026-09-28-remove-project-bootstrap](../2026-09-28-remove-project-bootstrap.md). The requirements and decisions below do not describe the current supported CLI or Project setup contract.
+> Historical record only. The clone-based Project bootstrap described here was removed by [2026-09-28-remove-project-bootstrap](2026-09-28-remove-project-bootstrap.md). The requirements and decisions below do not describe the current supported CLI or Project setup contract.
 
 ## Objective
 

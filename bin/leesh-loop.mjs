@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initLoop } from '../operator/app/init.mjs';
 
-const usage = 'Usage: leesh-loop init';
+const usage = 'Usage: leesh-loop init (run from the target repository root)';
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);

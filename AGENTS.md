@@ -13,10 +13,12 @@
 
 ## Project Map
 
-* `README.md` — what this repository does and how its parts fit together
+* `README.md` — product overview, setup, and task workflow
+* `docs/SYSTEM.md` — system responsibilities and configuration boundaries
+* `docs/DESIGN.md` — UI/UX principles
 * `docs/PLAN.md` — how to plan work
-* `WORKFLOW.md` — how to execute and review work
-* `docs/WORKFLOW_TEMPLATE.md` — reusable workflow for operated repositories
+* `WORKFLOW.md` — agent execution contract for this repository
+* `docs/WORKFLOW_TEMPLATE.md` — template for target repository agent contracts
 
 # Global Agent Instructions
 

@@ -103,8 +103,9 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.deepEqual(Object.keys(generatedPackage.scripts).sort(), ['start', 'stop']);
   assert.equal(result.workflowPath, join(target.destination, 'WORKFLOW.md'));
   assert.equal(result.notionBinding, 'not configured');
-  assert.match(result.completionOutput, /Notion database binding: not configured/);
-  assert.match(result.completionOutput, /set LEESH_LOOP_NOTION_DATABASE_URL/);
+  assert.match(result.completionOutput, /Notion database URL: not configured/);
+  assert.match(result.completionOutput, /make LEESH_LOOP_NOTION_DATABASE_URL and NOTION_TOKEN available/);
+  assert.match(result.completionOutput, /docs\/WORKFLOW_TEMPLATE\.md/);
   assert.match(result.completionOutput, /npm start/);
   assert.doesNotMatch(result.completionOutput, /npm (?:install|ci)|mix deps\.get/);
   assert.match(bootstrap, /^---\ntracker:\n  kind: notion/m);
@@ -164,7 +165,7 @@ test('init fails without a resolvable configured upstream and leaves no destinat
   const target = await makeTarget(t, { upstream: false });
   await assert.rejects(
     initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} }),
-    /current branch 'feature\/init-target' has no configured Git upstream/
+    /current branch 'feature\/init-target' has no configured remote branch/
   );
   await assert.rejects(lstat(target.destination), error => error.code === 'ENOENT');
   assert.equal((await git(target.targetRoot, 'status', '--porcelain')).stdout, '');
@@ -177,7 +178,7 @@ test('destination collision fails without changing existing content or type', as
   const before = await walk(target.destination);
   await assert.rejects(
     initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} }),
-    /destination already exists; refusing to change it/
+    /Loop folder already exists, so init left it unchanged/
   );
   assert.deepEqual(await walk(target.destination), before);
   assert.equal(await readFile(join(target.destination, 'operator-owned.txt'), 'utf8'), 'keep\n');
@@ -186,14 +187,14 @@ test('destination collision fails without changing existing content or type', as
 test('file and symlink destination collisions are rejected without following or changing them', async t => {
   const fileTarget = await makeTarget(t);
   await writeFile(fileTarget.destination, 'keep file\n');
-  await assert.rejects(initLoop({ cwd: fileTarget.targetRoot, sourceRoot, environment: {} }), /destination already exists/);
+  await assert.rejects(initLoop({ cwd: fileTarget.targetRoot, sourceRoot, environment: {} }), /Loop folder already exists/);
   assert.equal(await readFile(fileTarget.destination, 'utf8'), 'keep file\n');
 
   const symlinkTarget = await makeTarget(t);
   const protectedFile = join(symlinkTarget.directory, 'protected-data.txt');
   await writeFile(protectedFile, 'keep target\n');
   await symlink(protectedFile, symlinkTarget.destination);
-  await assert.rejects(initLoop({ cwd: symlinkTarget.targetRoot, sourceRoot, environment: {} }), /destination already exists/);
+  await assert.rejects(initLoop({ cwd: symlinkTarget.targetRoot, sourceRoot, environment: {} }), /Loop folder already exists/);
   assert.equal((await lstat(symlinkTarget.destination)).isSymbolicLink(), true);
   assert.equal(await readFile(protectedFile, 'utf8'), 'keep target\n');
 });

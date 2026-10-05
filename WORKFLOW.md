@@ -50,7 +50,10 @@ codex:
     '
 ---
 
-# Leesh Loop repository workflow
+# Leesh Loop agent execution contract
+
+Symphony workers read this file when executing tasks in this repository. It defines the agent's
+execution policy; it is not a setup guide for Leesh Loop users. See README.md for product usage.
 
 You are working on an Accepted Plan task.
 

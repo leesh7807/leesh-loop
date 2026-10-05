@@ -15,7 +15,7 @@ USAGE
 }
 
 fail() {
-  printf 'Operator readiness failed: %s\n' "$*" >&2
+  printf 'Loop setup needs attention: %s\n' "$*" >&2
   exit 1
 }
 
@@ -41,7 +41,7 @@ case "${1:-}" in
   -h|--help) usage ;;
 esac
 
-report 'validating workspace and local prerequisites'
+report 'checking your workspace and required tools'
 workspace_root=${SYMPHONY_WORKSPACE_ROOT:-}
 [ -n "$workspace_root" ] || fail 'SYMPHONY_WORKSPACE_ROOT must be set by the Operator.'
 case "$workspace_root" in
@@ -49,7 +49,7 @@ case "$workspace_root" in
   *) fail "SYMPHONY_WORKSPACE_ROOT must be an absolute path: $workspace_root" ;;
 esac
 
-command -v realpath >/dev/null 2>&1 || fail 'realpath is required on the Unix/Linux Operator boundary.'
+command -v realpath >/dev/null 2>&1 || fail 'this machine is missing a required Unix tool; install the usual Linux utilities and retry.'
 workspace_root=$(realpath -m -- "$workspace_root") || fail "cannot resolve workspace root: $workspace_root"
 repository_root=$(realpath -e -- "$repository_root") || fail 'cannot resolve the canonical repository root.'
 
@@ -60,23 +60,23 @@ is_under() {
   esac
 }
 
-[ "$workspace_root" != "$repository_root" ] || fail 'workspace root must not be the canonical repository.'
+[ "$workspace_root" != "$repository_root" ] || fail 'the worker workspace must use a separate folder from the Leesh Loop repository.'
 if is_under "$workspace_root" "$repository_root" && [ "${SYMPHONY_ALLOW_WORKSPACE_ROOT_INSIDE_REPOSITORY:-false}" != true ]; then
-  fail "workspace root must be outside the canonical repository: $workspace_root"
+  fail "the worker workspace must be outside the Leesh Loop repository: $workspace_root"
 fi
 
 mkdir -p -- "$workspace_root" || fail "cannot create workspace root: $workspace_root"
-[ -w "$workspace_root" ] || fail "workspace root is not writable by the Operator: $workspace_root"
+[ -w "$workspace_root" ] || fail "the worker workspace folder is not writable: $workspace_root"
 
-command -v node >/dev/null 2>&1 || fail 'node is required for Operator core readiness.'
-command -v git >/dev/null 2>&1 || fail 'git is required for GitHub readiness.'
-command -v gh >/dev/null 2>&1 || fail 'gh is required for GitHub authentication readiness.'
-command -v curl >/dev/null 2>&1 || fail 'curl is required for GitHub network readiness.'
+command -v node >/dev/null 2>&1 || fail 'Node.js is not installed or is not on PATH.'
+command -v git >/dev/null 2>&1 || fail 'Git is not installed or is not on PATH.'
+command -v gh >/dev/null 2>&1 || fail 'GitHub CLI is not installed or is not on PATH.'
+command -v curl >/dev/null 2>&1 || fail 'this machine is missing curl; install it and retry.'
 
 if [ "$skip_external_readiness" = false ]; then
   worker_client=$repository_root/operator/external/chatgpt-shot/chatgpt-shot
-  [ -x "$worker_client" ] || fail 'the worker-facing chatgpt-shot interface is missing or not executable.'
-  command -v chatgpt-shot >/dev/null 2>&1 || fail 'chatgpt-shot is not installed or is not on the Operator PATH.'
+  [ -x "$worker_client" ] || fail 'the Leesh Loop installation is incomplete; restore its included worker files and retry.'
+  command -v chatgpt-shot >/dev/null 2>&1 || fail 'the chatgpt-shot review command is not installed on this machine or is not on PATH.'
 
   xdg_config_home=${XDG_CONFIG_HOME:-$HOME/.config}
   xdg_data_home=${XDG_DATA_HOME:-$HOME/.local/share}
@@ -116,7 +116,7 @@ if [ "$skip_external_readiness" = false ]; then
   done
 fi
 
-report 'checking GitHub network and credential readiness'
+report 'checking GitHub access'
 github_repository_url=${SYMPHONY_GITHUB_REPOSITORY_URL:-}
 [ -n "$github_repository_url" ] || fail 'SYMPHONY_GITHUB_REPOSITORY_URL must be configured by the Project.'
 github_base_branch=${SYMPHONY_GITHUB_BASE_BRANCH:-}
@@ -128,40 +128,40 @@ curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
   --output /dev/null https://github.com/ || fail 'GitHub network reachability check failed.'
 
 if ! GH_PROMPT_DISABLED=1 gh auth status --hostname github.com >/dev/null 2>&1; then
-  fail 'GitHub authentication is absent or invalid; interactive login is not allowed during bootstrap.'
+  fail 'GitHub CLI is not signed in. Run gh auth login and make sure this account can access the target repository.'
 fi
 
 if [ "$git_transport" = https ]; then
   github_helpers=$(git config --global --get-all credential.https://github.com.helper 2>/dev/null || true)
   if ! printf '%s\n' "$github_helpers" | grep -Fq 'gh auth git-credential'; then
     GH_PROMPT_DISABLED=1 gh auth setup-git --hostname github.com >/dev/null 2>&1 ||
-      fail 'gh auth setup-git could not establish the HTTPS Git credential helper.'
+      fail 'GitHub CLI could not configure Git access. Run gh auth setup-git, then retry.'
   fi
 
-  credential_response=$(printf '%s\n' 'protocol=https' 'host=github.com' '' | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null) || fail 'Git HTTPS credential helper could not provide a GitHub credential.'
+  credential_response=$(printf '%s\n' 'protocol=https' 'host=github.com' '' | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null) || fail 'Git has no GitHub credential. Sign in with GitHub CLI and configure Git access, then retry.'
   credential_username=$(printf '%s\n' "$credential_response" | sed -n 's/^username=//p' | head -n 1)
   credential_password=$(printf '%s\n' "$credential_response" | sed -n 's/^password=//p' | head -n 1)
-  [ -n "$credential_username" ] && [ -n "$credential_password" ] || fail 'Git HTTPS credential helper returned no complete credential.'
+  [ -n "$credential_username" ] && [ -n "$credential_password" ] || fail 'Git could not read a complete GitHub credential. Sign in with GitHub CLI and configure Git access, then retry.'
 
   # A public repository can make ls-remote succeed without GitHub accepting
   # the credential selected by Git. Validate that exact helper output as well.
   if ! GH_HOST=github.com GH_PROMPT_DISABLED=1 GH_TOKEN="$credential_password" gh api user >/dev/null 2>&1; then
-    fail 'Git HTTPS credential helper returned a credential rejected by GitHub.'
+    fail 'GitHub rejected the credential Git selected. Sign in again and confirm repository access.'
   fi
   unset credential_response credential_username credential_password github_helpers
 fi
 
-GH_PROMPT_DISABLED=1 gh api --hostname github.com user >/dev/null 2>&1 || fail 'authenticated GitHub API probe failed.'
-GIT_TERMINAL_PROMPT=0 git -c credential.interactive=never ls-remote "$github_repository_url" HEAD >/dev/null 2>&1 || fail 'configured GitHub repository Git probe failed.'
+GH_PROMPT_DISABLED=1 gh api --hostname github.com user >/dev/null 2>&1 || fail 'GitHub CLI sign-in could not be confirmed. Run gh auth login, then retry.'
+GIT_TERMINAL_PROMPT=0 git -c credential.interactive=never ls-remote "$github_repository_url" HEAD >/dev/null 2>&1 || fail 'this account cannot read the configured target repository. Check the repository URL and account access.'
 
-report 'ensuring configured base branch exists'
+report 'checking the target branch'
 github_base_commit=$(node "$repository_root/operator/app/git-target.mjs" "$github_repository_url" "$github_base_branch") ||
-  fail 'configured Git target branch bootstrap failed; dispatch is not allowed.'
+  fail 'the configured GitHub base branch could not be prepared. Check github_repository_url and github_base_branch in operator/project.json.'
 
 if [ "$skip_external_readiness" = false ]; then
-  report 'checking chatgpt-shot configuration and browser session'
+  report 'checking the review setup'
   if ! chatgpt-shot doctor >/dev/null 2>&1; then
-    fail 'chatgpt-shot doctor failed; repair authentication, browser/session state, or Invocation configuration as Operator.'
+    fail 'the review setup is incomplete. Check chatgpt-shot sign-in and configuration, then retry.'
   fi
 
 service_accepting() {
@@ -208,28 +208,28 @@ request.on('error', () => { process.exitCode = 1; });
 NODE
 }
 
-report 'checking chatgpt-shot Service health'
-if ! service_accepting; then
-  chatgpt-shot start >/dev/null 2>&1 || fail 'chatgpt-shot Service could not be started.'
+  report 'checking the review service'
+  if ! service_accepting; then
+  chatgpt-shot start >/dev/null 2>&1 || fail 'the review service could not start. Check its configuration, then retry.'
 fi
 
-service_accepting || fail 'chatgpt-shot Service is not healthy and accepting requests.'
+service_accepting || fail 'the review service is not accepting requests. Check its configuration, then retry.'
 
-report 'submitting chatgpt-shot smoke Job'
+report 'checking the review connection'
 smoke_prompt=${SYMPHONY_CHATGPT_SHOT_SMOKE_PROMPT:-'Operator readiness smoke check. Reply with exactly READY.'}
 smoke_job_id_file=$(mktemp "${TMPDIR:-/tmp}/symphony-chatgpt-shot-smoke-id.XXXXXX")
 smoke_snapshot=$(mktemp "${TMPDIR:-/tmp}/symphony-chatgpt-shot-smoke-snapshot.XXXXXX")
 trap 'rm -f -- "$smoke_job_id_file" "$smoke_snapshot"' EXIT HUP INT TERM
 
 if ! chatgpt-shot submit "$smoke_prompt" >"$smoke_job_id_file"; then
-  fail 'chatgpt-shot submit smoke Job failed before returning a Job ID.'
+  fail 'the review connection check could not be sent. Check its credentials and retry.'
 fi
-[ -s "$smoke_job_id_file" ] || fail 'chatgpt-shot submit smoke Job returned an empty Job ID.'
+[ -s "$smoke_job_id_file" ] || fail 'the review connection check returned no result. Check its configuration and retry.'
 smoke_job_id=$(tr -d '[:space:]' <"$smoke_job_id_file")
-[ -n "$smoke_job_id" ] || fail 'chatgpt-shot submit smoke Job returned an empty Job ID.'
+[ -n "$smoke_job_id" ] || fail 'the review connection check returned no result. Check its configuration and retry.'
 while :; do
   if ! chatgpt-shot jobs "$smoke_job_id" >"$smoke_snapshot"; then
-    fail 'chatgpt-shot smoke Job could not be read after submission.'
+    fail 'the review connection check could not be read. Check the review service and retry.'
   fi
   smoke_state=$(node - "$smoke_snapshot" <<'NODE'
 const fs = require('node:fs');
@@ -237,10 +237,10 @@ const snapshot = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 if (typeof snapshot.state !== 'string' || !Object.prototype.hasOwnProperty.call(snapshot, 'result') || !Object.prototype.hasOwnProperty.call(snapshot, 'error')) process.exit(1);
 process.stdout.write(snapshot.state);
 NODE
-  ) || fail 'chatgpt-shot smoke Job returned an invalid snapshot.'
+  ) || fail 'the review connection check returned an invalid result. Check the review setup and retry.'
   case "$smoke_state" in
     completed)
-      node - "$smoke_snapshot" <<'NODE' || fail 'chatgpt-shot smoke Job completed without a Result.'
+      node - "$smoke_snapshot" <<'NODE' || fail 'the review connection check completed without a result. Check the review setup and retry.'
 const fs = require('node:fs');
 const snapshot = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 if (typeof snapshot.result !== 'string' || snapshot.result.length === 0) process.exit(1);
@@ -248,23 +248,23 @@ NODE
       break
       ;;
     failed)
-      fail 'chatgpt-shot smoke Job reached failed State.'
+      fail 'the review connection check failed. Check the review service and credentials, then retry.'
       ;;
     pending|in_progress)
       sleep 1
       ;;
     *)
-      fail "chatgpt-shot smoke Job returned unsupported State: $smoke_state"
+      fail 'the review connection check returned an unexpected status. Check the review setup and retry.'
       ;;
   esac
 done
-  service_accepting || fail 'chatgpt-shot Service stopped accepting requests after the smoke invocation.'
+  service_accepting || fail 'the review service stopped responding after the connection check. Check its setup and retry.'
 fi
 
 github_base_commit=$(node "$repository_root/operator/app/git-target.mjs" read "$github_repository_url" "$github_base_branch") ||
   fail 'configured base branch readback failed before readiness evidence was recorded.'
 if [ "$skip_external_readiness" = false ]; then
-  report 'preparing worker interface and readiness record'
+  report 'preparing task access'
   mkdir -p -- "$worker_interface_root" || fail "cannot create worker interface directory: $worker_interface_root"
   cp -- "$worker_client" "$worker_interface_root/chatgpt-shot" || fail 'cannot prepare the worker-facing chatgpt-shot interface.'
   chmod 755 -- "$worker_interface_root/chatgpt-shot" || fail 'cannot make the worker-facing chatgpt-shot interface executable.'
@@ -300,10 +300,10 @@ fs.writeFileSync(outputPath, JSON.stringify({
 NODE
   mv -f -- "$readiness_tmp" "$readiness_file" || fail "cannot publish readiness state: $readiness_file"
   chmod 600 -- "$readiness_file" 2>/dev/null || true
-  printf 'Operator readiness passed: workspace=%s chatgpt-shot=%s\n' "$workspace_root" "$chatgpt_discovery_path"
+  printf 'Loop setup checks passed. Worker workspace: %s. Review command: %s.\n' "$workspace_root" "$chatgpt_discovery_path"
 else
-  report 'skipping external readiness'
-  printf 'Operator core readiness passed: workspace=%s external-readiness=skipped\n' "$workspace_root"
+  report 'skipping review service checks'
+  printf 'Loop setup checks passed. Worker workspace: %s. Review service checks were skipped by configuration.\n' "$workspace_root"
 fi
 
 if [ "$#" -eq 0 ]; then
@@ -320,5 +320,5 @@ if [ "$skip_external_readiness" = false ]; then
   export SYMPHONY_OPERATOR_READINESS_FILE=$readiness_file
   export CHATGPT_SHOT_WORKER_INTERFACE_ROOT=$worker_interface_root
 fi
-report 'starting Symphony process'
+report 'starting task processing'
 exec "$@"

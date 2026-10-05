@@ -1,4 +1,9 @@
-# Repository workflow
+# Repository agent execution contract
+
+This policy defines the generated Loop's agent execution contract. `leesh-loop init` combines it
+with Loop-specific runtime settings and writes the result to the target repository's root
+`WORKFLOW.md`. The generated `operator/project.json` points Symphony to that file. The worker
+reads it while carrying out tasks; it is an execution contract, not a user tutorial.
 
 You are working on an Accepted Plan task.
 

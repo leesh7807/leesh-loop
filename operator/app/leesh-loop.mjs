@@ -275,7 +275,7 @@ async function ensureUi(config) {
   } else if (ui) await stopUi(config);
   let unmanaged = false;
   try { await reachable(uiUrl(config)); unmanaged = true; } catch { /* start the project-local Operator UI */ }
-  if (unmanaged) throw new Error(`Operator UI at ${uiUrl(config)} is not owned by this project`);
+  if (unmanaged) throw new Error(`another application is using ${uiUrl(config)}; close it or choose a different UI port in operator/project.json`);
   const child = spawn(process.execPath, [appScript, 'serve-prepared', config.configuration_path], { cwd: root, detached: true, stdio: 'ignore', env: process.env });
   child.unref();
   const process_start_ticks = processStartTicks(child.pid);
@@ -287,7 +287,7 @@ async function ensureUi(config) {
 async function start(config) {
   return withLock(config, async () => {
     const port = Number(config.symphony_port || PROJECT_DEFAULTS.symphony_port); const p = paths(config); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
-    if (!existing) console.error('Operator: preparing Publisher and Symphony startup.');
+    if (!existing) console.error('Operator: Checking your Loop setup and getting the task page ready.');
     ensurePublisher();
     ensureOperatorUi();
     if (existing) {
@@ -304,7 +304,7 @@ async function start(config) {
     }
     const runtimeId = randomUUID(); const identity = effective(config, runtimeId, port);
     const starting = { status: 'starting', runtime_id: runtimeId, effective: identity, authorization_path: p.authorization, acknowledgement_path: p.acknowledgement, ownership_path: p.ownership, created_at: new Date().toISOString() };
-    await atomicJson(p.state, starting); await remove(p.ownership); await remove(p.authorization); await remove(p.acknowledgement); await atomicText(p.startup_status, 'launching Operator readiness checks');
+    await atomicJson(p.state, starting); await remove(p.ownership); await remove(p.authorization); await remove(p.acknowledgement); await atomicText(p.startup_status, 'checking your Loop setup');
     try {
       const symphony = identity.symphony_command;
       const args = operatorBootstrapArgs(config, symphony, port);
@@ -323,10 +323,14 @@ async function start(config) {
       await atomicJson(p.ownership, { project_root: root, runtime_id: runtimeId, pid, process_start_ticks, created_at: new Date().toISOString() });
       const provisional = { ...ownedStarting, status: 'provisional' }; await atomicJson(p.state, provisional);
       let reportedStartupStatus;
-      const reportProgress = description => async elapsed => {
+      const reportProgress = async elapsed => {
         const status = (await readFile(p.startup_status, 'utf8').catch(() => '')).trim();
-        if (status && status !== reportedStartupStatus) { console.error(`Operator: ${status}.`); reportedStartupStatus = status; return; }
-        console.error(`Operator: still waiting for ${description} (${elapsed}s elapsed; current step: ${status || 'starting child process'}).`);
+        if (status && status !== reportedStartupStatus) {
+          console.error(`Operator: ${status[0].toUpperCase()}${status.slice(1)}.`);
+          reportedStartupStatus = status;
+          return;
+        }
+        console.error(`Operator: Still getting this Loop ready (${elapsed}s elapsed).`);
       };
       const childFailure = async description => {
         if (alive(pid)) return null;
@@ -334,12 +338,12 @@ async function start(config) {
         const detail = output ? `: ${output.slice(-4_000)}` : '';
         return new Error(`owned Symphony process ${pid} exited before ${description}${detail}`);
       };
-      await waitFor(() => runtimeObserved({ ...provisional, effective: identity }, false), 'Symphony observability', config.startup_timeout_ms || 30 * 60_000, reportProgress('Symphony observability'), () => childFailure('Symphony observability'));
+      await waitFor(() => runtimeObserved({ ...provisional, effective: identity }, false), 'task processing', config.startup_timeout_ms || 30 * 60_000, reportProgress, () => childFailure('task processing'));
       const committed = { ...provisional, status: 'committed-disabled' }; await atomicJson(p.state, committed);
       const running = { ...committed, status: 'running', authorized_at: new Date().toISOString() }; await atomicJson(p.state, running);
       await atomicJson(p.authorization, { state: 'running', runtime_id: runtimeId, published_at: new Date().toISOString() });
-      await atomicText(p.startup_status, 'waiting for Symphony dispatch acknowledgement');
-      await waitFor(() => runtimeObserved(running, true), 'dispatch acknowledgement', 15_000, reportProgress('dispatch acknowledgement'), () => childFailure('dispatch acknowledgement'));
+      await atomicText(p.startup_status, 'waiting for task processing');
+      await waitFor(() => runtimeObserved(running, true), 'task processing', 15_000, reportProgress, () => childFailure('task processing'));
       try {
         if (config.open_project_surfaces) {
           await openWindow(config, identity.dashboard);
@@ -397,7 +401,9 @@ if (directExecution && !['start', 'stop', 'stop-owned', 'serve', 'serve-prepared
   if (command === '--help' || command === '-h') console.log(usage);
   else { console.error(usage); process.exitCode = 2; }
 } else if (directExecution) {
+  let loadedConfig;
   loadConfig(configFile, { validateWorkspaceFileSources: command === 'start', requireNotionDatabase: !['stop', 'stop-owned'].includes(command) }).then(async config => {
+    loadedConfig = config;
     if (!locked && ['start', 'stop', 'stop-owned'].includes(command)) {
       await mkdir(stateRoot(config), { recursive: true, mode: 0o700 });
       const lockPath = join(stateRoot(config), 'lifecycle.flock');
@@ -409,7 +415,24 @@ if (directExecution && !['start', 'stop', 'stop-owned', 'serve', 'serve-prepared
       return undefined;
     }
     return command === 'start' ? start(config) : command === 'stop' ? stop(config) : command === 'stop-owned' ? stopOwnedRuntime(config, commandArgs[1]) : serve(config, { prepared: command === 'serve-prepared' });
-  }).then(value => { if (value) console.log(JSON.stringify(value)); }).catch(error => { console.error(`Operator failed: ${error.message}`); process.exitCode = 1; });
+  }).then(value => {
+    if (!value) return;
+    if (command === 'start') {
+      const message = value.reused ? 'This Loop is already running.' : 'This Loop is ready.';
+      const page = uiUrl(loadedConfig);
+      const opening = value.window_error
+        ? `The browser could not be opened automatically. Open the page at ${page}.`
+        : loadedConfig.open_project_surfaces
+          ? `Operator page: ${page}`
+          : `Operator page is available at ${page}`;
+      console.error(`Leesh Loop: ${message} ${opening}`);
+    }
+    console.log(JSON.stringify(value));
+  }).catch(error => {
+    const action = command === 'start' ? 'start' : command === 'stop' ? 'stop' : 'complete the requested action';
+    console.error(`Leesh Loop could not ${action}: ${error.message}`);
+    process.exitCode = 1;
+  });
 }
 
 export { acknowledgeBrowser, compatible, dispatchBrowser, effective, ensureOperatorUi, ensurePublisher, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, projectWindowNeedsOpening, readRequestBody, runPublisherCommand, uiIdentity, uiRuntimeSourceFiles };
