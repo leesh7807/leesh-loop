@@ -26,6 +26,7 @@ h1 { margin-bottom: .25rem; font-size: clamp(2rem, 3.2vw, 3rem); line-height: 1.
 .work-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(19rem, .8fr); align-items: start; gap: 2rem; padding-top: 1.5rem; }
 .task-surface { min-width: 0; }
 .surface { min-width: 0; padding: clamp(1rem, 2vw, 1.5rem); border: 1px solid #deded9; background: transparent; }
+.surface.publication-surface:not([open]) { border: 0; }
 .surface-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
 h2 { margin-bottom: 0; font-size: 1.45rem; line-height: 1.2; letter-spacing: -.025em; }
 .refresh-meta { margin: 0; color: #5f5f5a; font-size: .78rem; text-align: right; }
