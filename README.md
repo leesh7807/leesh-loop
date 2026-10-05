@@ -1,214 +1,119 @@
 # Leesh Loop
 
-Leesh Loop is a local agent execution loop for a single software repository.
+Leesh Loop runs an agent task loop for a single GitHub repository. It connects a target repository to Notion and runs accepted Plans against that repository, while keeping the Loop files beside the target instead of adding them to it.
 
-It publishes plans written as plain text or Markdown to a Notion task surface, then uses [OpenAI Symphony](https://github.com/openai/symphony) to execute runnable tasks with agents.
+## Get started
 
-```text
-Plan → Operator Publisher → Notion Tasks → Operator Symphony → Agent Work → State / Result
-```
+Leesh Loop runs on Linux or Unix. On Windows, use WSL2. Before you start, install Node.js 20.19+ or 22.12+ with npm, Git, GitHub CLI, mise, Codex CLI, and configure the `chatgpt-shot` review command on the machine that will run the Loop. You also need access to the target GitHub repository and a Notion task database.
 
-Leesh Loop does not live inside the target repository or wrap it. The Operator uses the Git target
-configured in its Project file.
+### 1. Make the Leesh Loop command available
 
-There is no separate central project manager for coordinating multiple repositories.
-
-The root `WORKFLOW.md` in this repository is the concrete execution contract for Leesh Loop itself. It is not the generic workflow for every repository operated by a loop.
-
-For another repository, adapt its worker policy to that repository's rules. [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md) is the reusable starting point and reference.
-
-## Operator readiness
-
-The Operator owns project configuration, lifecycle state, readiness, Symphony startup, and the project browser workspace. The checked-in `operator/project.json` configures this repository and uses paths relative to the config file. Local paths may also be absolute or begin with `~`. The Notion database URL comes from `LEESH_LOOP_NOTION_DATABASE_URL` in the process environment or repository-root `.env`. Git target settings use these paired fields:
-
-```json
-{
-  "github_repository_url": "https://github.com/owner/repository.git",
-  "github_base_branch": "main"
-}
-```
-
-`github_repository_url` and `github_base_branch` are always used together. `main` is only an example; it has no special meaning in the workflow. Existing configured base branches are used unchanged. If the configured base is missing, Operator readiness creates it from the configured repository's current default-branch HEAD and verifies the remote branch and commit before dispatch. Workspace creation, task branches, Rework, PRs, Merging, and Done verification then all use that same configured base branch.
-
-`codex_model` and `codex_reasoning_effort` are independent optional Project overrides. The checked-in Project sets both; remove either field to let Codex use its own setting. See [Project configuration](docs/PROJECT_CONFIGURATION.md).
-
-From the repository root, start the Operator with:
+Clone this repository and link its command:
 
 ```sh
-npm run start
+git clone https://github.com/leesh7807/leesh-loop.git
+cd leesh-loop
+npm link
 ```
 
-The bundled development launcher uses `mise exec -- mix run`; install the pinned toolchain and
-run `mise exec -- mix deps.get` from `operator/symphony` before the first start.
-
-Before spawning Symphony, Operator startup validates the workspace, GitHub HTTPS network and
-credential path, and the configured base branch initialization and readback. By default it then performs
-external readiness: it verifies the installed `chatgpt-shot` configuration and browser/session
-state, starts or recovers its Service, confirms the health endpoint is accepting requests, and
-performs one real `chatgpt-shot submit` smoke submission before launching Symphony. Missing or
-invalid readiness stops the command before any tracker task is dispatched; it never performs
-interactive login.
-
-An Operator Project may set `skip_external_readiness` to `true` when its execution environment
-cannot access the Operator-owned state outside `$SYMPHONY_WORKSPACE_ROOT`. In that case only the
-external readiness boundary is skipped: Operator startup does not read or prepare `chatgpt-shot`
-configuration, browser/session state, Service state, smoke Jobs, worker interface, or external
-readiness evidence. Core startup and dispatch readiness still run through the same
-`leesh-loop.mjs start` path. Omitted or `false` keeps the default external readiness behavior.
-
-The ownership boundary is:
-
-```text
-Operator
-├─ workspace-root placement
-├─ GitHub credential readiness
-├─ chatgpt-shot installation
-├─ chatgpt-shot auth/session/browser lifecycle
-├─ chatgpt-shot Service lifecycle
-└─ external-service readiness validation
-
-Worker
-├─ repository work inside assigned workspace
-├─ normal Git/GitHub operations
-├─ chatgpt-shot submit "<prompt>"
-└─ chatgpt-shot jobs <job-id>
-```
-
-The worker command is a restricted Service client prepared in an Operator-owned interface
-directory. It supports only review Job submission and readback through `submit` and `jobs`; it
-does not run `doctor`, `start`, login, browser recovery, profile repair, or access the
-`chatgpt-shot` Notion credentials. The XDG configuration, data, cache, browser profile, Service
-runtime state, and worker interface stay outside `$SYMPHONY_WORKSPACE_ROOT`.
-
-## How It Works
-
-The Publisher takes a plan written as plain text or Markdown, normalizes it into the canonical Leesh Loop task representation, and publishes it to Notion.
-
-Notion task State remains lifecycle authority. Its canonical Workpad is the live
-execution surface: workers reconstruct current execution context from the Workpad,
-Accepted/Repository Plan, State, and actual workspace on every dispatch. The
-Repository Plan remains the durable execution contract rather than a running log.
-
-The Publisher owns publication state only: it creates incomplete tasks as `Publisher Pending` and
-sets `State` to `Ready` after the canonical representation is complete and validated. The Notion
-`State` is a Notion select property. New databases are seeded with the repository workflow's
-state vocabulary plus `Backlog`; `Backlog` is a normal non-active, non-terminal waiting state
-and is never dispatched. The publisher may additionally use its transient `Publisher Pending`
-state while a task is being constructed.
-
-Symphony starts observable but dispatch-disabled. Only after the Operator publishes durable `running` authorization and Symphony writes its dispatch acknowledgement can it find runnable tasks in Notion and run agents in isolated workspaces. Repeated `start` reuses only a compatible acknowledged running runtime; use `npm run stop` before replacing a live incompatible runtime. Stopping never stops the external `chatgpt-shot` Service.
-
-`operator/project.json` may include `workspace_files`, an optional array of regular-file paths. Paths may be absolute, relative to the Project file, or start with `~` for the current user's home directory. Each configured file is copied by basename to the root of a newly created workspace after the repository clone and before dependency bootstrap; for example, `../.env` becomes `<workspace>/.env`. Empty or omitted arrays preserve the usual behavior. Missing, non-regular, and duplicate-basename sources reject Operator startup. Existing workspace destinations are never overwritten. The setting is part of runtime compatibility, but it is only applied for new workspaces: continuations preserve their existing files and do not apply a later configuration change.
-
-Configured base initialization/readback always runs, and the normal readiness evidence records the
-directly read-back `github_base_commit`. The same repository and branch values are passed to Symphony as
-`SYMPHONY_GITHUB_REPOSITORY_URL` and `SYMPHONY_GITHUB_BASE_BRANCH`; a missing value is a
-configuration/readiness failure, not an invitation to infer `origin`, a default branch, or `main`.
-When external readiness runs, its readiness record also includes the prepared `chatgpt-shot`
-discovery path and worker interface.
-
-After that readiness and dispatch-acknowledgement boundary, `start` opens the local Plan Publish surface, configured Notion database, and Symphony dashboard. On Linux the default path sends each URL to `xdg-open`, so the desktop uses its system default browser; Leesh Loop does not require `google-chrome`, `chromium`, or `chromium-browser` to exist. Browser, window, and tab placement are owned by the desktop environment. Set `LEESH_LOOP_BROWSER_COMMAND` to explicitly replace this default path; it receives the three project-surface URLs and does not fall back to `xdg-open` if it fails.
-
-Agents work against the target repository according to its `WORKFLOW.md`, then write results and state back to Notion. For the concrete Leesh Loop workflow, a bound Symphony worker may also publish a supplied Plan as a canonical `Backlog` task through the existing Publisher and add that task to the current task's `Blocked By` relation. These are separate limited capabilities: the relation operation is bound to the dispatched task and is not arbitrary Notion management.
-
-## Repository-level E2E harness
-
-The production E2E harness is owned by the top-level [`e2e`](e2e) directory and runs with
-`npm run e2e`. A direct repository invocation and a request from a Symphony worker workspace use
-the same E2E-owned command boundary: it creates a durable run identity, performs database
-recovery and reservation, then starts an independent Operator/Symphony child runtime. The worker
-requests this boundary with `npm run e2e`; its workflow does not call production `npm start` or
-start Symphony itself.
-
-E2E has no user-managed Project file. It reads only the repository URL, configured production base
-branch, Codex model, and Codex reasoning effort from [`operator/project.json`](operator/project.json).
-The E2E workflow, workspace and state paths, temporary ports, timeouts, polling and cleanup policy
-remain E2E-owned. The default is [`e2e/WORKFLOW.md`](e2e/WORKFLOW.md), and `--workflow PATH` keeps
-the existing per-run workflow pass-through. The `.env` file is read by the E2E host-side process;
-it is never copied into the nested worker workspace.
-
-The legacy `LEESH_LOOP_E2E_NOTION_DATABASE_URL` supplies the first pool member. The initial pool
-adds the four empty databases listed in `e2e/model/e2e-runtime-config.mjs`. To replace the pool,
-provide `LEESH_LOOP_E2E_NOTION_DATABASE_URLS` as newline- or comma-separated URLs; its size is the
-available candidate capacity. Reservation and recovery events are stored in the configured Git
-remote, keyed by canonical Notion database identity, so different checkouts observe the same
-reservation. E2E run records, workflows, runtime state and nested workspaces stay under the current
-checkout's ignored `e2e/runs/<run-id>` and `e2e/workspaces/<run-id>` paths.
-
-Run with catalog selection or an explicit Accepted Plan. Options are passed through after `--`:
+Sign in to GitHub CLI on this machine with access to the target repository:
 
 ```sh
-npm run e2e
-npm run e2e -- --plan PATH [--hard-cap-ms MS]
-npm run e2e -- --workflow PATH
+gh auth login
 ```
 
-To inspect the pool without starting a production workload, run `node e2e/cli.mjs admit`.
+### 2. Connect a target repository
 
-## Repository Harness
+The target must be a Git repository. Check out the branch you want the Loop to use, and make sure that branch has a configured remote branch. If it does not, push it with an upstream first:
 
-Leesh Loop assumes that the target repository already has a harness suitable for agent work. This follows from Symphony's model of running workers against the repository's existing development environment and rules.
-
-Each source repository needs a `WORKFLOW.md` that defines how Symphony should carry out work in that repository. The root `WORKFLOW.md` is Leesh Loop's own concrete workflow. [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md) is the reusable reference and starting point for workflows used by other repositories.
-
-## Publisher
-
-The Publisher normalizes plan documents into the Notion execution surface.
-
-```text
-Plan
-  ↓
-Normalize
-  ↓
-Notion Tasks
+```sh
+git push --set-upstream origin "$(git branch --show-current)"
 ```
 
-It creates the shared canonical task representation: durable `Identifier`, `Title`, `State`,
-`Priority`, `Labels`, and `Blocked By` metadata plus an explicit `Plan` relation. The task page
-body is the mutable Workpad; the relation opens a separate locked Plan page containing the complete
-accepted Plan. The Publisher and Notion adapter share this representation, and comments remain a
-separate human-review surface.
+Replace `origin` with the name of the target remote if it is different.
 
-`Human Review` is the single non-terminal human pause state. Workpad cycle markers
-make ordinary review return, bounded comment consumption, and Rework recovery
-understandable without adding a separate lifecycle database. `In Progress` resumes
-the preserved workspace; `Rework` deliberately starts a fresh task branch from the
-current remote configured base and preserves the latest Repository Plan. A human
-approval moves the task to active `Merging`, where a worker merges only the PR and
-exact HEAD delivered to that review cycle, verifies the result on the fetched remote
-configured base, and only then moves the task to `Done`.
+Run `leesh-loop init` from the target repository root:
 
-These are the Leesh Loop integration contracts: successful publication hands work to Symphony in
-`Ready`; changing that handoff requires coordinated Publisher and workflow changes; and the
-Publisher/adapter representation remains shared. Free-form `State` removes schema-option coupling
-for ordinary workflow-state additions or renames, but it does not make the complete lifecycle
-independently configurable.
-
-## Symphony
-
-Task execution uses [OpenAI Symphony](https://github.com/openai/symphony).
-
-At a high level, Symphony polls the configured tracker for runnable work, manages isolated
-workspaces, and runs agent workers against the repository.
-
-Repository-specific worker behavior and the exact state vocabulary are defined by `WORKFLOW.md`.
-Scheduling, dispatch, retry, reconciliation, workspace/session lifecycle, and active/terminal
-state semantics are upstream Symphony behavior; see the [upstream Symphony specification](https://github.com/openai/symphony/blob/main/SPEC.md) for that detailed runtime contract.
-
-## Browser UI
-
-Each loop provides a local browser UI for viewing and managing the execution state of the repository it operates.
-
-```text
-foo-loop
-    ↓
-local browser UI
-    ↓
-tasks / runs / state
+```sh
+cd /path/to/your-repository
+leesh-loop init
 ```
 
-The UI is scoped to one repository and its loop.
+Init creates a sibling directory named `<repository-name>-loop`. It reads the target URL and base branch from the current branch's configured upstream and leaves the target repository unchanged. The new Loop contains its own runtime files and agent workflow.
 
-## Example Workflow
+### 3. Add the Notion connection
 
-The repository includes a concrete production E2E workflow at [`operator/e2e/WORKFLOW.md`](operator/e2e/WORKFLOW.md). It exercises the normal Publisher, Operator, Symphony, worker, and delivery flow while omitting the Operator-owned external readiness setup. See the [E2E guide](operator/e2e/README.md) for configuration, run inputs, and durable evidence.
+Move into the generated Loop and create its local environment file:
+
+```sh
+cd ../your-repository-loop
+cp .env.example .env
+```
+
+Set these values in `.env`:
+
+```dotenv
+LEESH_LOOP_NOTION_DATABASE_URL=https://www.notion.so/...
+NOTION_TOKEN=...
+```
+
+Keep `.env` private; it contains credentials and is excluded from Git. The Notion integration must have access to an empty database or one already set up for Leesh Loop.
+
+On the same machine, configure the review command and make sure the Codex CLI is signed in. The first start checks the GitHub, Notion, workspace, and review setup before it accepts work.
+
+### 4. Start the Loop
+
+From the generated Loop directory:
+
+```sh
+npm start
+```
+
+The first start prepares the included dependencies and opens the Operator page in your browser. If it does not open automatically, visit <http://127.0.0.1:4310>. The page links to the target repository and Notion tasks, lists active and other tasks, and provides the Plan publishing form.
+
+![Operator page with the task list and Plan publishing entry point](docs/images/operator-overview.png)
+
+_The task list is live, so its tasks and counts will change. Open **Publish a Plan** to enter a Plan and choose its State._
+
+The checked-in `operator/project.json` is an example configuration for this repository. Init creates a separate Project configuration for each target; you normally do not need to edit it. Advanced settings and runtime responsibilities are described in [System responsibilities and configuration](docs/SYSTEM.md).
+
+### 5. Publish a Plan and follow its task
+
+In Operator, use **Publish a Plan**:
+
+1. Paste the complete Plan in **Review the Plan**.
+2. Optionally choose existing tasks under **Blocked By** when this work must wait for them.
+3. Choose a publication State. **Ready** starts eligible work; **Backlog** keeps it waiting.
+4. Select **Publish Plan**.
+
+The result shows the new task identifier and State, with a link to open the task in Notion. The task appears in the Operator task list. Its State tells you where it is in the work cycle; expand **Details and links** to open the Accepted Plan and inspect task context.
+
+Use [Plan instructions](docs/PLAN.md) when writing Plans. A task can only run after it is published in an active State and its Blocked By tasks, if any, are complete.
+
+## About the workflow
+
+The generated Loop's root `WORKFLOW.md` is an agent execution contract. Init builds it from [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md) and the Loop's runtime settings, then points `operator/project.json` at that root file. The worker reads it when it handles a task.
+
+You do not need to read and memorize the whole contract to use Leesh Loop. If you want to understand or change a repository rule, ask the agent to explain the relevant part of `WORKFLOW.md`, its effect on task execution, and the smallest safe change. The contract determines how agents act, so changes should preserve its intent rather than turn it into a general tutorial.
+
+The root `WORKFLOW.md` in this source repository applies to work on Leesh Loop itself. It is separate from the template used by `init` for target repositories.
+
+## If setup fails
+
+- If `init` says the current branch has no configured remote branch, check out the branch you intend to use, configure its Git upstream, then run `leesh-loop init` again.
+- If the generated Loop folder already exists, init leaves it untouched. Use that Loop if it is the one you want, or choose a target directory with a different name.
+- If `npm start` reports a missing Notion value, set it in the generated Loop's `.env` or in the environment that starts the Loop, then retry.
+- If setup reports a GitHub access problem, sign in with `gh auth login` and confirm the target repository is accessible.
+- If the task list cannot refresh, check that the Notion integration still has access to the database. Plan publishing and task reading report their own errors in Operator.
+- The smaller **Runtime details** link in the Operator header opens the live runtime dashboard for investigating a stuck or failed task. Everyday Plan publishing and task tracking happen on the Operator page.
+
+## Documentation
+
+- [System responsibilities and configuration](docs/SYSTEM.md) — for operators and maintainers who need Project, readiness, Publisher, or Notion contracts.
+- [Design principles](docs/DESIGN.md) — persistent UI and UX principles.
+- [Plan instructions](docs/PLAN.md) — how to create and maintain work Plans.
+- [Agent execution contract](WORKFLOW.md) — the contract for workers modifying Leesh Loop itself.
+- [Workflow template](docs/WORKFLOW_TEMPLATE.md) — the agent contract template materialized by init.
+- [E2E guide](e2e/README.md) — repository verification tooling for maintainers.
+
+Plans and UI review evidence are repository work artifacts, not additional product setup guides.

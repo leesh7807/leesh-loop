@@ -160,7 +160,7 @@ function environment(fixture) {
 test('skip external readiness reaches the child without reading or preparing external state', async t => {
   const fixtureValue = await fixture(t);
   const result = await execFile('sh', [bootstrap, '--skip-external-readiness', '--', fixtureValue.child, 'symphony'], { env: environment(fixtureValue) });
-  assert.match(result.stdout, /external-readiness=skipped/);
+  assert.match(result.stdout, /Review service checks were skipped by configuration/);
   const log = await readFile(fixtureValue.log, 'utf8');
   assert.match(log, /git /);
   assert.match(log, /gh /);
@@ -171,7 +171,7 @@ test('skip external readiness reaches the child without reading or preparing ext
   assert.match(log, /interface=\n/);
   assert.equal((await stat(fixtureValue.blocked)).isFile(), true);
   await assert.rejects(stat(join(fixtureValue.blocked, 'chatgpt-shot')), /ENOTDIR/);
-  assert.equal(await readFile(fixtureValue.status, 'utf8'), 'starting Symphony process\n');
+  assert.equal(await readFile(fixtureValue.status, 'utf8'), 'starting task processing\n');
 });
 
 test('GitHub SSH upstreams use SSH Git authentication while preserving the Operator readiness path', async t => {
@@ -179,7 +179,7 @@ test('GitHub SSH upstreams use SSH Git authentication while preserving the Opera
   const env = environment(fixtureValue);
   env.SYMPHONY_GITHUB_REPOSITORY_URL = 'git@github.com:example/repository.git';
   const result = await execFile('sh', [bootstrap, '--skip-external-readiness', '--', fixtureValue.child, 'symphony'], { env });
-  assert.match(result.stdout, /Operator core readiness passed/);
+  assert.match(result.stdout, /Loop setup checks passed/);
   const log = await readFile(fixtureValue.log, 'utf8');
   assert.match(log, /ls-remote git@github\.com:example\/repository\.git HEAD/);
   assert.doesNotMatch(log, /credential fill/);
@@ -190,7 +190,7 @@ test('external readiness remains required unless explicitly skipped', async t =>
   const fixtureValue = await fixture(t);
   await assert.rejects(
     execFile('sh', [bootstrap, '--', fixtureValue.child], { env: environment(fixtureValue) }),
-    error => /chatgpt-shot is not installed/.test(String(error.stderr))
+    error => /chatgpt-shot review command is not installed/.test(String(error.stderr))
   );
   await assert.rejects(readFile(fixtureValue.log, 'utf8'), /./);
 });
@@ -202,7 +202,7 @@ test('failed Service readiness uses public startup, preserves discovery, and fai
 
   await assert.rejects(
     execFile('sh', [bootstrap, '--', fixtureValue.child], { env: fixtureValue.env }),
-    error => /chatgpt-shot Service is not healthy and accepting requests/.test(String(error.stderr))
+    error => /review service is not accepting requests/.test(String(error.stderr))
   );
 
   assert.equal(await readFile(fixtureValue.discovery, 'utf8'), staleDiscovery);
@@ -218,7 +218,7 @@ test('public startup, Service readiness, smoke Job, and worker dispatch continue
   const fixtureValue = await externalReadinessFixture(t);
   const result = await execFile('sh', [bootstrap, '--', fixtureValue.child, 'symphony'], { env: fixtureValue.env });
 
-  assert.match(result.stdout, /Operator readiness passed/);
+  assert.match(result.stdout, /Loop setup checks passed/);
   const log = await readFile(fixtureValue.log, 'utf8');
   assert.match(log, /chatgpt-shot start/);
   assert.match(log, /chatgpt-shot submit Operator readiness smoke check/);
@@ -236,6 +236,6 @@ test('nested E2E bootstrap permits a run-owned workspace inside the current repo
   env.SYMPHONY_WORKSPACE_ROOT = nestedWorkspace;
   env.SYMPHONY_ALLOW_WORKSPACE_ROOT_INSIDE_REPOSITORY = 'true';
   const result = await execFile('sh', [bootstrap, '--skip-external-readiness', '--', fixtureValue.child, 'nested'], { env });
-  assert.match(result.stdout, /external-readiness=skipped/);
+  assert.match(result.stdout, /Review service checks were skipped by configuration/);
   assert.match(await readFile(fixtureValue.log, 'utf8'), /child nested/);
 });

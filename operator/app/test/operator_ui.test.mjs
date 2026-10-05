@@ -30,6 +30,14 @@ test('request decoding preserves Unicode across byte chunk boundaries', async ()
   );
 });
 
+test('runtime details navigation uses a secondary, user-facing label', async () => {
+  const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
+  const styles = await readFile(join(root, 'operator/ui/src/style.css'), 'utf8');
+  assert.match(source, /className="runtime-details"[^>]*>Runtime details ↗/);
+  assert.match(styles, /\.related-work \.runtime-details \{ color: #73736d; font-size: \.75rem; \}/);
+  assert.doesNotMatch(source, /Symphony Dashboard/);
+});
+
 test('Publisher preparation keeps build output off the Operator JSON stdout channel', async () => {
   const moduleUrl = new URL('../leesh-loop.mjs', import.meta.url).href;
   const source = `import { ensurePublisher } from ${JSON.stringify(moduleUrl)}; ensurePublisher(); console.log(JSON.stringify({ ready: true }));`;
@@ -167,7 +175,7 @@ test('Operator UI reuse identity follows imported modules and served Publisher/U
   assert.equal(uiIdentity({ notion_database_url: 'https://notion.example/db', ui_port: 4310, symphony_port: 4101 }).dashboard_port, 4101);
 });
 
-test('start skips desktop dispatch without recording an opening, then opens the Operator UI once when enabled', async t => {
+test('start reuses compatible runtimes, explains incompatible settings, and opens the Operator UI once', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-surface-policy-'));
   const stateDirectory = join(directory, 'state');
   const workspaceRoot = join(directory, 'workspaces');
@@ -261,4 +269,15 @@ test('start skips desktop dispatch without recording an opening, then opens the 
   await new Promise(done => setTimeout(done, 30));
   launches = (await readFile(browserLog, 'utf8')).trim().split('\n').filter(Boolean);
   assert.equal(launches.length, 1);
+
+  project.codex_model = 'changed-model';
+  await writeFile(configPath, JSON.stringify(project));
+  await assert.rejects(
+    execFile(process.execPath, [cli, 'start', configPath], { env: environment, timeout: 60_000 }),
+    error => {
+      assert.equal(error.stdout, '');
+      assert.match(error.stderr, /The Loop is already running with different settings\. Run npm stop, then npm start again\./);
+      return true;
+    }
+  );
 });

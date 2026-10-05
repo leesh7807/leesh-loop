@@ -25,29 +25,29 @@ function validateTargetUrl(remoteUrl) {
 export async function resolveTargetRepository(cwd) {
   let workingDirectory;
   try { workingDirectory = await realpath(cwd); }
-  catch { throw new Error(`cannot resolve target repository directory: ${cwd}`); }
+  catch { throw new Error(`cannot access target repository directory: ${cwd}`); }
   const rootValue = gitValue(workingDirectory, ['rev-parse', '--show-toplevel']);
-  if (!rootValue) throw new Error('leesh-loop init must be run inside a Git repository');
+  if (!rootValue) throw new Error('run leesh-loop init from inside a Git repository');
   const repositoryRoot = await realpath(rootValue);
   if (repositoryRoot !== workingDirectory) {
     throw new Error(`run leesh-loop init from the target repository root: ${repositoryRoot}`);
   }
 
   const branch = gitValue(repositoryRoot, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
-  if (!branch) throw new Error('cannot resolve a Git upstream while HEAD is detached; check out a branch with a configured upstream');
+  if (!branch) throw new Error('the current Git checkout is detached; check out a branch with a configured remote branch, then run init again');
   const remote = gitValue(repositoryRoot, ['config', '--get', `branch.${branch}.remote`]);
   const mergeRef = gitValue(repositoryRoot, ['config', '--get', `branch.${branch}.merge`]);
   if (!remote || !mergeRef || remote === '.') {
-    throw new Error(`current branch '${branch}' has no configured Git upstream; configure its upstream remote and branch, then run init again`);
+    throw new Error(`current branch '${branch}' has no configured remote branch; configure its Git upstream, then run init again`);
   }
   if (!mergeRef.startsWith('refs/heads/') || mergeRef.length === 'refs/heads/'.length) {
-    throw new Error(`current branch '${branch}' has an unsupported upstream branch configuration: ${mergeRef}`);
+    throw new Error(`current branch '${branch}' does not track a normal remote branch (${mergeRef}); update its Git upstream, then run init again`);
   }
   if (!gitValue(repositoryRoot, ['rev-parse', '--verify', '--quiet', '@{upstream}'])) {
-    throw new Error(`current branch '${branch}' has no resolvable configured Git upstream; fetch or repair that upstream, then run init again`);
+    throw new Error(`the remote branch tracked by '${branch}' cannot be read; fetch it or repair the Git upstream, then run init again`);
   }
   const remoteUrl = gitValue(repositoryRoot, ['remote', 'get-url', remote]);
-  if (!remoteUrl) throw new Error(`configured upstream remote '${remote}' has no repository URL`);
+  if (!remoteUrl) throw new Error(`the Git remote '${remote}' tracked by '${branch}' has no repository URL; configure it, then run init again`);
   return {
     repositoryRoot,
     repositoryName: basename(repositoryRoot),
@@ -140,27 +140,30 @@ NOTION_TOKEN=
 `;
 
 function completionOutput({ destination, project, workflowPath, notionBinding }) {
+  const notionStatus = notionBinding === 'not configured'
+    ? 'not configured'
+    : notionBinding.startsWith('configured in the init process')
+      ? 'available to init only; make it available to npm start too'
+      : 'found in this Loop’s root .env';
   const lines = [
-    'Leesh Loop initialized.',
-    `Output directory: ${destination}`,
-    `Target remote URL: ${project.github_repository_url}`,
-    `Target branch: ${project.github_base_branch}`,
-    `Workflow: ${workflowPath}`,
-    `Codex model: ${project.codex_model}`,
-    `Reasoning effort: ${project.codex_reasoning_effort}`,
-    `Notion database binding: ${notionBinding}`,
+    'Leesh Loop is ready.',
+    `Loop directory: ${destination}`,
+    `Target repository: ${project.github_repository_url}`,
+    `Target base branch: ${project.github_base_branch}`,
+    `Agent workflow: ${workflowPath}`,
+    'Init built the root WORKFLOW.md from docs/WORKFLOW_TEMPLATE.md; the worker reads this contract for each task.',
+    `Notion database URL: ${notionStatus}`,
+    'Before npm start, make LEESH_LOOP_NOTION_DATABASE_URL and NOTION_TOKEN available in this Loop’s environment or root .env.',
     'Host prerequisites:'
   ];
   for (const prerequisite of HOST_PREREQUISITES) lines.push(`  - ${prerequisite}`);
   if (notionBinding === 'not configured') {
-    lines.push('Notion setup required before npm start: set LEESH_LOOP_NOTION_DATABASE_URL in this Loop process environment or root .env.');
-  } else if (notionBinding.startsWith('configured in the init process')) {
-    lines.push('Ensure the npm start process also receives LEESH_LOOP_NOTION_DATABASE_URL; init does not persist credentials.');
+    lines.push('The Notion database URL was not found. Add it before starting the Loop.');
   }
   lines.push(
-    'Project settings can be changed in operator/project.json; the workflow can be moved by updating workflow_path.',
-    'npm start prepares this Loop’s Symphony, Publisher, and Operator UI package dependencies from its included manifests and lockfiles.',
-    "Before npm start, set NOTION_TOKEN in this Loop's environment or root .env. Configure GitHub CLI authentication, upstream Git credentials or SSH access, and the existing chatgpt-shot credentials as well.",
+    'Loop settings are in operator/project.json; the workflow location is controlled by workflow_path.',
+    'npm start prepares this Loop’s dependencies, checks its connections, and opens the Operator page.',
+    'Sign in to GitHub CLI and configure Codex CLI and chatgpt-shot on the machine that runs this Loop.',
     'Next:',
     `  cd ${shellQuote(destination)}`,
     '  npm start'
@@ -185,10 +188,10 @@ async function pathExists(path) {
 }
 
 export async function initLoop({ cwd = process.cwd(), sourceRoot, environment = process.env } = {}) {
-  if (!sourceRoot) throw new Error('cannot locate the Leesh Loop source checkout');
+  if (!sourceRoot) throw new Error('Leesh Loop could not find its installed files; reinstall or relink it, then retry');
   const target = await resolveTargetRepository(cwd);
   const destination = resolve(dirname(target.repositoryRoot), `${target.repositoryName}-loop`);
-  if (await pathExists(destination)) throw new Error(`destination already exists; refusing to change it: ${destination}`);
+  if (await pathExists(destination)) throw new Error(`the Loop folder already exists, so init left it unchanged: ${destination}`);
 
   const runtimeFiles = listRuntimeSnapshotFiles(sourceRoot);
   if (!runtimeFiles.length) throw new Error('runtime snapshot manifest selected no tracked runtime files');

@@ -39,11 +39,11 @@ export const RUNTIME_SNAPSHOT_PATHS = Object.freeze([
 ]);
 
 export const HOST_PREREQUISITES = Object.freeze([
-  'Unix/Linux shell and utilities, including flock, realpath, and xdg-open',
+  'Linux or Unix (use WSL2 on Windows)',
   'Node.js 20.19+ or 22.12+, plus npm',
-  'Git, GitHub CLI (gh), and curl',
-  'mise (operator/symphony/mise.toml selects Erlang 28 and Elixir 1.19.5-otp-28)',
-  'Codex CLI and the configured worker-facing chatgpt-shot command'
+  'Git, GitHub CLI, curl, and access to the target repository',
+  'mise, so the Loop can prepare its runtime dependencies',
+  'Codex CLI and the configured chatgpt-shot review command'
 ]);
 
 function matchesManifestPath(file, entry) {

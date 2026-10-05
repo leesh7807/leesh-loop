@@ -12,9 +12,9 @@ const result = spawnSync('mise', ['exec', '--', 'mix', 'deps.get'], {
 });
 
 if (result.error) {
-  console.error(`Generated Loop dependency preparation requires mise: ${result.error.message}`);
+  console.error(`This Loop needs mise to prepare its runtime dependencies. Install mise and retry npm start. ${result.error.message}`);
   process.exitCode = 1;
 } else if (result.status !== 0) {
-  console.error(`Generated Loop Symphony dependency preparation failed${result.signal ? ` (${result.signal})` : ` with exit code ${result.status}`}.`);
+  console.error(`This Loop could not prepare its runtime dependencies${result.signal ? ` (${result.signal})` : ` (exit code ${result.status})`}. Check the setup output above, then retry npm start.`);
   process.exitCode = result.status || 1;
 }
