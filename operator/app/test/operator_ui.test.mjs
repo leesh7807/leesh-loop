@@ -30,6 +30,14 @@ test('request decoding preserves Unicode across byte chunk boundaries', async ()
   );
 });
 
+test('runtime details navigation uses a secondary, user-facing label', async () => {
+  const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
+  const styles = await readFile(join(root, 'operator/ui/src/style.css'), 'utf8');
+  assert.match(source, /className="runtime-details"[^>]*>Runtime details ↗/);
+  assert.match(styles, /\.related-work \.runtime-details \{ color: #73736d; font-size: \.75rem; \}/);
+  assert.doesNotMatch(source, /Symphony Dashboard/);
+});
+
 test('Publisher preparation keeps build output off the Operator JSON stdout channel', async () => {
   const moduleUrl = new URL('../leesh-loop.mjs', import.meta.url).href;
   const source = `import { ensurePublisher } from ${JSON.stringify(moduleUrl)}; ensurePublisher(); console.log(JSON.stringify({ ready: true }));`;

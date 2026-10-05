@@ -71,9 +71,9 @@ npm start
 
 The first start prepares the included dependencies and opens the Operator page in your browser. If it does not open automatically, visit <http://127.0.0.1:4310>. The page links to the target repository and Notion tasks, lists active and other tasks, and provides the Plan publishing form.
 
-![Operator page with the task list and Plan publishing form](docs/images/operator-overview.png)
+![Operator page with the task list and Plan publishing entry point](docs/images/operator-overview.png)
 
-_The task list is live, so its tasks and counts will change. The screenshot shows the Operator layout and main actions._
+_The task list is live, so its tasks and counts will change. Open **Publish a Plan** to enter a Plan and choose its State._
 
 The checked-in `operator/project.json` is an example configuration for this repository. Init creates a separate Project configuration for each target; you normally do not need to edit it. Advanced settings and runtime responsibilities are described in [System responsibilities and configuration](docs/SYSTEM.md).
 
@@ -105,7 +105,7 @@ The root `WORKFLOW.md` in this source repository applies to work on Leesh Loop i
 - If `npm start` reports a missing Notion value, set it in the generated Loop's `.env` or in the environment that starts the Loop, then retry.
 - If setup reports a GitHub access problem, sign in with `gh auth login` and confirm the target repository is accessible.
 - If the task list cannot refresh, check that the Notion integration still has access to the database. Plan publishing and task reading report their own errors in Operator.
-- The **Symphony Dashboard** link in the Operator header is optional runtime diagnostics for investigating a stuck or failed task. Everyday Plan publishing and task tracking happen on the Operator page.
+- The smaller **Runtime details** link in the Operator header opens the live runtime dashboard for investigating a stuck or failed task. Everyday Plan publishing and task tracking happen on the Operator page.
 
 ## Documentation
 

@@ -322,7 +322,7 @@ function App() {
         <nav className="related-work" aria-label="Project navigation">
           {config?.githubRepositoryUrl && <a href={config.githubRepositoryUrl} target="_blank" rel="noreferrer">GitHub repository ↗</a>}
           {config?.notionTasksUrl && <a href={config.notionTasksUrl} target="_blank" rel="noreferrer">Notion Tasks ↗</a>}
-          {config?.dashboardUrl && <a href={config.dashboardUrl} target="_blank" rel="noreferrer">Symphony Dashboard ↗</a>}
+          {config?.dashboardUrl && <a className="runtime-details" href={config.dashboardUrl} target="_blank" rel="noreferrer">Runtime details ↗</a>}
         </nav>
       </header>
       <main className="work-layout">
