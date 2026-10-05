@@ -170,10 +170,11 @@ initial:
   Standard: 0.75
   Focus:    0.60
 outcome:
-  clean:         +0.30
-  minor-only:    +0.05
-  material:      -0.10
-  rejected-only:  0
+  clean:          +0.30
+  aesthetic-only: +0.10
+  minor-only:     +0.05
+  material:       -0.10
+  rejected-only:   0
 cross-perspective:
   direct material impact: -0.05
 other:
@@ -190,7 +191,7 @@ After implementation and required repository verification, capture exact deliver
 * `Standard`: this is a real but bounded review surface.
 * `Focus`: changed surface or potential consequence is broad or important.
 
-Judge from both `change surface` and `failure impact`; do not use a weighted formula or probability model. Low initial confidence alone does not force repeated review: a clean review may settle Standard or Focus in one cycle.
+Judge from both `change surface` and `failure impact`; do not use a weighted formula or probability model. For UI/UX, use `Settled` only when the delivery has no user-facing UI or UX impact. Low initial confidence alone does not force repeated review: a clean review may settle Standard or Focus in one cycle.
 
 Record:
 
@@ -242,6 +243,11 @@ changing in this delivery. Do not report alternative design, general best
 practice, style preference, speculative future problem, or a stronger
 requirement than the current contract establishes.
 
+For UI/UX aesthetic quality only, a finding may instead identify a concrete
+rendered improvement worth considering without establishing that the current
+result is defective. Do not enumerate every plausible polish idea or unsupported
+personal preference.
+
 # Verdict
 PASS | FINDINGS
 
@@ -249,8 +255,8 @@ PASS | FINDINGS
 None. | findings
 
 For each finding provide Severity, Title, Evidence location, Concrete evidence,
-Reasoning path, Material consequence, Why this is a current finding, and
-Evidence confidence.
+Reasoning path, Material consequence or expected improvement, Why this matters
+in the current delivery, and Evidence confidence.
 ```
 
 Perspective lens:
@@ -274,31 +280,43 @@ not report generic hardening advice.
 UI/UX
 Review hierarchy, comprehension, interaction, and aesthetic quality using
 rendered/interactive evidence when judging visual result. Design rationale or
-source may explain intent but cannot prove success. Do not report mere taste or
-infer visual success/failure without adequate user-facing evidence.
+source may explain intent but cannot prove success. Treat aesthetic judgment as
+a first-class part of the review rather than reducing it to checklist compliance
+or generic UI heuristics. Actively surface concrete opportunities for meaningful
+improvement in composition, proportion, visual rhythm, typography, spacing,
+balance, density, visual weight, or overall coherence when supported by rendered
+evidence, even when the current result is not defective. Do not enumerate every
+plausible polish idea. `Mere taste` means unsupported personal preference, not
+reasoned visual judgment. Express uncertainty through Evidence confidence rather
+than suppressing a useful aesthetic finding.
 ```
 
 ### Disposition, resolution, and confidence update
 
-Validate every finding independently. Accept only a concrete current problem supported by the Accepted Plan, repository contract, or direct product evidence and worth changing in this delivery. Do not accept or fix optional improvements, extra hardening, style preference, possible reuse, future extensibility, or "could be better" suggestions merely because they are easy.
+Validate every finding independently. Accept material/minor findings only when a concrete current problem is supported by the Accepted Plan, repository contract, or direct product evidence and is worth changing in this delivery. Do not accept extra hardening, unsupported style preference, possible reuse, future extensibility, or arbitrary "could be better" suggestions merely because they are easy.
+
+For UI/UX aesthetic quality, direct rendered evidence may instead support `accepted aesthetic` when the worker judges that a concrete suggestion is reasonably likely to produce a meaningful net visual improvement. The reviewer surfaces the possibility; the worker owns whether it is worth adopting.
 
 Classify:
 
 ```text
-accepted material — valid actionable new information that materially changes
-                    uncertainty for the reviewed perspective
-accepted minor    — valid actionable current problem worth fixing, but without
-                    material uncertainty
-rejected          — not established as a current problem worth changing here
+accepted material  — valid actionable new information that materially changes
+                     uncertainty for the reviewed perspective
+accepted minor     — valid actionable current problem worth fixing, but without
+                     material uncertainty
+accepted aesthetic — UI/UX aesthetic evidence supports a meaningful likely
+                     improvement without establishing a required current fix
+rejected           — not established as useful evidence worth acting on here
 ```
 
-`minor` is not a bucket for optional improvements.
+`minor` is not a bucket for optional improvements. `accepted aesthetic` is limited to UI/UX aesthetic quality; it records a worthwhile visual-improvement judgment rather than a defect classification and does not by itself require a fix.
 
 One Job produces one strongest outcome:
 
 ```text
 any accepted material → material -0.10
 else any accepted minor → minor-only +0.05
+else any accepted aesthetic → aesthetic-only +0.10
 else findings all rejected → rejected-only 0
 else no findings + usable review → clean +0.30
 ```
@@ -312,6 +330,8 @@ fix applied
 AND
 relevant verification passed
 ```
+
+Accepted aesthetic findings do not require resolution. The worker may apply one when the expected improvement justifies the change; otherwise record the disposition and continue.
 
 Use the minimum sufficient verification boundary; broader integration/E2E is required only when the changed behavior or repository contract needs it. Fix and verification do not themselves change confidence. Failed verification means unresolved finding.
 
