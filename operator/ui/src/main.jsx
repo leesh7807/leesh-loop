@@ -14,26 +14,25 @@ function TaskCard({ task, selected, selectionDisabled, onToggle }) {
     <article className="task-row">
       <div className="task-row-primary">
         <div className="task-title-block">
-          <h4><a href={task.taskUrl} target="_blank" rel="noreferrer" aria-label={`Open ${title} in Notion`}>{title}</a></h4>
-        </div>
-        <div className="task-row-controls">
-          <span className="task-state" role="group" aria-label={`State: ${task.state}`}><strong>{task.state}</strong></span>
-          <label className="blocker-choice">
-            <input
-              type="checkbox"
-              checked={selected}
-              disabled={selectionDisabled}
-              onChange={() => onToggle(task)}
-              aria-label={`Use ${title} in State ${task.state} as a Blocked By task`}
-            />
-            <span>Use as Blocked By</span>
-          </label>
+          <h4><a href={task.taskUrl} target="_blank" rel="noreferrer" aria-label={`Open ${title} in Notion`}>{title}<span className="task-link-cue" aria-hidden="true">↗</span></a></h4>
+          <p className="task-state" role="group" aria-label={`State: ${task.state}`}>{task.state}</p>
         </div>
       </div>
 
       <details className="task-details">
         <summary>Details and links</summary>
         <div className="task-details-content">
+          <div className="task-blocker-action">
+            <button
+              type="button"
+              className="text-button blocker-toggle"
+              aria-label={`${selected ? 'Remove' : 'Use'} ${title} in State ${task.state} as a Blocked By task`}
+              disabled={selectionDisabled}
+              onClick={() => onToggle(task)}
+            >
+              {selected ? 'Remove from Blocked By' : 'Use as Blocked By'}
+            </button>
+          </div>
           {task.blockedBy.length > 0 && (
             <section className="blocker-section" aria-label={`Blockers for ${title}`}>
               <h5>Blocked By</h5>
