@@ -105,6 +105,7 @@ The root `WORKFLOW.md` in this source repository applies to work on Leesh Loop i
 - If `npm start` reports a missing Notion value, set it in the generated Loop's `.env` or in the environment that starts the Loop, then retry.
 - If setup reports a GitHub access problem, sign in with `gh auth login` and confirm the target repository is accessible.
 - If the task list cannot refresh, check that the Notion integration still has access to the database. Plan publishing and task reading report their own errors in Operator.
+- The **Symphony Dashboard** link in the Operator header is optional runtime diagnostics for investigating a stuck or failed task. Everyday Plan publishing and task tracking happen on the Operator page.
 
 ## Documentation
 
