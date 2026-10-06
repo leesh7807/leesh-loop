@@ -103,6 +103,13 @@ test('E2E rejects unsupported production Project keys through the shared Project
   );
 });
 
+test('E2E preserves Git-valid production branch names from the shared Project contract', async t => {
+  const fixture = await projectFixture(t, { github_base_branch: 'release@2026' });
+  const config = await loadE2ERuntimeConfig({ root: fixture.root, environment: fixture.environment, envFile: fixture.envFile });
+  assert.equal(config.production_base_branch, 'release@2026');
+  assert.equal(config.seed_source_ref, 'refs/heads/release@2026');
+});
+
 test('E2E requires at least one valid Notion database URL', () => {
   assert.equal(resolveE2EDatabasePool({ configuredUrls: '' }).length, 4);
   assert.throws(() => resolveE2EDatabasePool({ configuredUrls: 'https://example.com/not-a-database' }), /Notion URL/);

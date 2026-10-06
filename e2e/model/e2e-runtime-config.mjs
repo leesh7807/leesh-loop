@@ -1,7 +1,7 @@
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractNotionDatabaseId } from './notion-database-id.mjs';
-import { assertBranch, normalizeRef } from '../systems/git/git-ref-validation.mjs';
+import { assertBranch } from '../systems/git/git-ref-validation.mjs';
 import { readRepositoryEnvironmentValue } from '../../operator/local-environment.mjs';
 import { readProjectConfiguration } from '../../operator/project-config.mjs';
 
@@ -52,8 +52,8 @@ export async function loadE2ERuntimeConfig({ root = repositoryRoot, environment 
   const configuredUrls = await readRepositoryEnvironmentValue('LEESH_LOOP_E2E_NOTION_DATABASE_URLS', { environment, envFile });
   const existingUrl = await readRepositoryEnvironmentValue('LEESH_LOOP_E2E_NOTION_DATABASE_URL', { environment, envFile });
   const databasePool = resolveE2EDatabasePool({ configuredUrls, existingUrl });
-  const productionBaseBranch = assertBranch(productionProject.github_base_branch);
-  const seedSourceRef = normalizeRef(`refs/heads/${productionBaseBranch}`);
+  const productionBaseBranch = productionProject.github_base_branch;
+  const seedSourceRef = `refs/heads/${productionBaseBranch}`;
   const workflowPath = join(absoluteRoot, 'e2e/WORKFLOW.md');
   const paths = {
     runRecordDirectory: join(absoluteRoot, 'e2e/runs'),
