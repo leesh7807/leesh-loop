@@ -73,15 +73,35 @@ function generatedProject(target) {
 }
 
 function generatedProjectToml(project) {
-  const guidance = [
+  const serialized = stringifyProjectConfiguration(project).trimEnd();
+  const settingLines = new Map(serialized.split('\n').map(line => {
+    const match = line.match(/^([a-z_]+)\s*=/);
+    if (!match) throw new Error(`cannot group generated Project setting: ${line}`);
+    return [match[1], line];
+  }));
+  const setting = key => {
+    const line = settingLines.get(key);
+    if (!line) throw new Error(`missing generated Project setting: ${key}`);
+    settingLines.delete(key);
+    return line;
+  };
+  const lines = [
     '# Project settings for this Loop. Relative paths start at this file.',
     '# Absolute paths and ~/ paths are also supported.',
     '',
-    '# Operator UI port. Default: 4310. Change it if another local app uses this port.',
-    '# ui_port = 4311',
+    '# Target Git repository and base branch for this Loop.',
+    setting('github_repository_url'),
+    setting('github_base_branch'),
     '',
-    '# Symphony runtime port. Default: 4100. Change it if another local app uses this port.',
-    '# symphony_port = 4101',
+    '# Worker contract file. Relative paths use this project.toml directory.',
+    setting('workflow_path'),
+    '',
+    '# Worker workspace root. Relative paths use this project.toml directory.',
+    setting('symphony_workspace_root'),
+    '# Init keeps worker workspaces under this generated Loop root.',
+    setting('allow_workspace_root_inside_repository'),
+    '# Runtime state directory. Relative paths use this project.toml directory.',
+    setting('state_directory'),
     '',
     '# Extra regular files copied into every newly created worker workspace.',
     '# Relative paths use this project.toml directory; absolute paths and ~/ paths also work.',
@@ -92,7 +112,15 @@ function generatedProjectToml(project) {
     '# Example: workspace_files = ["../your-repository/local-settings.json"]',
     'workspace_files = []',
     '',
-    '# Optional Codex worker overrides. Change or remove these to use your Codex defaults.',
+    '# Optional Codex worker overrides. Remove either value to use that Codex default.',
+    setting('codex_model'),
+    setting('codex_reasoning_effort'),
+    '',
+    '# Operator UI port. Default: 4310. Change it if another local app uses this port.',
+    '# ui_port = 4311',
+    '',
+    '# Symphony runtime port. Default: 4100. Change it if another local app uses this port.',
+    '# symphony_port = 4101',
     '',
     '# Open the Operator page automatically on start. Default: true.',
     '# open_project_surfaces = false',
@@ -105,9 +133,9 @@ function generatedProjectToml(project) {
     '',
     '# Browser acknowledgement timeout in milliseconds. Default: 1000.',
     '# browser_acknowledgement_timeout_ms = 1000',
-    ''
-  ].join('\n');
-  return `${guidance}${stringifyProjectConfiguration(project)}`;
+  ];
+  if (settingLines.size) throw new Error(`unplaced generated Project settings: ${[...settingLines.keys()].join(', ')}`);
+  return `${lines.join('\n').trimEnd()}\n`;
 }
 
 function generatedPackage(repositoryName) {

@@ -135,6 +135,11 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.match(projectText, /workspace root under its basename/);
   assert.match(projectText, /same basename are rejected/);
   assert.match(projectText, /Directories and globs are not supported/);
+  assert.match(projectText, /# Target Git repository and base branch for this Loop\.\ngithub_repository_url = .+\ngithub_base_branch = .+/);
+  assert.match(projectText, /# Worker contract file\. Relative paths use this project\.toml directory\.\nworkflow_path = .+/);
+  assert.match(projectText, /# Optional Codex worker overrides\. Remove either value to use that Codex default\.\ncodex_model = .+\ncodex_reasoning_effort = .+/);
+  assert.ok(projectText.indexOf('# Target Git repository') < projectText.indexOf('# Extra regular files'));
+  assert.ok(projectText.indexOf('# Extra regular files') < projectText.indexOf('# Optional Codex'));
   assert.match(projectText, /open_project_surfaces = false/);
   assert.match(projectText, /startup_timeout_ms = 1800000/);
   assert.doesNotMatch(projectText, /NOTION_TOKEN|LEESH_LOOP_NOTION_DATABASE_URL/);
