@@ -70,4 +70,6 @@ On start, Operator checks the Notion connection, workspace, GitHub access, and c
 
 The worker workspace is cloned from the configured base. Task branches, Rework, pull requests, and merge verification use that configured base; the remote default branch is not a substitute. Workspace files and review credentials stay within their separate ownership boundaries.
 
-Repository E2E verification has its own guide and runtime under [`e2e/README.md`](../e2e/README.md). It is not part of the normal `npm start` user flow.
+### Production E2E configuration
+
+The Production E2E host supplies `NOTION_TOKEN` and `LEESH_LOOP_E2E_NOTION_DATABASE_URL`. See [`e2e/README.md`](../e2e/README.md) for setup details. Production E2E has its own runtime and is not part of the normal `npm start` user flow.
