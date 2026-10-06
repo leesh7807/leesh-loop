@@ -232,7 +232,7 @@ export class RunAdmission {
               ? 'dead'
               : await inspectProcessIdentity(child.process_identity);
           const runState = await inspectProcessIdentity(lifecycle.run_process);
-          const runDead = TERMINAL_RUN_STATES.has(lifecycle.status) || runState === 'dead';
+          const runDead = runState === 'dead';
           if (!runDead || !['not_started', 'stopped'].includes(child.status) && childState !== 'dead') {
             const evidence = { lifecycle_status: lifecycle.status, run_process_state: runState, child_runtime_status: child.status, child_process_state: childState };
             const result = await this.reservationAuthority.recordRecoveryFailure(snapshot, { reason: 'previous E2E run or child runtime is active or unverified', lifecycle: evidence });
