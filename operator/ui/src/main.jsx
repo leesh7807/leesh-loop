@@ -286,6 +286,10 @@ function App() {
     return () => { active = false; window.clearInterval(timer); };
   }, [refresh]);
 
+  useEffect(() => {
+    if (config?.githubRepositoryName) document.title = `${config.githubRepositoryName} · Loop`;
+  }, [config?.githubRepositoryName]);
+
   function toggleBlocker(task) {
     setDraft(current => {
       const selectedBlockers = current.selectedBlockers.some(selected => selected.taskId === task.taskId)
@@ -316,11 +320,11 @@ function App() {
   return (
     <div className="page-shell">
       <header className="page-header">
-        <div>
-          <h1>Project work</h1>
+        <div className="project-identity">
+          <h1>{config?.githubRepositoryName || 'Project work'}</h1>
         </div>
         <nav className="related-work" aria-label="Project navigation">
-          {config?.githubRepositoryUrl && <a href={config.githubRepositoryUrl} target="_blank" rel="noreferrer">GitHub repository ↗</a>}
+          {config?.githubBrowserRepositoryUrl && <a href={config.githubBrowserRepositoryUrl} target="_blank" rel="noreferrer">GitHub repository ↗</a>}
           {config?.notionTasksUrl && <a href={config.notionTasksUrl} target="_blank" rel="noreferrer">Notion Tasks ↗</a>}
           {config?.dashboardUrl && <a className="runtime-details" href={config.dashboardUrl} target="_blank" rel="noreferrer">Runtime details ↗</a>}
         </nav>

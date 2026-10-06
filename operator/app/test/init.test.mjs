@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import { initLoop } from '../init.mjs';
 import { RUNTIME_SNAPSHOT_PATHS, listRuntimeSnapshotFiles } from '../runtime-manifest.mjs';
-import { githubRepositoryTransport } from '../github-repository-url.mjs';
+import { githubRepositoryDetails, githubRepositoryTransport } from '../github-repository-url.mjs';
 
 const execFile = promisify(execute);
 const sourceRoot = resolve(import.meta.dirname, '../../..');
@@ -224,11 +224,64 @@ test('runtime snapshot selection is a tracked whitelist and preserves executable
 });
 
 test('one GitHub repository URL policy accepts the supported HTTPS and SSH transports', () => {
-  assert.equal(githubRepositoryTransport('https://github.com/example/repository.git'), 'https');
-  assert.equal(githubRepositoryTransport('git@github.com:example/repository.git'), 'ssh');
-  assert.equal(githubRepositoryTransport('ssh://git@github.com/example/repository.git'), 'ssh');
+  for (const [url, transport] of [
+    ['https://github.com/example/repository.git', 'https'],
+    ['git@github.com:example/repository.git', 'ssh'],
+    ['ssh://git@github.com/example/repository.git', 'ssh']
+  ]) {
+    assert.equal(githubRepositoryTransport(url), transport);
+    assert.deepEqual(githubRepositoryDetails(url), {
+      transport,
+      owner: 'example',
+      repository: 'repository',
+      identity: 'example/repository',
+      name: 'repository',
+      browserRepositoryUrl: 'https://github.com/example/repository'
+    });
+  }
   assert.throws(() => githubRepositoryTransport('https://user:token@github.com/example/repository.git'), /contains credentials/);
   assert.throws(() => githubRepositoryTransport('https://gitlab.com/example/repository.git'), /requires a GitHub repository/);
   assert.throws(() => githubRepositoryTransport('https://github.com/example/repository/tree/main'), /does not identify a GitHub repository/);
+  assert.throws(() => githubRepositoryTransport('git@github.com:example/repository/tree/main'), /requires an HTTPS or SSH GitHub upstream URL/);
+  assert.throws(() => githubRepositoryTransport('ssh://git@github.com/example/repo?tab=code'), /does not identify a GitHub repository/);
   assert.throws(() => githubRepositoryTransport('git@github.com:example'), /requires an HTTPS or SSH GitHub upstream URL/);
+});
+
+test('init preserves HTTPS and SSH clone URLs while the generated Loop resolves one repository identity', async t => {
+  for (const remoteUrl of [
+    'https://github.com/example/sample-repository.git',
+    'git@github.com:example/sample-repository.git',
+    'ssh://git@github.com/example/sample-repository.git'
+  ]) {
+    await t.test(remoteUrl, async t => {
+      const target = await makeTarget(t, { remoteUrl });
+      const before = (await git(target.targetRoot, 'status', '--porcelain')).stdout;
+      await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
+      const project = JSON.parse(await readFile(join(target.destination, 'operator/project.json'), 'utf8'));
+      const generatedServerUrl = pathToFileURL(join(target.destination, 'operator/app/operator-ui-server.mjs')).href;
+      const { createOperatorUiServer } = await import(generatedServerUrl);
+      const server = await createOperatorUiServer({
+        root: target.destination,
+        config: { ...project, notion_database_url: 'https://www.notion.so/example', ui_port: 4310, symphony_port: 4100 },
+        stateDirectory: join(target.destination, '.runtime/state'),
+        publisherConfigPath: join(target.destination, 'operator/notion_publisher/examples/publisher-config.json'),
+        publisherState: { states: ['Backlog', 'Ready', 'Human Review'], defaultState: 'Ready' },
+        loadTaskReader: async () => ({ listTasks: async () => [] })
+      });
+      server.listen(0, '127.0.0.1');
+      await new Promise((resolveListen, rejectListen) => { server.once('listening', resolveListen); server.once('error', rejectListen); });
+      t.after(() => new Promise(resolveClose => { server.closeAllConnections(); server.close(resolveClose); }));
+
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/api/v1/config`);
+      const config = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(project.github_repository_url, remoteUrl);
+      assert.equal(project.github_base_branch, 'releases/2026/init');
+      assert.equal(config.githubRepositoryIdentity, 'example/sample-repository');
+      assert.equal(config.githubRepositoryName, 'sample-repository');
+      assert.equal(config.githubBrowserRepositoryUrl, 'https://github.com/example/sample-repository');
+      assert.equal(Object.hasOwn(config, 'githubRepositoryUrl'), false, 'the UI read model must not expose the clone URL as a browser destination');
+      assert.equal((await git(target.targetRoot, 'status', '--porcelain')).stdout, before);
+    });
+  }
 });
