@@ -31,6 +31,7 @@ Source Loop와 Generated Loop가 동일한 `workspace_files` 의미를 갖게 �
 - Generated Workflow의 `after_create`에서 clone 직후 기존 workspace file materializer를 실행하도록 연결한다.
 - 파일 복사나 validation 로직을 `init`에 별도로 구현하지 않는다.
 - `project.toml`의 `workspace_files` 형식, runtime environment 전달 방식 및 `operator/app/workspace-files.mjs`의 책임은 변경하지 않는다.
+- `LEESH_LOOP_WORKSPACE_FILES` 전달은 그대로 유지한다. Generated runtime root는 별도 `LEESH_LOOP_RUNTIME_ROOT` 환경값으로 전달하여 설정 가능한 workspace root 깊이와 무관하게 snapshot materializer를 찾는다.
 - `docs/WORKFLOW_TEMPLATE.md`는 worker contract 본문 책임으로 유지한다. 이번 수정은 init-owned frontmatter 생성 책임 안에서 처리한다.
 - Source Loop root workflow, Symphony workspace lifecycle, worker dispatch, Notion lifecycle, Publisher, review flow 및 E2E orchestration은 protected scope다.
 - 기존 파일과 주요 함수 이름을 유지하며 새로운 abstraction은 추가하지 않는다.
@@ -64,7 +65,7 @@ Source Loop와 Generated Loop가 동일한 `workspace_files` 의미를 갖게 �
 ## Verification Tools
 
 - `node --test operator/app/test/init.test.mjs`
-  - Generated Workflow의 `after_create` wiring과 기존 init 회귀를 확인한다.
+  - Generated Workflow의 `after_create` wiring과 custom workspace root에서도 runtime snapshot materializer를 찾는 경로, 기존 init 회귀를 확인한다.
 - workspace file 관련 기존 Node tests
   - 기존 materialization 및 validation 계약이 유지되는지 확인한다.
 - Generated `WORKFLOW.md` readback

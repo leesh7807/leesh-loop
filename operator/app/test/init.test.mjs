@@ -87,6 +87,7 @@ test('init uses only the current branch configured upstream and creates an indep
   const projectPath = join(target.destination, 'project.toml');
   const projectText = await readFile(projectPath, 'utf8');
   const project = await readProjectConfiguration(projectPath);
+  const loopRuntime = await readFile(join(target.destination, 'operator/app/leesh-loop.mjs'), 'utf8');
   const generatedPackage = JSON.parse(await readFile(join(target.destination, 'package.json'), 'utf8'));
   const workflow = await readFile(join(target.destination, 'WORKFLOW.md'), 'utf8');
   const template = (await readFile(join(sourceRoot, 'docs/WORKFLOW_TEMPLATE.md'), 'utf8')).trim();
@@ -122,9 +123,10 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.match(bootstrap, /root: \$SYMPHONY_WORKSPACE_ROOT/);
   assert.match(bootstrap, /git clone --branch "\$SYMPHONY_GITHUB_BASE_BRANCH" "\$SYMPHONY_GITHUB_REPOSITORY_URL"/);
   const cloneIndex = bootstrap.indexOf('git clone --branch "$SYMPHONY_GITHUB_BASE_BRANCH" "$SYMPHONY_GITHUB_REPOSITORY_URL" .');
-  const materializerIndex = bootstrap.indexOf('node "$SYMPHONY_WORKSPACE_ROOT/../../operator/app/workspace-files.mjs" "$PWD"');
+  const materializerIndex = bootstrap.indexOf('node "$LEESH_LOOP_RUNTIME_ROOT/operator/app/workspace-files.mjs" "$PWD"');
   assert.ok(cloneIndex >= 0, 'generated after_create must clone the configured repository');
   assert.ok(materializerIndex > cloneIndex, 'generated after_create must invoke the existing materializer after cloning');
+  assert.match(loopRuntime, /LEESH_LOOP_RUNTIME_ROOT: root/);
   assert.match(bootstrap, /env PATH="\$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:\$PATH"/);
   assert.ok(files.includes('operator/notion_publisher/package-lock.json'));
   assert.ok(files.includes('operator/ui/package-lock.json'));
@@ -166,6 +168,32 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.ok(!files.some(file => file === '.env'));
   assert.deepEqual(files.filter(file => !['.env.example', 'WORKFLOW.md', 'package.json', 'project.toml'].includes(file)), manifestFiles);
   assert.equal((await git(target.targetRoot, 'status', '--porcelain')).stdout, before);
+});
+
+test('generated after_create resolves its materializer independently of a custom workspace root', async t => {
+  const target = await makeTarget(t);
+  await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
+  const workflow = await readFile(join(target.destination, 'WORKFLOW.md'), 'utf8');
+  const template = (await readFile(join(sourceRoot, 'docs/WORKFLOW_TEMPLATE.md'), 'utf8')).trim();
+  const bootstrap = workflow.slice(0, workflow.indexOf(template)).trimEnd();
+  const materializerCommand = bootstrap.split('\n').map(line => line.trim()).find(line => line.startsWith('node "$LEESH_LOOP_RUNTIME_ROOT/operator/app/workspace-files.mjs"'));
+  assert.ok(materializerCommand, 'generated after_create must use the runtime-root materializer path');
+
+  const customWorkspaceRoot = join(target.directory, 'custom-workspaces');
+  const workspace = join(customWorkspaceRoot, 'new-worker');
+  const source = join(target.directory, 'custom-settings.json');
+  await mkdir(workspace, { recursive: true });
+  await writeFile(source, '{"workspace":"custom-root"}\n');
+  await execFile('sh', ['-ec', materializerCommand], {
+    cwd: workspace,
+    env: {
+      ...process.env,
+      LEESH_LOOP_RUNTIME_ROOT: target.destination,
+      LEESH_LOOP_WORKSPACE_FILES: JSON.stringify([source]),
+      SYMPHONY_WORKSPACE_ROOT: customWorkspaceRoot
+    }
+  });
+  assert.equal(await readFile(join(workspace, 'custom-settings.json'), 'utf8'), '{"workspace":"custom-root"}\n');
 });
 
 test('an initialized independent Loop uses its bundled worker interface on fast start', async t => {

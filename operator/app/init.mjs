@@ -180,7 +180,7 @@ function generatedWorkflow(template) {
     '    : "${SYMPHONY_GITHUB_REPOSITORY_URL:?SYMPHONY_GITHUB_REPOSITORY_URL is required}"',
     '    : "${SYMPHONY_GITHUB_BASE_BRANCH:?SYMPHONY_GITHUB_BASE_BRANCH is required}"',
     '    git clone --branch "$SYMPHONY_GITHUB_BASE_BRANCH" "$SYMPHONY_GITHUB_REPOSITORY_URL" .',
-    '    node "$SYMPHONY_WORKSPACE_ROOT/../../operator/app/workspace-files.mjs" "$PWD"',
+    '    node "$LEESH_LOOP_RUNTIME_ROOT/operator/app/workspace-files.mjs" "$PWD"',
     'agent:',
     '  max_turns: 20',
     'codex:',
