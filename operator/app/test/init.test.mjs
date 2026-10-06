@@ -121,6 +121,10 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.match(bootstrap, /database_url: \$LEESH_LOOP_NOTION_DATABASE_URL/);
   assert.match(bootstrap, /root: \$SYMPHONY_WORKSPACE_ROOT/);
   assert.match(bootstrap, /git clone --branch "\$SYMPHONY_GITHUB_BASE_BRANCH" "\$SYMPHONY_GITHUB_REPOSITORY_URL"/);
+  const cloneIndex = bootstrap.indexOf('git clone --branch "$SYMPHONY_GITHUB_BASE_BRANCH" "$SYMPHONY_GITHUB_REPOSITORY_URL" .');
+  const materializerIndex = bootstrap.indexOf('node "$SYMPHONY_WORKSPACE_ROOT/../../operator/app/workspace-files.mjs" "$PWD"');
+  assert.ok(cloneIndex >= 0, 'generated after_create must clone the configured repository');
+  assert.ok(materializerIndex > cloneIndex, 'generated after_create must invoke the existing materializer after cloning');
   assert.match(bootstrap, /env PATH="\$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:\$PATH"/);
   assert.ok(files.includes('operator/notion_publisher/package-lock.json'));
   assert.ok(files.includes('operator/ui/package-lock.json'));
