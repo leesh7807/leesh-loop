@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile as execute } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -12,6 +12,11 @@ import { githubRepositoryDetails, githubRepositoryTransport } from '../github-re
 
 const execFile = promisify(execute);
 const sourceRoot = resolve(import.meta.dirname, '../../..');
+
+async function executable(path, contents) {
+  await writeFile(path, contents);
+  await chmod(path, 0o755);
+}
 
 async function git(cwd, ...args) {
   return execFile('git', args, { cwd, encoding: 'utf8' });
@@ -120,6 +125,10 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.ok(files.includes('operator/external/chatgpt-shot/chatgpt-shot'));
   assert.ok(files.includes('operator/app/prepare-runtime.mjs'));
   assert.ok((await stat(join(target.destination, 'operator/app/operator-bootstrap'))).mode & 0o111);
+  assert.equal(
+    await readFile(join(target.destination, 'operator/app/operator-bootstrap'), 'utf8'),
+    await readFile(join(sourceRoot, 'operator/app/operator-bootstrap'), 'utf8')
+  );
   const prepareRuntime = await readFile(join(target.destination, 'operator/app/prepare-runtime.mjs'), 'utf8');
   assert.match(prepareRuntime, /mise.*mix.*deps\.get/);
   for (const file of files) assert.ok(!(await lstat(join(target.destination, file))).isSymbolicLink(), `${file} must be materialized, not linked`);
@@ -130,6 +139,74 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.ok(!files.some(file => file === '.env'));
   assert.deepEqual(files.filter(file => !['.env.example', 'WORKFLOW.md', 'package.json', 'operator/project.json'].includes(file)), manifestFiles);
   assert.equal((await git(target.targetRoot, 'status', '--porcelain')).stdout, before);
+});
+
+test('an initialized independent Loop uses its bundled worker interface on fast start', async t => {
+  const target = await makeTarget(t);
+  await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
+  const bin = join(target.directory, 'bin');
+  const workerInterface = join(target.directory, 'cache', 'chatgpt-shot', 'worker-interface');
+  const log = join(target.directory, 'commands.log');
+  const workspace = join(target.directory, 'workspaces');
+  await mkdir(bin);
+  const nodeWrapper = `#!/bin/sh\nexec "${process.execPath}" "$@"\n`;
+  await executable(join(bin, 'node'), nodeWrapper);
+  await executable(join(bin, 'git'), `#!/bin/sh
+case "$1" in
+  check-ref-format) exit 0 ;;
+  ls-remote)
+    case "$*" in
+      *'refs/heads/releases/2026/init'*) printf '0123456789012345678901234567890123456789 refs/heads/releases/2026/init\\n' ;;
+      *' HEAD'*) printf '0123456789012345678901234567890123456789 HEAD\\n' ;;
+      *) exit 0 ;;
+    esac
+    ;;
+  *) exit 0 ;;
+esac
+`);
+  await executable(join(bin, 'gh'), '#!/bin/sh\nexit 0\n');
+  await executable(join(bin, 'curl'), '#!/bin/sh\nexit 0\n');
+  await executable(join(bin, 'chatgpt-shot'), `#!/bin/sh
+printf 'fallback\\n' >> "$INIT_TEST_LOG"
+exit 91
+`);
+  const child = join(target.directory, 'child');
+  await executable(child, `#!/bin/sh
+set -eu
+PATH="$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:$PATH"
+export PATH
+printf '%s\\n' "$(command -v chatgpt-shot)" > "$INIT_TEST_LOG"
+chatgpt-shot submit 'independent Loop review'
+`);
+
+  const env = {
+    ...process.env,
+    PATH: `${bin}:/usr/bin:/bin`,
+    HOME: join(target.directory, 'home'),
+    XDG_CONFIG_HOME: join(target.directory, 'config'),
+    XDG_DATA_HOME: join(target.directory, 'data'),
+    XDG_CACHE_HOME: join(target.directory, 'cache'),
+    INIT_TEST_LOG: log,
+    SYMPHONY_OPERATOR_STARTUP_STATUS_FILE: join(target.directory, 'startup-status'),
+    SYMPHONY_WORKSPACE_ROOT: workspace,
+    SYMPHONY_GITHUB_REPOSITORY_URL: 'git@github.com:example/sample-repository.git',
+    SYMPHONY_GITHUB_BASE_BRANCH: 'releases/2026/init'
+  };
+  delete env.SYMPHONY_OPERATOR_INTERFACE_ROOT;
+  delete env.CHATGPT_SHOT_WORKER_DISCOVERY_PATH;
+  delete env.CHATGPT_SHOT_WORKER_INTERFACE_ROOT;
+  delete env.SYMPHONY_OPERATOR_READINESS_FILE;
+  const generatedBootstrap = join(target.destination, 'operator/app/operator-bootstrap');
+  await assert.rejects(
+    execFile('sh', [generatedBootstrap, '--skip-external-readiness', '--', child], { env }),
+    error => /BROWSER_UNAVAILABLE: No prepared chatgpt-shot Service discovery/.test(String(error.stderr))
+  );
+
+  assert.equal(await readFile(log, 'utf8'), `${join(workerInterface, 'chatgpt-shot')}\n`);
+  assert.equal(
+    await readFile(join(workerInterface, 'chatgpt-shot'), 'utf8'),
+    await readFile(join(target.destination, 'operator/external/chatgpt-shot/chatgpt-shot'), 'utf8')
+  );
 });
 
 test('the existing Operator configuration loader reads Notion binding from the generated Loop root', async t => {
