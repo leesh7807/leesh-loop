@@ -50,10 +50,7 @@ codex:
     '
 ---
 
-# Leesh Loop agent execution contract
-
-Symphony workers read this file when executing tasks in this repository. It defines the agent's
-execution policy; it is not a setup guide for Leesh Loop users. See README.md for product usage.
+# Leesh Loop repository workflow
 
 You are working on an Accepted Plan task.
 
@@ -182,9 +179,11 @@ On Merging, require the Approved PR and configured base. Before conflict-resolut
 
 After conflict resolution, rerun applicable validation, `git diff --check`, final Plan comparison, and PR/merge/readback checks. Conflict resolution alone does not reopen independent review. Record the exact resulting HEAD as `merge_target_head`, re-read the PR immediately before merge, and require the same Approved PR, configured base, and exact target HEAD. Use only the normal GitHub PR merge path.
 
-After merge, fetch the configured base and verify the Approved PR's actual merged/source head equals `merge_target_head` and its merge result is present on fetched remote base. Record verified merge identity and transition `Merging → Done`.
+After merge, fetch the configured base and verify the Approved PR's actual merged/source head equals `merge_target_head` and its merge result is present on fetched remote base. Record verified merge identity.
 
 If the Approved PR is already merged, verify the same identity and remote-base presence. If no target was recorded, the merged/source head must equal Approved HEAD before recording it as target. A differing or ambiguous merged identity is a blocker.
+
+After verified merge, delete the Approved PR's remote source branch when it is safe to do so; branch-cleanup failure alone does not block `Done`. Then transition `Merging → Done`.
 
 A human-required blocker includes missing Approved identity, PR base/head mismatch, unresolved conflict, required decision outside Merging authority, validation failure, GitHub/auth/access failure, ambiguous merge result, merge identity mismatch, absent merge result on fetched base, or configured-base fetch/readback failure. Record concrete condition, repository/validation state, required human action, and remaining work; preserve Approved PR/HEAD as delivered identity; prepare `Human Review` with `reason: blocker`; transition and stop. Never choose an alternate PR, promote an unauthorized later HEAD, perform a repair merge, direct-push the base, or autonomously choose Rework.
 
