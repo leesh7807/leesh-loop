@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RunFinalizer } from '../run/finalization/run-finalizer.mjs';
 import { createRunPaths } from '../model/e2e-runtime-config.mjs';
-import { createRunRecord } from '../model/run-record-store.mjs';
+import { createRunRecord, RunRecordStore } from '../model/run-record-store.mjs';
 
 test('terminal run lifecycle is the release authority and is published before reservation ends', async () => {
   const events = [];
@@ -190,4 +190,37 @@ test('branch isolation distinguishes external changes from unresolved new refs',
   assert.deepEqual(result.evidence.branch_isolation.unrelated_deletions, ['refs/heads/deleted-before-run']);
   assert.deepEqual(result.evidence.branch_isolation.unresolved_new_refs, ['refs/heads/worker-leftover']);
   assert.equal(result.finalization.complete, true);
+});
+
+test('summary write failure fails the run without reversing completed coordination settlement', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-summary-finalization-'));
+  const config = { notion_database_url: 'https://notion.example/database', repository_url: 'git@github.com:owner/repo.git', run_record_directory: join(directory, 'runs'), workspace_root: join(directory, 'workspaces'), finalization_timeout_ms: 1000, runtime_stop_timeout_ms: 1000 };
+  const workload = { id: 'fixture', identifier: 'PLAN-FIXTURE', accepted_plan: '# Fixture\n', accepted_plan_sha256: 'hash', hard_cap_ms: 10 };
+  const record = createRunRecord({ config, database: { database_id: 'db-summary-failure', database_url: config.notion_database_url }, runId: 'run-summary-failure', workload, paths: createRunPaths(config, 'run-summary-failure') });
+  const events = [];
+  const store = new RunRecordStore(config, { summaryStore: { async write() { events.push('summary'); throw new Error('summary filesystem unavailable'); } } });
+  const reservationAuthority = {
+    async updateRunLifecycleForReservation(_databaseId, _runId, lifecycle) { events.push(`lifecycle:${lifecycle.status}`); return { committed: true }; },
+    async release() { events.push('release'); return { committed: true }; },
+    async deleteRunLifecycle() { events.push('delete_lifecycle'); return { committed: true }; },
+    async markUnavailable() { events.push('unavailable'); return { committed: true, recovery_marker: 'unexpected' }; }
+  };
+  const notion = { async readTask() { return { id: 'task-1', identifier: 'PLAN-FIXTURE', state: 'Done' }; } };
+  const evidence = { async collectSnapshot() { return { observed_at: new Date().toISOString(), notion: { id: 'task-1', identifier: 'PLAN-FIXTURE', state: 'Done' }, github: { delivery_prs: [] }, symphony: {}, git: { remote_refs: {} }, errors: [] }; } };
+  const finalizer = new RunFinalizer({ config, runRecordStore: store, notionClient: notion, operatorClient: {}, gitClient: { async listRemoteBranchRefs() { return {}; } }, githubClient: {}, runEvidenceCollector: evidence, reservationAuthority });
+
+  const result = await finalizer.finalizeRun({ record, reason: 'normal_completion', task: await notion.readTask(), normalDone: true });
+  const persisted = await store.read(record.run_id);
+
+  assert.deepEqual(events, ['lifecycle:completed', 'release', 'delete_lifecycle', 'summary']);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.summary.status, 'failed');
+  assert.equal(result.finalization.complete, true);
+  assert.deepEqual(result.finalization.unresolved, []);
+  assert.deepEqual(result.cleanup.unresolved, []);
+  assert.equal(result.database_reservation.status, 'available');
+  assert.equal(result.cleanup.run_lifecycle_coordination_deleted, true);
+  assert.equal(persisted.status, 'failed');
+  assert.equal(persisted.finalization.complete, true);
+  assert.equal(persisted.database_reservation.status, 'available');
 });

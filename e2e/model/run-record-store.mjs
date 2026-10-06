@@ -91,20 +91,9 @@ export class RunRecordStore {
       const result = await this.summaryStore.write(record);
       record.summary = { status: 'written', path: result.path, created: result.created, written_at: currentTimeIso() };
     } catch (error) {
-      const action = 'write_run_summary';
       record.status = 'failed';
       record.summary = { status: 'failed', error: String(error?.message || error) };
       if (!record.failures?.some(failure => failure.phase === 'summary_generation')) addFailure(record, error, 'summary_generation');
-      if (record.finalization) {
-        record.finalization.unresolved ||= [];
-        record.finalization.complete = false;
-        record.finalization.incomplete = true;
-        if (!record.finalization.unresolved.includes(action)) record.finalization.unresolved.push(action);
-      }
-      if (record.cleanup) {
-        record.cleanup.unresolved ||= [];
-        if (!record.cleanup.unresolved.includes(action)) record.cleanup.unresolved.push(action);
-      }
     }
     if (record.paths?.record) await this.save(record);
     return record.summary;
