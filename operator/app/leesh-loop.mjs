@@ -72,6 +72,24 @@ function effective(config, runtimeId, port) {
 }
 function compatibilityIdentity(value) { const { runtime_id: _runtimeId, skip_external_readiness, codex_model, codex_reasoning_effort, ...identity } = value || {}; return { ...identity, codex_model: codex_model ?? null, codex_reasoning_effort: codex_reasoning_effort ?? null, skip_external_readiness: skip_external_readiness === true }; }
 function compatible(oldValue, current) { return JSON.stringify(compatibilityIdentity(oldValue)) === JSON.stringify(compatibilityIdentity(current)); }
+function parseStartArguments(values) {
+  let configurationPath;
+  let skipExternalReadiness = false;
+  for (const value of values) {
+    if (value === '--skip-external-readiness') {
+      if (skipExternalReadiness) throw new Error('start accepts --skip-external-readiness only once');
+      skipExternalReadiness = true;
+      continue;
+    }
+    if (value.startsWith('-')) throw new Error(`unknown start option: ${value}`);
+    if (configurationPath !== undefined) throw new Error('start accepts at most one project configuration path');
+    configurationPath = value;
+  }
+  return { configurationPath: configurationPath || defaultConfig, skipExternalReadiness };
+}
+function startConfiguration(config, { skipExternalReadiness = false } = {}) {
+  return skipExternalReadiness ? { ...config, skip_external_readiness: true } : config;
+}
 function operatorBootstrapArgs(config, symphony, port) { return [join(root, 'operator/app/operator-bootstrap'), ...(config.skip_external_readiness ? ['--skip-external-readiness'] : []), '--', symphony, '--port', String(port), '--i-understand-that-this-will-be-running-without-the-usual-guardrails', config.workflow_path]; }
 async function request(url) { const response = await fetch(url, { signal: AbortSignal.timeout(1_000) }); if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }
 async function reachable(url) { const response = await fetch(url, { signal: AbortSignal.timeout(1_000) }); if (!response.ok) throw new Error(`HTTP ${response.status}`); }
@@ -393,21 +411,32 @@ async function serve(config, { prepared = false } = {}) {
 const args = process.argv.slice(2);
 const locked = args[0] === '__locked';
 const [command, ...commandArgs] = locked ? args.slice(1) : args;
-const configFile = commandArgs[0] || defaultConfig;
+let startOptions;
+let startArgumentError;
+if (command === 'start') {
+  try { startOptions = parseStartArguments(commandArgs); }
+  catch (error) { startArgumentError = error; }
+}
+const configFile = startOptions?.configurationPath || commandArgs[0] || defaultConfig;
 let directExecution = false;
 try { directExecution = Boolean(process.argv[1] && realpathSync(process.argv[1]) === appScript); } catch { /* Node may be importing this module from another entry point. */ }
-if (directExecution && !['start', 'stop', 'stop-owned', 'serve', 'serve-prepared'].includes(command)) {
-  const usage = 'Usage: node operator/app/leesh-loop.mjs <start|stop|stop-owned|serve> [project-config.json] [runtime-id]';
+if (directExecution && startArgumentError) {
+  console.error(`Leesh Loop could not start: ${startArgumentError.message}`);
+  process.exitCode = 2;
+} else if (directExecution && !['start', 'stop', 'stop-owned', 'serve', 'serve-prepared'].includes(command)) {
+  const usage = 'Usage: node operator/app/leesh-loop.mjs <start|stop|stop-owned|serve> [project-config.json] [runtime-id] [--skip-external-readiness for start]';
   if (command === '--help' || command === '-h') console.log(usage);
   else { console.error(usage); process.exitCode = 2; }
 } else if (directExecution) {
   let loadedConfig;
   loadConfig(configFile, { validateWorkspaceFileSources: command === 'start', requireNotionDatabase: !['stop', 'stop-owned'].includes(command) }).then(async config => {
+    if (command === 'start') config = startConfiguration(config, startOptions);
     loadedConfig = config;
     if (!locked && ['start', 'stop', 'stop-owned'].includes(command)) {
       await mkdir(stateRoot(config), { recursive: true, mode: 0o700 });
       const lockPath = join(stateRoot(config), 'lifecycle.flock');
       const lockedArgs = ['-x', lockPath, process.execPath, process.argv[1], '__locked', command, config.configuration_path];
+      if (command === 'start' && startOptions.skipExternalReadiness) lockedArgs.push('--skip-external-readiness');
       if (command === 'stop-owned') lockedArgs.push(commandArgs[1] || '');
       const result = spawnSync('flock', lockedArgs, { cwd: root, stdio: 'inherit' });
       if (result.error) throw result.error;
@@ -435,4 +464,4 @@ if (directExecution && !['start', 'stop', 'stop-owned', 'serve', 'serve-prepared
   });
 }
 
-export { acknowledgeBrowser, compatible, dispatchBrowser, effective, ensureOperatorUi, ensurePublisher, loadConfig, openProjectSurfaces, operatorBootstrapArgs, projectSurfaces, projectWindowNeedsOpening, readRequestBody, runPublisherCommand, uiIdentity, uiRuntimeSourceFiles };
+export { acknowledgeBrowser, compatible, dispatchBrowser, effective, ensureOperatorUi, ensurePublisher, loadConfig, openProjectSurfaces, operatorBootstrapArgs, parseStartArguments, projectSurfaces, projectWindowNeedsOpening, readRequestBody, runPublisherCommand, startConfiguration, uiIdentity, uiRuntimeSourceFiles };
