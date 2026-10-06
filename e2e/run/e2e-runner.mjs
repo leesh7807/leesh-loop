@@ -255,24 +255,22 @@ export class E2ERunner {
       if (!record) {
         let databaseReservation = { status: 'unknown' };
         const cleanup = { runtime_stopped: true, branches_deleted: [], workspaces_deleted: [], run_lifecycle_coordination_deleted: false, unresolved: [] };
-        try {
-          await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: currentTimeIso(), selected_database_id: admission.database.database_id });
-          const released = await this.reservationAuthority.release(admission.database.database_id, runId, { result: 'failed before workload setup' });
-          if (!released.committed) throw new Error('database reservation was not safely released after setup failure');
-          databaseReservation = { status: 'available' };
-          const removed = await this.reservationAuthority.deleteRunLifecycle(runId);
-          if (!removed.committed) throw new Error('run lifecycle coordination state was not safely removed after setup failure');
-          cleanup.run_lifecycle_coordination_deleted = true;
-        } catch (settlementError) {
-          const current = await this.reservationAuthority.read(admission.database.database_id).catch(() => null);
-          if (current?.status === 'in use' && current.reservation?.run_id === runId) {
-            const unavailable = await this.reservationAuthority.markUnavailable(admission.database.database_id, runId, 'setup failure settlement did not complete').catch(() => ({ committed: false }));
-            databaseReservation = { status: unavailable.committed ? 'unavailable' : 'unknown' };
-            if (unavailable.committed) await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: currentTimeIso(), selected_database_id: admission.database.database_id }).catch(() => {});
-          }
-          cleanup.unresolved.push('settlement cleanup');
-          error.settlement_error = String(settlementError?.message || settlementError);
-        }
+        const settlementRecord = {
+          run_id: runId,
+          binding: { database_id: admission.database.database_id },
+          runtime: { child_runtime: { status: 'not_started' } },
+          cleanup,
+          finalization: { complete: true, incomplete: false, unresolved: [] },
+          failures: [],
+          ended_at: currentTimeIso()
+        };
+        addFailure(settlementRecord, error, 'orchestration');
+        await this.runFinalizer.settleDatabaseReservation(settlementRecord);
+        databaseReservation = settlementRecord.database_reservation || { status: 'unknown' };
+        cleanup.run_lifecycle_coordination_deleted = settlementRecord.cleanup.run_lifecycle_coordination_deleted === true;
+        cleanup.unresolved = [...new Set([...settlementRecord.finalization.unresolved, ...settlementRecord.cleanup.unresolved])];
+        const settlementFailure = settlementRecord.failures.find(failure => failure.phase !== 'orchestration');
+        if (settlementFailure) error.settlement_error = settlementFailure.error;
         await this.runRecordStore.saveAdmissionFailure(error, { runId, databasePool: [admission.database], recovery: admission.recovery, workload: this.runInput.workload, databaseReservation, cleanup });
         throw error;
       }

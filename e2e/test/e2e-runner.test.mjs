@@ -8,6 +8,7 @@ import { derivePlanIdentifier, sha256 } from '../model/plan-identity.mjs';
 import { E2ERunner } from '../run/e2e-runner.mjs';
 import { RunCompletionVerifier } from '../run/lifecycle/run-completion-verifier.mjs';
 import { RunRecordStore } from '../model/run-record-store.mjs';
+import { RunFinalizer } from '../run/finalization/run-finalizer.mjs';
 import { readProjectConfiguration } from '../../operator/project-config.mjs';
 
 const plan = '# Representative task\n\nInspect the repository and write a concise note under docs/.\n';
@@ -37,6 +38,8 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
     async read() { return structuredClone(reservationState); },
     async reserve(_databaseId, reservation) { if (reservationState.status !== 'available') return { reserved: false, current: structuredClone(reservationState) }; reservationState.status = 'in use'; reservationState.reservation = { run_id: reservation.run_id, acquired_at: new Date(clock()).toISOString() }; reservationState.sequence = ++reservationSequence; reservationState.sha = `sha-${reservationSequence}`; return { reserved: true, state: structuredClone(reservationState) }; },
     async markUnavailable(_databaseId, runId, reason) { if (reservationState.reservation?.run_id !== runId) return { committed: false }; reservationState.status = 'unavailable'; reservationState.recovery_marker = `marker-${runId}`; reservationState.unavailable = { reason, run_id: runId, marker: reservationState.recovery_marker }; reservationState.reservation = null; return { committed: true, recovery_marker: reservationState.recovery_marker, state: structuredClone(reservationState) }; },
+    async release(_databaseId, runId) { if (reservationState.status !== 'in use' || reservationState.reservation?.run_id !== runId) return { committed: false }; reservationState.status = 'available'; reservationState.reservation = null; reservationState.recovery_marker = null; reservationState.unavailable = null; return { committed: true, state: structuredClone(reservationState) }; },
+    async deleteRunLifecycle(runId) { runLifecycles.delete(runId); return { committed: true }; },
     async recordActiveRecoveryObservation() { return { committed: true }; },
     async updateRunLifecycleForReservation(_databaseId, runId, lifecycle) {
       if (reservationState.status !== 'in use' || reservationState.reservation?.run_id !== runId) return { committed: false };
@@ -163,6 +166,30 @@ test('E2ERunner reaches terminal Done through injected production dependencies',
   assert.deepEqual(harness.transitions, ['Merging']);
   assert.equal(record.lifecycle.mechanical_human_review_transition.performed, true);
   assert.equal(Object.hasOwn(record.artifacts, 'mechanical_approval'), false);
+});
+
+test('pre-record setup failure preserves released availability when lifecycle cleanup fails', async () => {
+  const harness = fixture({ states: ['Ready'], clock: () => Date.now() });
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-pre-record-settlement-'));
+  harness.config.run_record_directory = join(directory, 'runs');
+  harness.config.workspace_root = join(directory, 'workspaces');
+  harness.gitClient.resolveSeedCommit = async () => { throw new Error('seed resolution failed'); };
+  const events = [];
+  const updateLifecycle = harness.reservationAuthority.updateRunLifecycleForReservation.bind(harness.reservationAuthority);
+  const release = harness.reservationAuthority.release.bind(harness.reservationAuthority);
+  harness.reservationAuthority.updateRunLifecycleForReservation = async (...args) => { events.push(`lifecycle:${args[2].status}`); return updateLifecycle(...args); };
+  harness.reservationAuthority.release = async (...args) => { events.push('release'); return release(...args); };
+  harness.reservationAuthority.deleteRunLifecycle = async () => { events.push('delete_lifecycle'); return { committed: false, reason: 'simulated lifecycle ref cleanup failure' }; };
+  const runId = 'pre-record-settlement';
+  const finalizer = new RunFinalizer({ config: harness.config, reservationAuthority: harness.reservationAuthority });
+
+  await assert.rejects(new E2ERunner({ ...harness, runFinalizer: finalizer }).runProductionE2E({ runId }), /seed resolution failed/);
+
+  const persisted = await harness.runRecordStore.read(runId);
+  assert.deepEqual(events, ['lifecycle:failed', 'release', 'delete_lifecycle']);
+  assert.equal(persisted.database_reservation.status, 'available');
+  assert.equal(persisted.cleanup.run_lifecycle_coordination_deleted, false);
+  assert.deepEqual(persisted.cleanup.unresolved, ['run_lifecycle_coordination_cleanup']);
 });
 
 test('E2ERunner keeps selected database binding explicit instead of mutating shared runtime config', async () => {
