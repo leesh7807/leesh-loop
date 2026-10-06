@@ -1,0 +1,34 @@
+{
+  "kind": "e2e_run_lifecycle",
+  "run_id": "e17fa6ca-68b5-4532-b245-7fcf95fff273",
+  "lifecycle": {
+    "run_id": "e17fa6ca-68b5-4532-b245-7fcf95fff273",
+    "status": "failed",
+    "started_at": "2026-10-06T13:11:20.154Z",
+    "run_process": {
+      "pid": 245645,
+      "process_start_ticks": "11622202",
+      "boot_id": "3cb1e199-7384-466e-8fe6-f58af3688ee5",
+      "pid_namespace": "pid:[4026531836]",
+      "host": "lees"
+    },
+    "child_runtime": {
+      "runtime_id": "a0442d81-5739-479d-ad87-b15839393e51",
+      "status": "active",
+      "process_identity": {
+        "pid": 246539,
+        "process_start_ticks": "11627016",
+        "boot_id": "3cb1e199-7384-466e-8fe6-f58af3688ee5",
+        "pid_namespace": "pid:[4026531836]",
+        "host": "lees"
+      }
+    },
+    "updated_at": "2026-10-06T13:32:06.988Z",
+    "selected_database_id": "3ea8a265-8625-8034-8507-c385c5e9c594",
+    "child_runtime_id": "a0442d81-5739-479d-ad87-b15839393e51",
+    "ended_at": "2026-10-06T13:32:03.904Z"
+  },
+  "event_sequence": 5,
+  "previous_event_sha": "1eccf86f71e144fe34f40f9bdda2587fb2fb7ef7",
+  "recorded_at": "2026-10-06T13:32:08.167Z"
+}
