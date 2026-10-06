@@ -75,3 +75,28 @@ test('invalid TOML Project ports fail before start creates runtime state', async
   );
   await assert.rejects(readFile(join(stateDirectory, 'runtime.json')), { code: 'ENOENT' });
 });
+
+test('unsupported Project setting fails before start creates runtime state', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-unknown-start-project-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const configPath = join(directory, 'project.toml');
+  const stateDirectory = join(directory, 'state');
+  await writeFile(configPath, [
+    'github_repository_url = "https://github.com/example/repository.git"',
+    'github_base_branch = "main"',
+    'workflow_path = "WORKFLOW.md"',
+    'symphony_workspace_root = ".runtime/workspaces"',
+    `state_directory = ${JSON.stringify(stateDirectory)}`,
+    'ui_prt = 4311'
+  ].join('\n'));
+
+  await assert.rejects(
+    execFile(process.execPath, [join(root, 'operator/app/leesh-loop.mjs'), 'start', configPath], { timeout: 10_000 }),
+    error => {
+      assert.equal(error.stdout, '');
+      assert.match(error.stderr, /unknown Project setting: ui_prt/);
+      return true;
+    }
+  );
+  await assert.rejects(readFile(join(stateDirectory, 'runtime.json')), { code: 'ENOENT' });
+});

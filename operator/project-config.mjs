@@ -30,6 +30,14 @@ const OPTIONAL_POSITIVE_INTEGER_SETTINGS = Object.freeze([
   'browser_acknowledgement_timeout_ms'
 ]);
 const PORT_SETTINGS = Object.freeze(['symphony_port', 'ui_port']);
+const SUPPORTED_PROJECT_SETTINGS = new Set([
+  ...REQUIRED_STRING_SETTINGS,
+  ...OPTIONAL_STRING_SETTINGS,
+  ...OPTIONAL_BOOLEAN_SETTINGS,
+  ...OPTIONAL_POSITIVE_INTEGER_SETTINGS,
+  ...PORT_SETTINGS,
+  'workspace_files'
+]);
 const gitEnvironment = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
 
 export function validateGitBranchName(branch) {
@@ -55,6 +63,9 @@ export function parseProjectToml(source, sourcePath = 'project.toml') {
 export function validateProjectConfiguration(config) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
     throw new Error('Project TOML must contain a top-level table');
+  }
+  for (const key of Object.keys(config)) {
+    if (!SUPPORTED_PROJECT_SETTINGS.has(key)) throw new Error(`unknown Project setting: ${key}`);
   }
   for (const key of REQUIRED_STRING_SETTINGS) {
     if (typeof config[key] !== 'string' || !config[key].trim()) throw new Error(`project configuration requires ${key}`);

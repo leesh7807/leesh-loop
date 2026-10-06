@@ -95,6 +95,14 @@ test('E2E rejects a Git-invalid production base branch through the shared Projec
   );
 });
 
+test('E2E rejects unsupported production Project keys through the shared Project reader', async t => {
+  const fixture = await projectFixture(t, { ui_prt: 4311 });
+  await assert.rejects(
+    loadE2ERuntimeConfig({ root: fixture.root, environment: fixture.environment, envFile: fixture.envFile }),
+    /unknown Project setting: ui_prt/
+  );
+});
+
 test('E2E requires at least one valid Notion database URL', () => {
   assert.equal(resolveE2EDatabasePool({ configuredUrls: '' }).length, 4);
   assert.throws(() => resolveE2EDatabasePool({ configuredUrls: 'https://example.com/not-a-database' }), /Notion URL/);

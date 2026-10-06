@@ -129,5 +129,7 @@ test('malformed TOML and invalid Project value types, ranges, and paths fail cle
   }
   await writeFile(projectPath, valid.replace('github_base_branch = "main"', 'github_base_branch = "foo~bar"'));
   await assert.rejects(readProjectConfiguration(projectPath), /not a valid Git branch name: foo~bar/);
+  await writeFile(projectPath, `${valid}ui_prt = 4311\n`);
+  await assert.rejects(readProjectConfiguration(projectPath), /unknown Project setting: ui_prt/);
   assert.throws(() => validateProjectConfiguration([]), /top-level table/);
 });
