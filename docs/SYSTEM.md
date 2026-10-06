@@ -43,7 +43,18 @@ Project paths are resolved relative to the directory containing root `project.to
 | `skip_external_readiness` | Optional setting that skips external review readiness; it does not skip core startup checks. |
 | `startup_timeout_ms`, `browser_acknowledgement_timeout_ms` | Optional startup and browser acknowledgement timeouts. |
 
-The Notion database URL comes from `LEESH_LOOP_NOTION_DATABASE_URL`; the integration token comes from `NOTION_TOKEN`. Operator reads either value from the process environment or the Loop root `.env`. Init does not create a Notion database, copy credentials, or save process-only values. The GitHub repository URL and base branch are always a pair.
+The Notion database URL comes from `LEESH_LOOP_NOTION_DATABASE_URL`; the integration token comes from `NOTION_TOKEN`. Operator reads either value from the process environment or the Loop root `.env`. Init does not create a Notion database, copy credentials, or save process-only values.
+
+### Git target
+
+Configure the target repository URL and base branch together:
+
+```toml
+github_repository_url = "https://github.com/example/project.git"
+github_base_branch = "main"
+```
+
+`main` is only an example; Operator does not guess the branch. The configured base is used for task workspaces and branches, and as the target for delivery pull requests.
 
 Use `workspace_files` only for regular files workers need. It is not a general credential transfer mechanism. A Git-ignored local file in the sibling target repository can be listed explicitly. The Operator validates the sources before starting and copies each file without recreating its source directories.
 
