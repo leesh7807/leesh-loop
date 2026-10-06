@@ -127,5 +127,7 @@ test('malformed TOML and invalid Project value types, ranges, and paths fail cle
     await writeFile(projectPath, valid + extra + '\n');
     await assert.rejects(readProjectConfiguration(projectPath), error => error instanceof Error && !/invalid Project TOML/.test(error.message));
   }
+  await writeFile(projectPath, valid.replace('github_base_branch = "main"', 'github_base_branch = "foo~bar"'));
+  await assert.rejects(readProjectConfiguration(projectPath), /not a valid Git branch name: foo~bar/);
   assert.throws(() => validateProjectConfiguration([]), /top-level table/);
 });

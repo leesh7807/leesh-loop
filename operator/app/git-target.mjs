@@ -5,6 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { validateGitBranchName } from '../project-config.mjs';
 
 const execFile = promisify(execute);
 const gitEnvironment = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
@@ -27,12 +28,7 @@ export async function validateBaseBranch(baseBranch) {
   if (typeof baseBranch !== 'string' || baseBranch.length === 0) {
     throw new Error('SYMPHONY_GITHUB_BASE_BRANCH must be a non-empty Git branch name.');
   }
-  try {
-    await execFile('git', ['check-ref-format', '--branch', baseBranch], { env: gitEnvironment, maxBuffer: 1024 * 1024 });
-  } catch {
-    throw new Error(`configured base branch is not a valid Git branch name: ${baseBranch}`);
-  }
-  return baseBranch;
+  return validateGitBranchName(baseBranch);
 }
 
 function parseRemoteBranch(stdout, baseBranch) {

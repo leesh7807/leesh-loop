@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import toml from './app/vendor/smol-toml/index.cjs';
@@ -29,6 +30,19 @@ const OPTIONAL_POSITIVE_INTEGER_SETTINGS = Object.freeze([
   'browser_acknowledgement_timeout_ms'
 ]);
 const PORT_SETTINGS = Object.freeze(['symphony_port', 'ui_port']);
+const gitEnvironment = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+
+export function validateGitBranchName(branch) {
+  try {
+    execFileSync('git', ['check-ref-format', '--branch', branch], {
+      env: gitEnvironment,
+      stdio: 'ignore'
+    });
+  } catch {
+    throw new Error(`configured base branch is not a valid Git branch name: ${branch}`);
+  }
+  return branch;
+}
 
 export function parseProjectToml(source, sourcePath = 'project.toml') {
   try {
@@ -45,6 +59,7 @@ export function validateProjectConfiguration(config) {
   for (const key of REQUIRED_STRING_SETTINGS) {
     if (typeof config[key] !== 'string' || !config[key].trim()) throw new Error(`project configuration requires ${key}`);
   }
+  validateGitBranchName(config.github_base_branch);
   for (const key of OPTIONAL_STRING_SETTINGS) {
     if (config[key] !== undefined && (typeof config[key] !== 'string' || !config[key].trim())) {
       throw new Error(`${key} must be a non-empty string`);

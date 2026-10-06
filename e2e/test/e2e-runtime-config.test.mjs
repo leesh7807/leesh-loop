@@ -87,6 +87,14 @@ test('production authority validates required fields and only imports supported 
   await assert.rejects(loadE2ERuntimeConfig({ root: fixture.root, environment: fixture.environment, envFile: fixture.envFile }), /codex_model/);
 });
 
+test('E2E rejects a Git-invalid production base branch through the shared Project reader', async t => {
+  const fixture = await projectFixture(t, { github_base_branch: 'foo~bar' });
+  await assert.rejects(
+    loadE2ERuntimeConfig({ root: fixture.root, environment: fixture.environment, envFile: fixture.envFile }),
+    /not a valid Git branch name: foo~bar/
+  );
+});
+
 test('E2E requires at least one valid Notion database URL', () => {
   assert.equal(resolveE2EDatabasePool({ configuredUrls: '' }).length, 4);
   assert.throws(() => resolveE2EDatabasePool({ configuredUrls: 'https://example.com/not-a-database' }), /Notion URL/);

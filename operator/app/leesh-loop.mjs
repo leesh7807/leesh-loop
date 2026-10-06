@@ -6,7 +6,6 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { validateWorkspaceFiles } from './workspace-files.mjs';
-import { validateBaseBranch } from './git-target.mjs';
 import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
 import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
@@ -48,7 +47,6 @@ async function loadConfig(file, { validateWorkspaceFileSources = true, requireNo
   const config = await readProjectConfiguration(file, { validateWorkspaceFileSources: false, homeDirectory });
   const notion_database_url = await readRepositoryEnvironmentValue('LEESH_LOOP_NOTION_DATABASE_URL', { environment, envFile });
   if (requireNotionDatabase && !notion_database_url) throw new Error('missing LEESH_LOOP_NOTION_DATABASE_URL: set it in the Operator environment or repository-root .env');
-  await validateBaseBranch(config.github_base_branch);
   if (validateWorkspaceFileSources) await validateWorkspaceFiles(config.workspace_files);
   return { ...config, notion_database_url };
 }
