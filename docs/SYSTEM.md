@@ -43,6 +43,19 @@ Project paths are resolved relative to `operator/project.json`; absolute paths a
 
 The Notion database URL comes from `LEESH_LOOP_NOTION_DATABASE_URL`; the integration token comes from `NOTION_TOKEN`. Operator reads either value from the process environment or the Loop root `.env`. Init does not create a Notion database, copy credentials, or save process-only values. The GitHub repository URL and base branch are always a pair.
 
+### Git target
+
+Configure `github_repository_url` and `github_base_branch` together. For example:
+
+```json
+{
+  "github_repository_url": "https://github.com/OWNER/REPOSITORY.git",
+  "github_base_branch": "main"
+}
+```
+
+`main` is only an example; use the target repository's intended base branch. The configured base supplies task workspaces and branches, and delivery pull requests target it.
+
 Treat `workspace_files` carefully: each configured file is copied into new worker workspaces. Do not use it for credentials or files that workers do not need. Continuations keep their existing workspace files.
 
 ### Changing settings while the Loop is running
