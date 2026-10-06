@@ -36,7 +36,6 @@ function fixture({ states, clock, includeTrackerInput = true, reviewWorkpad, rev
   const reservationAuthority = {
     async read() { return structuredClone(reservationState); },
     async reserve(_databaseId, reservation) { if (reservationState.status !== 'available') return { reserved: false, current: structuredClone(reservationState) }; reservationState.status = 'in use'; reservationState.reservation = { run_id: reservation.run_id, acquired_at: new Date(clock()).toISOString() }; reservationState.sequence = ++reservationSequence; reservationState.sha = `sha-${reservationSequence}`; return { reserved: true, state: structuredClone(reservationState) }; },
-    async updateReservationMetadata(_databaseId, runId, metadata) { reservationState.reservation = { ...reservationState.reservation, ...metadata }; reservationState.sequence = ++reservationSequence; reservationState.sha = `sha-${reservationSequence}`; return { committed: reservationState.reservation.run_id === runId, state: structuredClone(reservationState) }; },
     async markUnavailable(_databaseId, runId, reason) { if (reservationState.reservation?.run_id !== runId) return { committed: false }; reservationState.status = 'unavailable'; reservationState.recovery_marker = `marker-${runId}`; reservationState.unavailable = { reason, run_id: runId, marker: reservationState.recovery_marker }; reservationState.reservation = null; return { committed: true, recovery_marker: reservationState.recovery_marker, state: structuredClone(reservationState) }; },
     async recordActiveRecoveryObservation() { return { committed: true }; },
     async updateRunLifecycleForReservation(_databaseId, runId, lifecycle) {
@@ -148,7 +147,9 @@ test('E2ERunner reaches terminal Done through injected production dependencies',
   assert.ok(persistedStartRequests[0]);
   assert.equal(harness.runtimeStartingAtCall.length, 1);
   assert.equal(harness.runtimeStartingAtCall[0].status, 'starting');
-  assert.equal(harness.runtimeStartingAtCall[0].state_path, record.paths.runtime_state);
+  assert.equal(harness.runtimeStartingAtCall[0].state_path, undefined);
+  assert.equal(harness.runtimeStartingAtCall[0].ports, undefined);
+  assert.equal(record.runtime.child_runtime.state_path, record.paths.runtime_state);
   assert.deepEqual(harness.startedDatabaseUrls, [harness.config.notion_database_url]);
   assert.equal(record.lifecycle.observations[0].state, 'Ready');
   assert.equal(record.workload.execution_number, 1);

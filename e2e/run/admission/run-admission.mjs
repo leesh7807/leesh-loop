@@ -26,24 +26,44 @@ export class RunAdmission {
     this.identity = identity;
   }
 
-  async checkRunAdmission({ runId = this.identity(), runProcess, origin = 'direct', outerExecutionProvenance = null } = {}) {
+  async settleUnadmittedRunLifecycle(runId) {
+    const cleanup = { runtime_stopped: true, branches_deleted: [], workspaces_deleted: [], run_lifecycle_coordination_deleted: false, unresolved: [] };
+    let databaseReservation = { status: 'not acquired' };
+    try {
+      const result = await this.reservationAuthority.deleteRunLifecycle(runId);
+      if (result.committed) {
+        cleanup.run_lifecycle_coordination_deleted = true;
+      } else {
+        databaseReservation = { status: 'unavailable' };
+        cleanup.unresolved.push('run_lifecycle_coordination_cleanup');
+      }
+    } catch {
+      databaseReservation = { status: 'unknown' };
+      cleanup.unresolved.push('run_lifecycle_coordination_cleanup');
+    }
+    return { cleanup, databaseReservation };
+  }
+
+  async checkRunAdmission({ runId = this.identity(), runProcess, workload = null } = {}) {
     if (!runProcess) throw new Error('E2E admission requires a durable run process identity');
     await this.reservationAuthority.writeRunLifecycle(runId, {
       run_id: runId,
       status: 'active',
-      origin,
       started_at: currentTimeIso(),
       run_process: runProcess,
-      outer_execution_provenance: outerExecutionProvenance,
       child_runtime: { status: 'not_started' }
     });
 
     const recovery = await this.recoveryPass();
+    const recoveryCleanupBlocked = new Set(recovery
+      .filter(item => item.result === 'recovered; run lifecycle cleanup pending')
+      .map(item => item.database_id));
     let databaseAdmissionFailures = [];
     let contentionObserved = false;
     for (let pass = 0; pass < 2; pass += 1) {
       let acquired = false;
       for (const candidate of this.config.database_pool) {
+        if (recoveryCleanupBlocked.has(candidate.database_id)) continue;
         let current;
         try { current = await this.reservationAuthority.read(candidate.database_id); }
         catch (error) {
@@ -51,10 +71,7 @@ export class RunAdmission {
           continue;
         }
         if (current.status !== DATABASE_STATES.AVAILABLE) continue;
-        const result = await this.reservationAuthority.reserve(candidate.database_id, {
-          run_id: runId,
-          origin
-        });
+        const result = await this.reservationAuthority.reserve(candidate.database_id, { run_id: runId });
         if (!result.reserved) {
           contentionObserved = true;
           continue;
@@ -72,13 +89,13 @@ export class RunAdmission {
             continue;
           }
           const refs = await this.gitClient.listRemoteBranchRefs();
-          await this.reservationAuthority.writeRunLifecycle(runId, { selected_database_id: candidate.database_id, database_url: candidate.database_url });
+          await this.reservationAuthority.writeRunLifecycle(runId, { selected_database_id: candidate.database_id });
           return { admitted: true, run_id: runId, database: candidate, workload: this.catalog, tasks, refs, recovery };
         } catch (error) {
           if (acquired) {
             const transition = await this.reservationAuthority.markUnavailable(candidate.database_id, runId, 'database-specific admission or required readback failed', { error: String(error?.message || error) }).catch(() => ({ committed: false }));
             if (!transition.committed) {
-              await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: currentTimeIso(), failure: 'database admission failed and reservation could not be safely ended' }).catch(() => {});
+              await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: currentTimeIso() }).catch(() => {});
               throw new Error(`E2E database admission failed and database ${candidate.database_id} could not be made unavailable: ${error.message}`);
             }
           }
@@ -94,16 +111,18 @@ export class RunAdmission {
     if (databaseAdmissionFailures.length) {
       const error = new Error(`E2E database admission failed for ${databaseAdmissionFailures.map(item => item.database_id).join(', ')}`);
       error.database_admission_failures = databaseAdmissionFailures;
-      await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: currentTimeIso(), database_admission_failures: databaseAdmissionFailures }).catch(() => {});
-      await this.runRecordStore?.saveAdmissionFailure(error, { runId, databasePool: this.config.database_pool, recovery }).catch(() => {});
+      await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: currentTimeIso() }).catch(() => {});
+      const settlement = await this.settleUnadmittedRunLifecycle(runId);
+      await this.runRecordStore?.saveAdmissionFailure(error, { runId, databasePool: this.config.database_pool, recovery, workload, ...settlement }).catch(() => {});
       return { admitted: false, failure: 'database_admission_failed', run_id: runId, recovery, error: error.message };
     }
 
     const admission = new ResourceUnavailableAdmissionError(runId);
-    await this.reservationAuthority.writeRunLifecycle(runId, { status: 'resource_unavailable_admission', ended_at: currentTimeIso(), database_id: null }).catch(error => {
+    await this.reservationAuthority.writeRunLifecycle(runId, { status: 'resource_unavailable_admission', ended_at: currentTimeIso() }).catch(error => {
       throw new Error(`resource unavailable admission could not be recorded durably: ${error.message}`);
     });
-    await this.runRecordStore?.saveAdmissionFailure(admission, { runId, databasePool: this.config.database_pool, recovery });
+    const settlement = await this.settleUnadmittedRunLifecycle(runId);
+    await this.runRecordStore?.saveAdmissionFailure(admission, { runId, databasePool: this.config.database_pool, recovery, workload, ...settlement });
     return { admitted: false, failure: admission.code, run_id: runId, recovery, error: admission.message };
   }
 
@@ -130,6 +149,7 @@ export class RunAdmission {
   }
 
   async recoveryPass() {
+    await this.reservationAuthority.reconcileCurrentState?.(this.config.database_pool);
     const results = [];
     for (const candidate of this.config.database_pool) {
       try {
@@ -174,10 +194,18 @@ export class RunAdmission {
     const evidence = {
       run_lifecycle_status: lifecycle.status,
       run_process: { identity: runProcess || null, result: runProcessState },
-      child_runtime: { runtime_id: childRuntime.runtime_id || null, identity: childRuntime.process_identity || null, result: childProcessState },
-      outer_execution_provenance: lifecycle.outer_execution_provenance || null
+      child_runtime: { runtime_id: childRuntime.runtime_id || null, identity: childRuntime.process_identity || null, result: childProcessState }
     };
-    if (!runTerminal) await this.reservationAuthority.writeRunLifecycle(runId, { status: 'interrupted', ended_at: currentTimeIso(), interruption_evidence: evidence });
+    const settledChildRuntime = {
+      runtime_id: childRuntime.runtime_id || null,
+      status: childRuntime.status === 'not_started' ? 'not_started' : 'stopped',
+      process_identity: childRuntime.process_identity || null
+    };
+    await this.reservationAuthority.writeRunLifecycle(runId, {
+      status: runTerminal ? lifecycle.status : 'interrupted',
+      ended_at: lifecycle.ended_at || currentTimeIso(),
+      child_runtime: settledChildRuntime
+    });
     const transition = await this.reservationAuthority.markDeadRunUnavailable(state, evidence);
     if (!transition.committed) return { database_id: candidate.database_id, status: transition.state.status, run_id: runId, result: 'dead reservation changed before conditional unavailable transition', evidence };
     const unavailable = await this.reservationAuthority.read(candidate.database_id);
@@ -211,6 +239,19 @@ export class RunAdmission {
             return { database_id: candidate.database_id, status: DATABASE_STATES.UNAVAILABLE, recovery_marker: snapshot.recovery_marker, result: 'still unavailable', evidence: result.state?.unavailable || evidence };
           }
         }
+        const child = lifecycle.child_runtime || { status: 'unknown' };
+        if (!lifecycleBoundElsewhere && lifecycle && (lifecycle.status === 'active' || !['not_started', 'stopped'].includes(child.status))) {
+          const terminal = TERMINAL_RUN_STATES.has(lifecycle.status);
+          lifecycle = await this.reservationAuthority.writeRunLifecycle(previousRunId, {
+            status: terminal ? lifecycle.status : 'interrupted',
+            ended_at: lifecycle.ended_at || currentTimeIso(),
+            child_runtime: {
+              runtime_id: child.runtime_id || null,
+              status: child.status === 'not_started' ? 'not_started' : 'stopped',
+              process_identity: child.process_identity || null
+            }
+          });
+        }
       }
 
       const lifecycleForDatabase = lifecycleBoundElsewhere ? null : lifecycle;
@@ -229,6 +270,10 @@ export class RunAdmission {
         cleanup
       };
       const result = await this.reservationAuthority.completeRecovery(snapshot, evidence);
+      if (result.recovered && previousRunId && !lifecycleBoundElsewhere) {
+        const removed = await this.reservationAuthority.deleteRunLifecycle(previousRunId).catch(() => ({ committed: false }));
+        if (!removed.committed) return { database_id: candidate.database_id, status: DATABASE_STATES.AVAILABLE, recovery_marker: snapshot.recovery_marker, result: 'recovered; run lifecycle cleanup pending', evidence };
+      }
       return result.recovered
         ? { database_id: candidate.database_id, status: DATABASE_STATES.AVAILABLE, recovery_marker: snapshot.recovery_marker, result: 'recovered', evidence }
         : { database_id: candidate.database_id, status: result.state.status, recovery_marker: snapshot.recovery_marker, result: result.reason, final_authoritative_state: result.state };
@@ -253,13 +298,10 @@ export class RunAdmission {
       const previousState = task.state;
       const cleanedAt = recovery.unavailable?.at || currentTimeIso();
       const provenance = [
-        '[E2E reconciliation]',
-        `previous_state: ${previousState}`,
-        'action: stale task cancelled by E2E database recovery',
-        `cleanup_time: ${cleanedAt}`,
-        `recovery_identity: ${recovery.recovery_marker}`,
-        `previous_run_id: ${recovery.unavailable?.run_id || recovery.reservation?.run_id || 'unknown'}`,
-        `previous_child_runtime_id: ${lifecycle?.child_runtime?.runtime_id || 'unknown'}`
+        '[복구 기록]',
+        `이전 상태: ${previousState}`,
+        '처리: 남아 있던 작업을 취소 상태로 정리',
+        `처리 시각: ${cleanedAt}`
       ].join('\n');
       if (!String(task.workpad || '').includes(provenance)) await this.notionClient.appendWorkpad(task.id, provenance);
       task = await this.notionClient.readTask(candidate.database_url, summary.id);

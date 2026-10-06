@@ -3,6 +3,14 @@ import { TERMINAL_STATES } from '../lifecycle/lifecycle-interpreter.mjs';
 import { addFailure, recordFinalizationAction } from '../../model/run-record-store.mjs';
 import { deleteRunOwnedDeliveryBranch } from './run-owned-delivery-branch.mjs';
 
+function coordinationChildRuntime(child) {
+  return {
+    runtime_id: child.runtime_id || null,
+    status: child.status || 'unknown',
+    process_identity: child.process_identity || null
+  };
+}
+
 export class RunFinalizer {
   constructor({ config, runRecordStore, notionClient, operatorClient, gitClient, githubClient, runEvidenceCollector, runTimingRecorder, reservationAuthority }) {
     this.config = config;
@@ -162,6 +170,7 @@ export class RunFinalizer {
     record.finalization.complete = record.finalization.unresolved.length === 0;
     if (record.status !== 'failed') record.status = 'finished';
     await this.runRecordStore.save(record);
+    await this.runRecordStore.writeSummary?.(record);
     return record;
   }
 
@@ -174,35 +183,28 @@ export class RunFinalizer {
       : { status: record.timing?.symphony?.start_requested_at ? 'unknown' : 'not_started' };
     const lifecycleStatus = record.finalization.complete ? (record.failures.length ? 'failed' : 'completed') : 'failed';
     const endedAt = record.ended_at || currentTimeIso();
-    const transitionEvidence = {
-      lifecycle_status: lifecycleStatus,
-      child_runtime_id: childRuntime.runtime_id || null,
-      child_runtime_status: childRuntime.status,
-      finalization_complete: record.finalization.complete,
-      unresolved: [...record.finalization.unresolved],
-      cleanup_unresolved: [...record.cleanup.unresolved],
-      ended_at: endedAt
-    };
     let reservationEnded = false;
+    let databaseReleased = false;
     try {
       const lifecycle = await this.reservationAuthority.updateRunLifecycleForReservation(databaseId, runId, {
         status: lifecycleStatus,
         ended_at: endedAt,
         selected_database_id: databaseId,
         child_runtime_id: childRuntime.runtime_id || null,
-        child_runtime: childRuntime,
-        finalization_complete: record.finalization.complete,
-        unresolved: [...record.finalization.unresolved],
-        cleanup_unresolved: [...record.cleanup.unresolved]
+        child_runtime: coordinationChildRuntime(childRuntime)
       });
       if (!lifecycle.committed) throw new Error('database reservation ownership changed before run lifecycle finalization readback');
       if (record.finalization.complete && record.cleanup.runtime_stopped === true && record.cleanup.unresolved.length === 0) {
-        const released = await this.reservationAuthority.release(databaseId, runId, transitionEvidence);
+        const released = await this.reservationAuthority.release(databaseId, runId);
         if (!released.committed) throw new Error(`database reservation could not be safely returned to available: ${released.reason || released.state?.status || 'conditional transition rejected'}`);
         reservationEnded = true;
+        databaseReleased = true;
         record.database_reservation = { database_id: databaseId, status: 'available', released_at: endedAt };
+        const lifecycleCleanup = await this.reservationAuthority.deleteRunLifecycle(runId);
+        if (!lifecycleCleanup.committed) throw new Error(`run lifecycle coordination state could not be safely removed: ${lifecycleCleanup.reason || 'conditional cleanup rejected'}`);
+        record.cleanup.run_lifecycle_coordination_deleted = true;
       } else {
-        const unavailable = await this.reservationAuthority.markUnavailable(databaseId, runId, 'current E2E run finalization or required cleanup did not complete', transitionEvidence);
+        const unavailable = await this.reservationAuthority.markUnavailable(databaseId, runId, 'required run cleanup or settlement did not complete');
         if (!unavailable.committed) throw new Error('current database reservation could not be atomically changed to unavailable');
         reservationEnded = true;
         record.database_reservation = { database_id: databaseId, status: 'unavailable', recovery_marker: unavailable.recovery_marker };
@@ -211,10 +213,11 @@ export class RunFinalizer {
       }
     } catch (error) {
       record.status = 'failed';
-      if (!record.finalization.unresolved.includes('database_reservation_finalization')) record.finalization.unresolved.push('database_reservation_finalization');
-      if (!record.cleanup.unresolved.includes('database_reservation_finalization')) record.cleanup.unresolved.push('database_reservation_finalization');
+      const unresolvedAction = databaseReleased ? 'run_lifecycle_coordination_cleanup' : 'database_reservation_finalization';
+      if (!record.finalization.unresolved.includes(unresolvedAction)) record.finalization.unresolved.push(unresolvedAction);
+      if (!record.cleanup.unresolved.includes(unresolvedAction)) record.cleanup.unresolved.push(unresolvedAction);
       record.finalization.incomplete = true;
-      addFailure(record, error, 'database_reservation_finalization');
+      addFailure(record, error, unresolvedAction);
       if (!reservationEnded) {
         let current = null;
         let reservationReadError = null;
@@ -227,8 +230,7 @@ export class RunFinalizer {
         if (current && (current.status !== 'in use' || current.reservation?.run_id !== runId)) {
           reservationEnded = true;
         } else {
-          const unavailable = await this.reservationAuthority.markUnavailable(databaseId, runId, 'current E2E run finalization or required cleanup did not complete', {
-            ...transitionEvidence,
+          const unavailable = await this.reservationAuthority.markUnavailable(databaseId, runId, 'required run cleanup or settlement did not complete', {
             error: String(error?.message || error),
             ...(reservationReadError ? { reservation_state_read_error: reservationReadError } : {})
           }).catch(() => ({ committed: false }));
@@ -238,8 +240,8 @@ export class RunFinalizer {
           }
         }
       }
-      if (reservationEnded) {
-        await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: endedAt, selected_database_id: databaseId, failure: String(error?.message || error), child_runtime: childRuntime }).catch(() => {});
+      if (reservationEnded && !databaseReleased) {
+        await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: endedAt, selected_database_id: databaseId, child_runtime: coordinationChildRuntime(childRuntime) }).catch(() => {});
       }
     }
   }

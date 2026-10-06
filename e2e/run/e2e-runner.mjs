@@ -16,6 +16,14 @@ import { identifyE2ERunOrigin } from '../model/run-origin.mjs';
 import { isRuntimePortConflict } from '../systems/operator/operator-client.mjs';
 import { writeProjectConfiguration } from '../../operator/project-config.mjs';
 
+function coordinationChildRuntime(child) {
+  return {
+    runtime_id: child?.runtime_id || null,
+    status: child?.status || 'unknown',
+    process_identity: child?.process_identity || null
+  };
+}
+
 async function writeRunInputSnapshots(paths, workload, workflow) {
   await Promise.all([
     writeFile(paths.workloadInputSnapshot, workload.source === 'catalog_random' ? workload.catalog_entry.accepted_plan : workload.supplied.accepted_plan, { mode: 0o600 }),
@@ -74,9 +82,9 @@ export class E2ERunner {
     const runProcess = await currentProcessIdentity();
     const { origin, outer_execution_provenance: outerExecutionProvenance } = identifyE2ERunOrigin({ repositoryRoot: this.config.repository_root || process.cwd() });
     let admission;
-    try { admission = await this.admission.checkRunAdmission({ runId, runProcess, origin, outerExecutionProvenance }); }
+    try { admission = await this.admission.checkRunAdmission({ runId, runProcess, workload: this.runInput.workload }); }
     catch (error) {
-      await this.runRecordStore.saveAdmissionFailure(error, { runId, databasePool: this.config.database_pool });
+      await this.runRecordStore.saveAdmissionFailure(error, { runId, databasePool: this.config.database_pool, workload: this.runInput.workload });
       throw error;
     }
     if (!admission.admitted) {
@@ -114,18 +122,12 @@ export class E2ERunner {
       record.run_origin = origin;
       record.outer_execution_provenance = outerExecutionProvenance;
       record.evidence.branch_refs_before = admission.refs;
+      record.recovery = admission.recovery;
       record.status = 'preparing';
       await this.runRecordStore.save(record);
 
       await writeRunInputSnapshots(paths, resolvedWorkload.evidence, workflow);
       await this.runRecordStore.save(record);
-      const metadata = await this.reservationAuthority.updateReservationMetadata(admission.database.database_id, runId, {
-        base_branch: branch,
-        workspace_root: paths.workspaceRoot,
-        run_record_path: paths.record,
-        workflow_snapshot_path: paths.workflowSnapshot
-      });
-      if (!metadata.committed) throw new Error(`database reservation was no longer owned by E2E run ${runId}`);
       const baseCommit = await this.gitClient.createRunScopedBaseBranch(branch, seedCommit, this.config.seed_source_ref);
       record.binding.base_commit = baseCommit;
       await this.runRecordStore.save(record);
@@ -170,7 +172,7 @@ export class E2ERunner {
         record.runtime.port_start_attempts.push(portAttempt);
         const startingRuntime = await this.reservationAuthority.updateRunLifecycleForReservation(admission.database.database_id, runId, {
           child_runtime_id: record.runtime.child_runtime.runtime_id || null,
-          child_runtime: record.runtime.child_runtime
+          child_runtime: coordinationChildRuntime(record.runtime.child_runtime)
         });
         if (!startingRuntime.committed) throw new Error(`child runtime startup could not be bound to database reservation for E2E run ${runId}`);
         await this.runRecordStore.save(record);
@@ -195,7 +197,7 @@ export class E2ERunner {
           record.runtime.child_runtime = { ...record.runtime.child_runtime, status: 'stopped', stopped_at: currentTimeIso() };
           const stoppedRuntime = await this.reservationAuthority.updateRunLifecycleForReservation(admission.database.database_id, runId, {
             child_runtime_id: record.runtime.child_runtime.runtime_id || null,
-            child_runtime: record.runtime.child_runtime
+            child_runtime: coordinationChildRuntime(record.runtime.child_runtime)
           });
           if (!stoppedRuntime.committed) throw new Error(`stopped child runtime could not be bound to database reservation for E2E run ${runId}`);
 
@@ -214,10 +216,10 @@ export class E2ERunner {
       record.runtime.dashboard = dashboard;
       record.status = 'runtime_ready';
       const childRuntime = await this.operatorClient.readOwnedRuntimeIdentity(paths.runtimeState, runtimeResult);
-      record.runtime.child_runtime = childRuntime;
+      record.runtime.child_runtime = { ...childRuntime, state_path: paths.runtimeState };
       const runtimeSaved = await this.reservationAuthority.updateRunLifecycleForReservation(admission.database.database_id, runId, {
         child_runtime_id: childRuntime.runtime_id,
-        child_runtime: childRuntime
+        child_runtime: coordinationChildRuntime(childRuntime)
       });
       if (!runtimeSaved.committed) throw new Error(`child runtime ${childRuntime.runtime_id} could not be bound to its database reservation`);
       await this.runRecordStore.save(record);
@@ -251,9 +253,27 @@ export class E2ERunner {
     } catch (error) {
       await portLease?.release().catch(() => {});
       if (!record) {
-        await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: currentTimeIso(), selected_database_id: admission.database.database_id, failure: String(error?.message || error) }).catch(() => {});
-        await this.reservationAuthority.release(admission.database.database_id, runId, { result: 'failed before production workload setup', error: String(error?.message || error) }).catch(() => ({ committed: false }));
-        await this.runRecordStore.saveAdmissionFailure(error, { runId, databasePool: [admission.database] }).catch(() => {});
+        let databaseReservation = { status: 'unknown' };
+        const cleanup = { runtime_stopped: true, branches_deleted: [], workspaces_deleted: [], run_lifecycle_coordination_deleted: false, unresolved: [] };
+        try {
+          await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: currentTimeIso(), selected_database_id: admission.database.database_id });
+          const released = await this.reservationAuthority.release(admission.database.database_id, runId, { result: 'failed before workload setup' });
+          if (!released.committed) throw new Error('database reservation was not safely released after setup failure');
+          databaseReservation = { status: 'available' };
+          const removed = await this.reservationAuthority.deleteRunLifecycle(runId);
+          if (!removed.committed) throw new Error('run lifecycle coordination state was not safely removed after setup failure');
+          cleanup.run_lifecycle_coordination_deleted = true;
+        } catch (settlementError) {
+          const current = await this.reservationAuthority.read(admission.database.database_id).catch(() => null);
+          if (current?.status === 'in use' && current.reservation?.run_id === runId) {
+            const unavailable = await this.reservationAuthority.markUnavailable(admission.database.database_id, runId, 'setup failure settlement did not complete').catch(() => ({ committed: false }));
+            databaseReservation = { status: unavailable.committed ? 'unavailable' : 'unknown' };
+            if (unavailable.committed) await this.reservationAuthority.writeRunLifecycle(runId, { status: 'failed', ended_at: currentTimeIso(), selected_database_id: admission.database.database_id }).catch(() => {});
+          }
+          cleanup.unresolved.push('settlement cleanup');
+          error.settlement_error = String(settlementError?.message || settlementError);
+        }
+        await this.runRecordStore.saveAdmissionFailure(error, { runId, databasePool: [admission.database], recovery: admission.recovery, workload: this.runInput.workload, databaseReservation, cleanup });
         throw error;
       }
       addFailure(record, error, 'orchestration');

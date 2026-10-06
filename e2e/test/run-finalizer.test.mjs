@@ -13,6 +13,7 @@ test('terminal run lifecycle is the release authority and is published before re
     async release() { events.push('release'); return { committed: true }; },
     async markUnavailable() { events.push('unavailable'); return { committed: true, recovery_marker: 'marker-1' }; },
     async updateRunLifecycleForReservation(_databaseId, _runId, lifecycle) { events.push(`run_lifecycle:${lifecycle.status}`); return { committed: true }; },
+    async deleteRunLifecycle() { events.push('delete_run_lifecycle'); return { committed: true }; },
     async writeRunLifecycle(_runId, lifecycle) { events.push(`run_lifecycle:${lifecycle.status}`); }
   };
   const finalizer = new RunFinalizer({ config: {}, reservationAuthority });
@@ -29,8 +30,10 @@ test('terminal run lifecycle is the release authority and is published before re
   await finalizer.settleDatabaseReservation(record);
 
   assert.ok(events.indexOf('run_lifecycle:completed') < events.indexOf('release'));
+  assert.ok(events.indexOf('release') < events.indexOf('delete_run_lifecycle'));
   assert.equal(events.includes('unavailable'), false);
   assert.equal(record.database_reservation.status, 'available');
+  assert.equal(record.cleanup.run_lifecycle_coordination_deleted, true);
 });
 
 test('incomplete required cleanup atomically makes the current database unavailable', async () => {

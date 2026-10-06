@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { currentTimeIso } from '../run/run-timing.mjs';
 import { createRunPaths } from './e2e-runtime-config.mjs';
 import { sha256 } from './plan-identity.mjs';
+import { RunSummaryStore } from './run-summary-store.mjs';
 
 async function writeJsonAtomically(path, value) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -66,19 +67,47 @@ export function createRunRecord({ config, database, runId, workload, paths, runI
     evidence: { snapshots: [], snapshot_timeouts: [], errors: [], branch_refs_before: null, branch_refs_after: null, branch_isolation: null, workspace_paths: [] },
     failures: [],
     finalization: { reason: null, actor: 'e2e-harness', actions: [], complete: false, incomplete: false, unresolved: [] },
-    cleanup: { task_terminalized: false, runtime_stopped: false, branches_deleted: [], workspaces_deleted: [], unresolved: [] },
+    cleanup: { task_terminalized: false, runtime_stopped: false, branches_deleted: [], workspaces_deleted: [], run_lifecycle_coordination_deleted: false, unresolved: [] },
     paths: { directory: paths.directory, record: paths.record, runtime_project: paths.runtimeProject, runtime_state: paths.runtimeState, workload_input_snapshot: paths.workloadInputSnapshot, workload_publisher_snapshot: paths.workloadPublisherSnapshot, workflow_snapshot: paths.workflowSnapshot, workspace_root: paths.workspaceRoot }
   };
 }
 
 export class RunRecordStore {
-  constructor(config) { this.config = config; }
+  constructor(config, { summaryStore } = {}) {
+    this.config = config;
+    this.summaryStore = summaryStore || (config.repository_root ? new RunSummaryStore({ repositoryRoot: config.repository_root }) : null);
+  }
 
   recordPath(runId) { return createRunPaths(this.config, runId).record; }
 
   async save(record) {
     await writeJsonAtomically(record.paths.record, record);
     return record;
+  }
+
+  async writeSummary(record) {
+    if (!this.summaryStore) return null;
+    try {
+      const result = await this.summaryStore.write(record);
+      record.summary = { status: 'written', path: result.path, created: result.created, written_at: currentTimeIso() };
+    } catch (error) {
+      const action = 'write_run_summary';
+      record.status = 'failed';
+      record.summary = { status: 'failed', error: String(error?.message || error) };
+      if (!record.failures?.some(failure => failure.phase === 'summary_generation')) addFailure(record, error, 'summary_generation');
+      if (record.finalization) {
+        record.finalization.unresolved ||= [];
+        record.finalization.complete = false;
+        record.finalization.incomplete = true;
+        if (!record.finalization.unresolved.includes(action)) record.finalization.unresolved.push(action);
+      }
+      if (record.cleanup) {
+        record.cleanup.unresolved ||= [];
+        if (!record.cleanup.unresolved.includes(action)) record.cleanup.unresolved.push(action);
+      }
+    }
+    if (record.paths?.record) await this.save(record);
+    return record.summary;
   }
 
   async read(runId) { return readJson(this.recordPath(runId)); }
@@ -95,10 +124,10 @@ export class RunRecordStore {
     return records.sort((a, b) => String(a.started_at).localeCompare(String(b.started_at)));
   }
 
-  async saveAdmissionFailure(error, { runId = randomUUID(), databasePool = [], recovery = [] } = {}) {
+  async saveAdmissionFailure(error, { runId = randomUUID(), databasePool = [], recovery = [], workload = null, databaseReservation = null, cleanup = null } = {}) {
     const at = currentTimeIso();
     const path = join(this.config.run_record_directory, runId, 'run.json');
-    await writeJsonAtomically(path, {
+    const record = {
       schema_version: 1,
       kind: 'e2e_run_admission',
       run_id: runId,
@@ -106,11 +135,16 @@ export class RunRecordStore {
       started_at: at,
       ended_at: currentTimeIso(),
       lifecycle: { status: 'terminal', result: error?.code || 'admission_failed' },
+      workload: workload ? { id: workload.id || null, plan_identifier: workload.plan_identifier || workload.identifier || null } : null,
+      database_reservation: databaseReservation ? { status: databaseReservation.status } : null,
+      cleanup: cleanup || { runtime_stopped: true, branches_deleted: [], workspaces_deleted: [], run_lifecycle_coordination_deleted: false, unresolved: [] },
       database_pool: databasePool.map(candidate => ({ database_id: candidate.database_id })),
       recovery,
       error: String(error?.message || error),
       paths: { record: path }
-    });
+    };
+    await writeJsonAtomically(path, record);
+    await this.writeSummary(record);
     return path;
   }
 }

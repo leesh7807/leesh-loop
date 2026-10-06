@@ -94,6 +94,10 @@ Use the Notion task surface for the Accepted Plan, Workpad, and state changes. W
 Korean; preserve code, commands, identifiers, paths, API names, and quotations verbatim where
 accuracy requires it.
 
+Keep Workpad entries focused on repository work, verification, delivery, blockers, and recovery.
+Describe actual outcomes in ordinary task terms. Do not explain invocation mechanics or mention
+internal coordination refs or harness logging there.
+
 If the task surface or its authentication is unavailable, record the concrete external-access
 blocker in the worker result. Do not claim a same-surface handoff or invent a fallback mutation
 channel.
