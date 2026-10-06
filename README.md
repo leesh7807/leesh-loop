@@ -75,7 +75,7 @@ The first start prepares the included dependencies and opens the Operator page i
 
 _The task list is live, so its tasks and counts will change. Open **Publish a Plan** to enter a Plan and choose its State._
 
-The checked-in `operator/project.json` is an example configuration for this repository. Init creates a separate Project configuration for each target; you normally do not need to edit it. Advanced settings and runtime responsibilities are described in [System responsibilities and configuration](docs/SYSTEM.md).
+Project settings live in the Loop root `project.toml`. Init creates a separate file for each target with the repository identity and paths already set. Edit it when you need a different worker model, workspace file, local port, or other documented setting; comments in the file explain defaults and path handling. Runtime responsibilities are described in [System responsibilities and configuration](docs/SYSTEM.md).
 
 ### 5. Publish a Plan and follow its task
 
@@ -92,7 +92,7 @@ Use [Plan instructions](docs/PLAN.md) when writing Plans. A task can only run af
 
 ## About the workflow
 
-The generated Loop's root `WORKFLOW.md` is an agent execution contract. Init builds it from [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md) and the Loop's runtime settings, then points `operator/project.json` at that root file. The worker reads it when it handles a task.
+The generated Loop's root `WORKFLOW.md` is an agent execution contract. Init builds it from [`docs/WORKFLOW_TEMPLATE.md`](docs/WORKFLOW_TEMPLATE.md) and the Loop's runtime settings; root `project.toml` points the runtime to that file. The worker reads it when it handles a task.
 
 You do not need to read and memorize the whole contract to use Leesh Loop. If you want to understand or change a repository rule, ask the agent to explain the relevant part of `WORKFLOW.md`, its effect on task execution, and the smallest safe change. The contract determines how agents act, so changes should preserve its intent rather than turn it into a general tutorial.
 

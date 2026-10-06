@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFile as execute } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { effective, operatorBootstrapArgs, parseStartArguments, startConfiguration } from '../leesh-loop.mjs';
 
 const execFile = promisify(execute);
@@ -16,7 +17,8 @@ test('start:fast uses the same start command and project config with the existin
 
   assert.deepEqual(normalInvocation.slice(0, 3), fastInvocation.slice(0, 3));
   assert.equal(normalInvocation[2], 'start');
-  assert.deepEqual(fastInvocation.slice(3), ['operator/project.json', '--skip-external-readiness']);
+  assert.deepEqual(fastInvocation.slice(3), ['project.toml', '--skip-external-readiness']);
+  assert.equal(parseStartArguments([]).configurationPath, join(root, 'project.toml'));
 
   const normal = parseStartArguments(normalInvocation.slice(3));
   const fast = parseStartArguments(fastInvocation.slice(3));
@@ -39,7 +41,7 @@ test('start:fast uses the same start command and project config with the existin
 
 test('start rejects malformed fast-start arguments before treating an option as a config path', async () => {
   await assert.rejects(
-    execFile('npm', ['run', 'start:fast', '--', '/tmp/custom-project.json', 'unexpected'], { cwd: root }),
+    execFile('npm', ['run', 'start:fast', '--', '/tmp/custom-project.toml', 'unexpected'], { cwd: root }),
     error => {
       assert.equal(error.code, 2);
       assert.match(error.stderr, /start accepts at most one project configuration path/);
@@ -47,4 +49,29 @@ test('start rejects malformed fast-start arguments before treating an option as 
       return true;
     }
   );
+});
+
+test('invalid TOML Project ports fail before start creates runtime state', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-invalid-start-project-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const configPath = join(directory, 'project.toml');
+  const stateDirectory = join(directory, 'state');
+  await writeFile(configPath, [
+    'github_repository_url = "https://github.com/example/repository.git"',
+    'github_base_branch = "main"',
+    'workflow_path = "WORKFLOW.md"',
+    'symphony_workspace_root = ".runtime/workspaces"',
+    `state_directory = ${JSON.stringify(stateDirectory)}`,
+    'ui_port = 70000'
+  ].join('\n'));
+
+  await assert.rejects(
+    execFile(process.execPath, [join(root, 'operator/app/leesh-loop.mjs'), 'start', configPath], { timeout: 10_000 }),
+    error => {
+      assert.equal(error.stdout, '');
+      assert.match(error.stderr, /ui_port must be an integer between 1 and 65535/);
+      return true;
+    }
+  );
+  await assert.rejects(readFile(join(stateDirectory, 'runtime.json')), { code: 'ENOENT' });
 });

@@ -6,16 +6,20 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { createOperatorProjectConfig, createRunPaths, INITIAL_EMPTY_E2E_DATABASE_URLS, loadE2ERuntimeConfig, resolveE2EDatabasePool } from '../model/e2e-runtime-config.mjs';
 import { extractNotionDatabaseId } from '../model/notion-database-id.mjs';
+import { readProjectConfiguration, writeProjectConfiguration } from '../../operator/project-config.mjs';
+import toml from '../../operator/app/vendor/smol-toml/index.cjs';
+
+const { stringify } = toml;
 
 async function projectFixture(t, overrides = {}) {
   const root = await mkdtemp(join(tmpdir(), 'leesh-loop-e2e-runtime-config-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, 'operator'), { recursive: true });
-  const projectPath = join(root, 'operator/project.json');
-  await writeFile(projectPath, JSON.stringify({
-    workflow_path: '../WORKFLOW.md',
+  const projectPath = join(root, 'project.toml');
+  await writeFile(projectPath, stringify({
+    workflow_path: 'WORKFLOW.md',
     symphony_workspace_root: '/host/global/workspaces',
-    workspace_files: ['../.env'],
+    workspace_files: [],
     state_directory: '/host/global/state',
     github_repository_url: 'https://github.com/example/repository.git',
     github_base_branch: 'release',
@@ -33,6 +37,7 @@ test('E2E shared settings come selectively from production Project while policy 
   const fixture = await projectFixture(t);
   const config = await loadE2ERuntimeConfig({ root: fixture.root, environment: fixture.environment, envFile: fixture.envFile });
   assert.equal(config.repository_url, 'https://github.com/example/repository.git');
+  assert.equal(config.production_project_path, fixture.projectPath);
   assert.equal(config.production_base_branch, 'release');
   assert.equal(config.seed_source_ref, 'refs/heads/release');
   assert.equal(config.codex_model, 'production-model');
@@ -59,6 +64,12 @@ test('E2E shared settings come selectively from production Project while policy 
   assert.equal(project.open_project_surfaces, false);
   assert.equal(Object.hasOwn(project, 'workspace_files'), false);
   assert.equal(Object.hasOwn(project, 'state_directory'), true);
+  await mkdir(paths.directory, { recursive: true });
+  await writeProjectConfiguration(paths.runtimeProject, project);
+  const readback = await readProjectConfiguration(paths.runtimeProject);
+  assert.equal(readback.github_base_branch, 'base/run-1');
+  assert.equal(readback.symphony_port, 45001);
+  assert.equal(readback.ui_port, 45002);
 });
 
 test('pool URLs can override the bootstrap pool and identities deduplicate across URL forms', () => {
@@ -72,7 +83,7 @@ test('pool URLs can override the bootstrap pool and identities deduplicate acros
 test('production authority validates required fields and only imports supported Codex values', async t => {
   const fixture = await projectFixture(t, { github_base_branch: '', codex_model: null });
   await assert.rejects(loadE2ERuntimeConfig({ root: fixture.root, environment: fixture.environment, envFile: fixture.envFile }), /github_base_branch/);
-  await writeFile(fixture.projectPath, JSON.stringify({ github_repository_url: 'https://github.com/example/repository.git', github_base_branch: 'main', codex_model: '' }));
+  await writeFile(fixture.projectPath, stringify({ github_repository_url: 'https://github.com/example/repository.git', github_base_branch: 'main', workflow_path: 'WORKFLOW.md', symphony_workspace_root: '.runtime/workspaces', codex_model: '' }));
   await assert.rejects(loadE2ERuntimeConfig({ root: fixture.root, environment: fixture.environment, envFile: fixture.envFile }), /codex_model/);
 });
 

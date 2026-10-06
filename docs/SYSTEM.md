@@ -4,7 +4,7 @@ This document is for operators and maintainers who need the system boundaries be
 
 ## Runtime responsibilities
 
-A Loop instance operates one target Git repository. It has a Project configuration in `operator/project.json`, a root `WORKFLOW.md`, a local Operator page, and isolated worker workspaces. The target repository remains separate from the Loop instance.
+A Loop instance operates one target Git repository. Its Project configuration is the root `project.toml`; it also has a root `WORKFLOW.md`, a local Operator page, and isolated worker workspaces. `operator/` contains the runtime that reads the Project. The target repository remains separate from the Loop instance.
 
 - **Operator** reads Project settings, checks startup requirements, starts the task runtime, and serves the local task and Plan page.
 - **Publisher** writes a Plan and task to Notion using the configured database and publication State.
@@ -22,13 +22,13 @@ Init builds the generated root `WORKFLOW.md` from:
 1. Runtime settings added at the beginning of the file, including the Notion tracker, workspace root, and Git clone hook.
 2. The complete body of this repository's `docs/WORKFLOW_TEMPLATE.md`.
 
-The generated `operator/project.json` sets `workflow_path` to `../WORKFLOW.md`, resolved relative to the `operator` directory. Symphony therefore reads the generated root file at task execution time. The template is a source for that agent contract, not a separate file the generated worker reads.
+The generated root `project.toml` sets `workflow_path` to `WORKFLOW.md`. Project-relative paths are resolved from the directory containing that TOML file, so Symphony reads the generated root workflow at task execution time. The template is a source for that agent contract, not a separate file the generated worker reads.
 
 The source repository's root `WORKFLOW.md` is its own concrete agent contract. It is not copied to target repositories.
 
 ## Project settings and credentials
 
-Project paths are resolved relative to `operator/project.json`; absolute paths and `~` are also supported. The core settings are:
+Project paths are resolved relative to the directory containing root `project.toml`; absolute paths and `~/...` are also supported. The checked-in TOML and each generated Loop TOML document defaults and show optional settings as comments. UI and Symphony ports default to 4310 and 4100; set `ui_port` or `symphony_port` in `project.toml` when another local process uses a default. The core settings are:
 
 | Setting | Responsibility |
 | --- | --- |
@@ -36,14 +36,16 @@ Project paths are resolved relative to `operator/project.json`; absolute paths a
 | `github_base_branch` | Target repository's base branch. Set it with the URL; Operator does not guess a branch. |
 | `workflow_path` | Agent execution contract passed to Symphony. Init points this to the generated root `WORKFLOW.md`. |
 | `symphony_workspace_root` | Parent directory for task workspaces. |
-| `workspace_files` | Optional regular files copied by basename to newly created workspaces. Paths may be absolute, relative to `operator/project.json`, or start with `~`. Existing destinations are preserved. |
+| `state_directory` | Optional Operator runtime state directory. |
+| `workspace_files` | Optional regular files copied to the new worker workspace root under their basename. Paths may be absolute, relative to `project.toml`, or start with `~/`. Git tracking status does not matter. Directories and globs are unsupported; duplicate basenames are rejected. Existing destinations are left untouched, and continuations do not recopy files. |
 | `codex_model`, `codex_reasoning_effort` | Optional independent Codex overrides. Omitted values use Codex settings. |
 | `open_project_surfaces` | Whether starting the Loop asks the desktop to open the Operator page. |
-| `skip_external_readiness` | Operator-only setting that skips external review readiness; it does not skip core startup checks. |
+| `skip_external_readiness` | Optional setting that skips external review readiness; it does not skip core startup checks. |
+| `startup_timeout_ms`, `browser_acknowledgement_timeout_ms` | Optional startup and browser acknowledgement timeouts. |
 
 The Notion database URL comes from `LEESH_LOOP_NOTION_DATABASE_URL`; the integration token comes from `NOTION_TOKEN`. Operator reads either value from the process environment or the Loop root `.env`. Init does not create a Notion database, copy credentials, or save process-only values. The GitHub repository URL and base branch are always a pair.
 
-Treat `workspace_files` carefully: each configured file is copied into new worker workspaces. Do not use it for credentials or files that workers do not need. Continuations keep their existing workspace files.
+Use `workspace_files` only for regular files workers need. It is not a general credential transfer mechanism. A Git-ignored local file in the sibling target repository can be listed explicitly. The Operator validates the sources before starting and copies each file without recreating its source directories.
 
 ### Changing settings while the Loop is running
 

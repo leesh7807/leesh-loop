@@ -156,7 +156,7 @@ GIT_TERMINAL_PROMPT=0 git -c credential.interactive=never ls-remote "$github_rep
 
 report 'checking the target branch'
 github_base_commit=$(node "$repository_root/operator/app/git-target.mjs" "$github_repository_url" "$github_base_branch") ||
-  fail 'the configured GitHub base branch could not be prepared. Check github_repository_url and github_base_branch in operator/project.json.'
+  fail 'the configured GitHub base branch could not be prepared. Check github_repository_url and github_base_branch in project.toml.'
 
 if [ "$skip_external_readiness" = false ]; then
   report 'checking the review setup'

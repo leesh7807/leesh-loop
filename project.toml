@@ -1,0 +1,39 @@
+# Leesh Loop Project configuration. Relative paths start at this file.
+# Absolute paths and ~/ paths are also supported.
+
+github_repository_url = "https://github.com/leesh7807/leesh-loop.git"
+github_base_branch = "main"
+workflow_path = "WORKFLOW.md"
+symphony_workspace_root = "~/.leesh-loop/workspaces"
+state_directory = ".runtime/state"
+
+# Extra regular files copied into every newly created worker workspace.
+# Relative paths use this project.toml directory. Absolute paths and ~/ paths also work.
+# Git tracking does not matter: a sibling target repository Git-ignored file may be listed.
+# Each source is copied unchanged to the workspace root under its basename.
+# Directories and globs are not supported. Sources with the same basename are rejected.
+# Do not use this setting to pass credentials to workers.
+# Example: workspace_files = ["../your-repository/local-settings.json"]
+workspace_files = []
+
+# Optional Codex worker overrides. Remove either value to use the Codex default for it.
+codex_model = "gpt-6-luna"
+codex_reasoning_effort = "xhigh"
+
+# Operator UI port. Default: 4310. Change it if another local app uses this port.
+# ui_port = 4311
+
+# Symphony runtime port. Default: 4100. Change it if another local app uses this port.
+# symphony_port = 4101
+
+# Open the Operator page automatically on start. Default: true.
+# open_project_surfaces = false
+
+# Skip external review readiness checks. Default: false; core startup checks still run.
+# skip_external_readiness = true
+
+# Startup timeout in milliseconds. Default: 1800000 (30 minutes).
+# startup_timeout_ms = 1800000
+
+# Browser acknowledgement timeout in milliseconds. Default: 1000.
+# browser_acknowledgement_timeout_ms = 1000

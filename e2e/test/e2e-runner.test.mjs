@@ -8,6 +8,7 @@ import { derivePlanIdentifier, sha256 } from '../model/plan-identity.mjs';
 import { E2ERunner } from '../run/e2e-runner.mjs';
 import { RunCompletionVerifier } from '../run/lifecycle/run-completion-verifier.mjs';
 import { RunRecordStore } from '../model/run-record-store.mjs';
+import { readProjectConfiguration } from '../../operator/project-config.mjs';
 
 const plan = '# Representative task\n\nInspect the repository and write a concise note under docs/.\n';
 
@@ -155,7 +156,7 @@ test('E2ERunner reaches terminal Done through injected production dependencies',
   assert.equal(record.artifacts.merged_head, '0123456789012345678901234567890123456789');
   assert.equal(record.artifacts.remote_base_commit, 'abcdefabcdefabcdefabcdefabcdefabcdefabcd');
   assert.match(await readFile(record.paths.record, 'utf8'), /production_done/);
-  const runtimeProject = JSON.parse(await readFile(record.paths.runtime_project, 'utf8'));
+  const runtimeProject = await readProjectConfiguration(record.paths.runtime_project);
   assert.equal(runtimeProject.skip_external_readiness, true);
   assert.equal(runtimeProject.open_project_surfaces, false);
   assert.deepEqual(harness.transitions, ['Merging']);
@@ -208,7 +209,7 @@ test('E2ERunner retries a run-owned Operator startup with a new port pair after 
     { symphony_port: 4410, ui_port: 4610 },
     { symphony_port: 4420, ui_port: 4620 }
   ]);
-  const runtimeProject = JSON.parse(await readFile(record.paths.runtime_project, 'utf8'));
+  const runtimeProject = await readProjectConfiguration(record.paths.runtime_project);
   assert.equal(runtimeProject.symphony_port, 4420);
   assert.equal(runtimeProject.ui_port, 4620);
   assert.equal(record.run_input.runtime_options.symphony_port, 4420);
@@ -240,7 +241,7 @@ test('E2ERunner retries when production Operator reports a UI port conflict in a
     { symphony_port: 4430, ui_port: 4630 },
     { symphony_port: 4440, ui_port: 4640 }
   ]);
-  const runtimeProject = JSON.parse(await readFile(record.paths.runtime_project, 'utf8'));
+  const runtimeProject = await readProjectConfiguration(record.paths.runtime_project);
   assert.equal(runtimeProject.symphony_port, 4440);
   assert.equal(runtimeProject.ui_port, 4640);
   assert.equal(harness.runtimeStopCalls, 1);
@@ -401,7 +402,7 @@ test('E2E run-local Operator Project contains only configured Codex overrides', 
   harness.config.workspace_root = directory + '/workspaces';
   harness.config.codex_model = 'example-model';
   const record = await new E2ERunner({ ...harness, random: () => 0, clock: () => current++, waitForPoll: async () => {} }).runProductionE2E();
-  const project = JSON.parse(await readFile(record.paths.runtime_project, 'utf8'));
+  const project = await readProjectConfiguration(record.paths.runtime_project);
   assert.equal(project.codex_model, 'example-model');
   assert.equal(Object.hasOwn(project, 'codex_reasoning_effort'), false);
 });

@@ -8,6 +8,7 @@ import { execFile as execute } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createOperatorUiServer, readRequestBody } from '../operator-ui-server.mjs';
 import { effective, ensurePublisher, loadConfig as loadOperatorConfig, openProjectSurfaces, projectSurfaces, projectWindowNeedsOpening, uiIdentity, uiRuntimeSourceFiles } from '../leesh-loop.mjs';
+import { stringifyProjectConfiguration } from '../../project-config.mjs';
 
 const execFile = promisify(execute);
 const root = resolve(import.meta.dirname, '../../..');
@@ -192,7 +193,7 @@ test('start reuses compatible runtimes, explains incompatible settings, and open
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-surface-policy-'));
   const stateDirectory = join(directory, 'state');
   const workspaceRoot = join(directory, 'workspaces');
-  const configPath = join(directory, 'project.json');
+  const configPath = join(directory, 'project.toml');
   const runtimeId = 'surface-policy-runtime';
   const dashboardServer = createServer((request, response) => {
     if (request.url === '/api/v1/runtime') {
@@ -225,7 +226,7 @@ test('start reuses compatible runtimes, explains incompatible settings, and open
     ui_port: uiPort,
     workspace_files: []
   };
-  await writeFile(configPath, JSON.stringify(project));
+  await writeFile(configPath, stringifyProjectConfiguration(project));
   const config = await loadOperatorConfig(configPath, {
     environment: { LEESH_LOOP_NOTION_DATABASE_URL: databaseUrl },
     envFile: join(directory, 'missing.env')
@@ -264,7 +265,7 @@ test('start reuses compatible runtimes, explains incompatible settings, and open
   assert.deepEqual(await (await fetch(`http://127.0.0.1:${dashboardPort}/api/v1/runtime`)).json(), { pid: process.pid, runtime_id: runtimeId, dispatch_capable: true });
 
   delete project.open_project_surfaces;
-  await writeFile(configPath, JSON.stringify(project));
+  await writeFile(configPath, stringifyProjectConfiguration(project));
   const enabledStart = await execFile(process.execPath, [cli, 'start', configPath], { env: environment, timeout: 60_000 });
   assert.equal(JSON.parse(enabledStart.stdout).reused, true);
   let launches = [];
@@ -284,7 +285,7 @@ test('start reuses compatible runtimes, explains incompatible settings, and open
   assert.equal(launches.length, 1);
 
   project.codex_model = 'changed-model';
-  await writeFile(configPath, JSON.stringify(project));
+  await writeFile(configPath, stringifyProjectConfiguration(project));
   await assert.rejects(
     execFile(process.execPath, [cli, 'start', configPath], { env: environment, timeout: 60_000 }),
     error => {

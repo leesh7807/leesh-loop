@@ -13,9 +13,9 @@ test('nested Operator start receives the resolved E2E database binding through i
     }
   });
   const databaseUrl = 'https://notion.example/e2e-binding';
-  await client.startConfiguredOperatorProject('/tmp/run/project.json', 1_000, databaseUrl);
+  await client.startConfiguredOperatorProject('/tmp/run/project.toml', 1_000, databaseUrl);
   assert.equal(invocation[0], 'node');
-  assert.deepEqual(invocation[1], ['/repository/operator/app/leesh-loop.mjs', 'start', '/tmp/run/project.json']);
+  assert.deepEqual(invocation[1], ['/repository/operator/app/leesh-loop.mjs', 'start', '/tmp/run/project.toml']);
   assert.equal(invocation[2].env.LEESH_LOOP_NOTION_DATABASE_URL, databaseUrl);
 });
 

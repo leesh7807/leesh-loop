@@ -5,17 +5,17 @@ import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
-import { normalizeWorkspaceFiles, validateWorkspaceFiles } from './workspace-files.mjs';
+import { validateWorkspaceFiles } from './workspace-files.mjs';
 import { validateBaseBranch } from './git-target.mjs';
 import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
-import { resolveProjectPath } from '../local-path.mjs';
+import { readProjectConfiguration } from '../project-config.mjs';
 import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
 import { defaultOperatorUiDependencies, readRequestBody, startOperatorUiServer } from './operator-ui-server.mjs';
 
 const appScript = fileURLToPath(import.meta.url);
 const root = resolve(dirname(appScript), '../..');
 const appRoot = join(root, 'operator');
-const defaultConfig = join(appRoot, 'project.json');
+const defaultConfig = join(root, 'project.toml');
 const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 const canonical = value => resolve(value);
 const stateRoot = config => canonical(config.state_directory || join(appRoot, '.runtime'));
@@ -45,24 +45,12 @@ function processStartTicks(pid) {
 async function remove(path) { await rm(path, { force: true }); }
 
 async function loadConfig(file, { validateWorkspaceFileSources = true, requireNotionDatabase = true, environment = process.env, envFile = join(root, '.env'), homeDirectory } = {}) {
-  const config = await json(canonical(file));
-  if (!config || typeof config !== 'object') throw new Error(`missing or invalid project configuration: ${file}`);
-  for (const key of ['workflow_path', 'symphony_workspace_root', 'github_repository_url', 'github_base_branch']) if (typeof config[key] !== 'string' || !config[key]) throw new Error(`project configuration requires ${key}`);
+  const config = await readProjectConfiguration(file, { validateWorkspaceFileSources: false, homeDirectory });
   const notion_database_url = await readRepositoryEnvironmentValue('LEESH_LOOP_NOTION_DATABASE_URL', { environment, envFile });
   if (requireNotionDatabase && !notion_database_url) throw new Error('missing LEESH_LOOP_NOTION_DATABASE_URL: set it in the Operator environment or repository-root .env');
-  for (const key of ['codex_model', 'codex_reasoning_effort']) if (config[key] !== undefined && (typeof config[key] !== 'string' || !config[key].trim())) throw new Error(`${key} must be a non-empty string`);
   await validateBaseBranch(config.github_base_branch);
-  if (config.skip_external_readiness !== undefined && typeof config.skip_external_readiness !== 'boolean') throw new Error('skip_external_readiness must be a boolean');
-  if (config.open_project_surfaces !== undefined && typeof config.open_project_surfaces !== 'boolean') throw new Error('open_project_surfaces must be a boolean');
-  if (config.allow_workspace_root_inside_repository !== undefined && typeof config.allow_workspace_root_inside_repository !== 'boolean') throw new Error('allow_workspace_root_inside_repository must be a boolean');
-  if (config.startup_timeout_ms !== undefined && (!Number.isSafeInteger(config.startup_timeout_ms) || config.startup_timeout_ms <= 0)) throw new Error('startup_timeout_ms must be a positive integer');
-  if (config.browser_acknowledgement_timeout_ms !== undefined && (!Number.isSafeInteger(config.browser_acknowledgement_timeout_ms) || config.browser_acknowledgement_timeout_ms <= 0)) throw new Error('browser_acknowledgement_timeout_ms must be a positive integer');
-  const configuration_path = canonical(file);
-  const projectDirectory = dirname(configuration_path);
-  const workspace_files = normalizeWorkspaceFiles(config.workspace_files, projectDirectory, homeDirectory);
-  if (validateWorkspaceFileSources) await validateWorkspaceFiles(workspace_files);
-  const resolved = { ...config, notion_database_url, skip_external_readiness: config.skip_external_readiness === true, open_project_surfaces: config.open_project_surfaces ?? PROJECT_DEFAULTS.open_project_surfaces, workflow_path: resolveProjectPath(config.workflow_path, projectDirectory, homeDirectory), symphony_workspace_root: resolveProjectPath(config.symphony_workspace_root, projectDirectory, homeDirectory), workspace_files, ...(config.state_directory === undefined ? {} : { state_directory: resolveProjectPath(config.state_directory, projectDirectory, homeDirectory) }), ...(config.symphony_command === undefined ? {} : { symphony_command: resolveProjectPath(config.symphony_command, projectDirectory, homeDirectory) }), configuration_path };
-  return resolved;
+  if (validateWorkspaceFileSources) await validateWorkspaceFiles(config.workspace_files);
+  return { ...config, notion_database_url };
 }
 async function withLock(config, action) {
   return action();
@@ -293,7 +281,7 @@ async function ensureUi(config) {
   } else if (ui) await stopUi(config);
   let unmanaged = false;
   try { await reachable(uiUrl(config)); unmanaged = true; } catch { /* start the project-local Operator UI */ }
-  if (unmanaged) throw new Error(`another application is using ${uiUrl(config)}; close it or choose a different UI port in operator/project.json`);
+  if (unmanaged) throw new Error(`another application is using ${uiUrl(config)}; close it or choose a different UI port in project.toml`);
   const child = spawn(process.execPath, [appScript, 'serve-prepared', config.configuration_path], { cwd: root, detached: true, stdio: 'ignore', env: process.env });
   child.unref();
   const process_start_ticks = processStartTicks(child.pid);
@@ -424,7 +412,7 @@ if (directExecution && startArgumentError) {
   console.error(`Leesh Loop could not start: ${startArgumentError.message}`);
   process.exitCode = 2;
 } else if (directExecution && !['start', 'stop', 'stop-owned', 'serve', 'serve-prepared'].includes(command)) {
-  const usage = 'Usage: node operator/app/leesh-loop.mjs <start|stop|stop-owned|serve> [project-config.json] [runtime-id] [--skip-external-readiness for start]';
+  const usage = 'Usage: node operator/app/leesh-loop.mjs <start|stop|stop-owned|serve> [project.toml] [runtime-id] [--skip-external-readiness for start]';
   if (command === '--help' || command === '-h') console.log(usage);
   else { console.error(usage); process.exitCode = 2; }
 } else if (directExecution) {
