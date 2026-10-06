@@ -37,7 +37,6 @@ Project paths are resolved relative to the directory containing root `project.to
 | `workflow_path` | Agent execution contract passed to Symphony. Init points this to the generated root `WORKFLOW.md`. |
 | `symphony_workspace_root` | Parent directory for task workspaces. |
 | `state_directory` | Optional Operator runtime state directory. |
-| `workspace_files` | Optional regular files copied to the new worker workspace root under their basename. Paths may be absolute, relative to `project.toml`, or start with `~/`. Git tracking status does not matter. Directories and globs are unsupported; duplicate basenames are rejected. Existing destinations are left untouched, and continuations do not recopy files. |
 | `codex_model`, `codex_reasoning_effort` | Optional independent Codex overrides. Omitted values use Codex settings. |
 | `open_project_surfaces` | Whether starting the Loop asks the desktop to open the Operator page. |
 | `skip_external_readiness` | Optional setting that skips external review readiness; it does not skip core startup checks. |
@@ -45,7 +44,11 @@ Project paths are resolved relative to the directory containing root `project.to
 
 The Notion database URL comes from `LEESH_LOOP_NOTION_DATABASE_URL`; the integration token comes from `NOTION_TOKEN`. Operator reads either value from the process environment or the Loop root `.env`. Init does not create a Notion database, copy credentials, or save process-only values. The GitHub repository URL and base branch are always a pair.
 
-Use `workspace_files` only for regular files workers need. It is not a general credential transfer mechanism. A Git-ignored local file in the sibling target repository can be listed explicitly. The Operator validates the sources before starting and copies each file without recreating its source directories.
+### Workspace files
+
+`workspace_files` is optional and lists regular files to copy by basename into the root of each newly created worker workspace. Paths may be relative to root `project.toml`, absolute, or start with `~/`; Git tracking status does not matter. Directories and globs are unsupported, and entries with duplicate basenames are rejected.
+
+Operator leaves an existing destination untouched and reports an error instead of overwriting it. Continuations keep their workspace and do not recopy these files. Use this setting for worker files, not as a general credential transfer mechanism.
 
 ### Changing settings while the Loop is running
 

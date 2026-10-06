@@ -1,0 +1,3 @@
+# 2026-09-27-project-workspace-files-config-2
+
+Add a concise `workspace_files` subsection to `docs/SYSTEM.md`. Explain that entries may be relative to `project.toml`, absolute, or start with `~/`; they name regular files regardless of Git tracking status and are copied by basename into the root of each new workspace. Describe the duplicate-basename error and that directories and globs are unsupported. Existing destinations remain untouched, and continuations preserve their workspace without recopying. Keep the change documentation-only. Verify each statement against the root `README.md`, `project.toml`, and Operator workspace-file implementation, then run `git diff --check`.
