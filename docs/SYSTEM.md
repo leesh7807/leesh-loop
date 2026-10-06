@@ -45,6 +45,8 @@ Project paths are resolved relative to the directory containing root `project.to
 
 The Notion database URL comes from `LEESH_LOOP_NOTION_DATABASE_URL`; the integration token comes from `NOTION_TOKEN`. Operator reads either value from the process environment or the Loop root `.env`. Init does not create a Notion database, copy credentials, or save process-only values. The GitHub repository URL and base branch are always a pair.
 
+For Production E2E runs, the host-side inputs are `NOTION_TOKEN` (integration token) and `LEESH_LOOP_E2E_NOTION_DATABASE_URL` (single database URL). See the [E2E README](../e2e/README.md) for setup details.
+
 Use `workspace_files` only for regular files workers need. It is not a general credential transfer mechanism. A Git-ignored local file in the sibling target repository can be listed explicitly. The Operator validates the sources before starting and copies each file without recreating its source directories.
 
 ### Changing settings while the Loop is running
