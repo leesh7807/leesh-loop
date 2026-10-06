@@ -72,7 +72,33 @@ function duration(record) {
 
 function recoveryOutcomes(record) {
   const recovery = record.recovery || record.admission?.recovery || [];
-  return [...new Set(recovery.map(item => oneLine(item.result || item.status)).filter(Boolean))];
+  const counts = new Map();
+  for (const item of recovery) {
+    const result = oneLine(item.result || item.status);
+    if (!result || result === 'available') continue;
+
+    const outcome = result === 'recovered'
+      ? 'recovered'
+      : result.startsWith('recovered;')
+        ? 'recovered with cleanup pending'
+        : item.status === 'unavailable' || result === 'still unavailable'
+          ? 'unavailable'
+          : item.status === 'in use'
+            ? 'active'
+            : item.status === 'unknown' || result.includes('could not verify')
+              ? 'unverified'
+              : 'follow-up';
+    counts.set(outcome, (counts.get(outcome) || 0) + 1);
+  }
+  return [...counts].map(([outcome, count]) => {
+    const reservations = `${count} pool reservation${count === 1 ? '' : 's'}`;
+    if (outcome === 'recovered') return `${reservations} recovered`;
+    if (outcome === 'recovered with cleanup pending') return `${reservations} recovered with cleanup pending`;
+    if (outcome === 'unavailable') return `${reservations} remain unavailable`;
+    if (outcome === 'active') return `${count} active pool reservation${count === 1 ? '' : 's'} preserved`;
+    if (outcome === 'unverified') return `${count} pool reservation state${count === 1 ? '' : 's'} unverified`;
+    return `${count} pool recovery outcome${count === 1 ? '' : 's'} need follow-up`;
+  });
 }
 
 function failureSummary(record) {

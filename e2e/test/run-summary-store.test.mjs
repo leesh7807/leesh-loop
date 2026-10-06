@@ -56,6 +56,26 @@ test('success summary is compact, useful, and excludes execution infrastructure 
   assert.equal((await stat(result.path)).mode & 0o777, 0o644);
 });
 
+test('recovery summary distinguishes unresolved pool reservations from the completed run reservation', async t => {
+  const root = await repository(t);
+  const store = new RunSummaryStore({ repositoryRoot: root });
+  const result = await store.write(runRecord('run-summary-recovery', {
+    recovery: [
+      { database_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', status: 'unavailable', result: 'still unavailable' },
+      { database_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', status: 'unavailable', result: 'still unavailable' },
+      { database_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', status: 'available', result: 'available' },
+      { database_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', status: 'available', result: 'recovered' },
+      { database_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', status: 'in use', result: 'preserved; active runtime' },
+      { database_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', status: 'unknown', result: 'recovery could not verify database; other pool entries continue' }
+    ]
+  }));
+  const summary = await readFile(result.path, 'utf8');
+
+  assert.match(summary, /Database reservation: available/);
+  assert.match(summary, /Recovery: 2 pool reservations remain unavailable; 1 pool reservation recovered; 1 active pool reservation preserved; 1 pool reservation state unverified/);
+  assert.doesNotMatch(summary, /aaaaaaaa-aaaa|bbbbbbbb-bbbb|recovery could not verify database/);
+});
+
 test('failed summary records a short stage and redacts identifiers, URLs, credentials, and paths', async t => {
   const root = await repository(t);
   const store = new RunSummaryStore({ repositoryRoot: root });
