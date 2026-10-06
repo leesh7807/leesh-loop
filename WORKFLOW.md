@@ -269,23 +269,27 @@ Any perspective below `0.90` is a candidate. Run one Review Job at a time. Selec
 ```text
 review target: <PR URL>
 review head: <exact HEAD SHA>
+review plan: <repository-relative Accepted Plan path>
 review perspective: <Behavior | Maintainability | Security | UI/UX>
 Job ID: <UUID>
 ```
 
 Poll the same Job every 30 seconds while `pending` or `in_progress`; use a completed Job's `result`. Do not duplicate a running request. A failed submission/Job or malformed/unusable evidence changes no confidence and uses the human-required blocker handoff.
 
-The reviewer supplies evidence for one perspective and never adjusts orchestration confidence. Bind every request to exact PR/HEAD, include the complete Accepted Plan plus concise changed-result context, and treat Accepted Plan/repository contracts as authority over implementation, tests, mocks, fixtures, harnesses, or design rationale. If a finding reports confidence, call it `Evidence confidence`.
+The reviewer supplies evidence for one perspective and never adjusts orchestration confidence. Bind every request to exact PR/HEAD and identify the canonical Accepted Plan by its repository-relative path. The reviewer must read that Plan from the exact review HEAD rather than receiving a copied Plan body. Include concise changed-result context, and treat the Accepted Plan/repository contracts as authority over implementation, tests, mocks, fixtures, harnesses, or design rationale. If a finding reports confidence, call it `Evidence confidence`.
 
 Use:
 
 ```text
 Review PR <PR_URL> at HEAD <HEAD_SHA> from the <PERSPECTIVE> perspective.
 
-Inspect the exact HEAD and diff, plus only surrounding repository or rendered
-evidence needed for this perspective. Treat the Accepted Plan and existing
-repository contracts as authority. Existing implementation, tests, mocks,
-fixtures, harnesses, and design rationale are evidence, not stronger authority.
+Accepted Plan: <REPOSITORY_RELATIVE_PLAN_PATH>
+
+Inspect the exact HEAD and diff. Read the Accepted Plan above from that exact
+HEAD, plus only surrounding repository or rendered evidence needed for this
+perspective. Treat the Accepted Plan and existing repository contracts as
+authority. Existing implementation, tests, mocks, fixtures, harnesses, and
+design rationale are evidence, not stronger authority.
 
 Assume other perspectives are reviewed separately. Do not broaden this into a
 general multi-perspective review.
