@@ -52,7 +52,7 @@ github_repository_url = "https://github.com/owner/repository.git"
 github_base_branch = "main"
 ```
 
-`main` is only an example; set `github_base_branch` to the branch you intend to use. Operator creates task workspaces from the configured repository and base branch, and task branches and delivery pull requests use that configured base.
+`main` is only an example; set `github_base_branch` to the branch you intend to use. Symphony creates task workspaces from the configured repository and base branch, and task branches and delivery pull requests use that configured base.
 
 The Notion database URL comes from `LEESH_LOOP_NOTION_DATABASE_URL`; the integration token comes from `NOTION_TOKEN`. Operator reads either value from the process environment or the Loop root `.env`. Init does not create a Notion database, copy credentials, or save process-only values. The GitHub repository URL and base branch are always a pair.
 
