@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { execFile as execute } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { execFile as execute, spawn } from 'node:child_process';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -53,10 +53,20 @@ exit 0
 `);
   const child = join(directory, 'child');
   await executable(child, `#!/bin/sh
+set -eu
 printf 'child %s\\n' "$*" >> "$OPERATOR_TEST_LOG"
 printf 'discovery=%s\\n' "\${CHATGPT_SHOT_WORKER_DISCOVERY_PATH-}" >> "$OPERATOR_TEST_LOG"
 printf 'readiness=%s\\n' "\${SYMPHONY_OPERATOR_READINESS_FILE-}" >> "$OPERATOR_TEST_LOG"
 printf 'interface=%s\\n' "\${CHATGPT_SHOT_WORKER_INTERFACE_ROOT-}" >> "$OPERATOR_TEST_LOG"
+if [ "\${OPERATOR_TEST_USE_WORKER_INTERFACE:-false}" = true ]; then
+  PATH="$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:$PATH"
+  export PATH
+  printf 'selected=%s\\n' "$(command -v chatgpt-shot)" >> "$OPERATOR_TEST_LOG"
+  worker_job_id=$(chatgpt-shot submit 'worker review request')
+  printf 'worker-job=%s\\n' "$worker_job_id" >> "$OPERATOR_TEST_LOG"
+  printf 'worker-snapshot=' >> "$OPERATOR_TEST_LOG"
+  chatgpt-shot jobs "$worker_job_id" >> "$OPERATOR_TEST_LOG"
+fi
 `);
   t.after(async () => {
     try {
@@ -64,6 +74,16 @@ printf 'interface=%s\\n' "\${CHATGPT_SHOT_WORKER_INTERFACE_ROOT-}" >> "$OPERATOR
       if (Number.isInteger(pid) && pid > 0) process.kill(pid, 'SIGTERM');
     } catch {
       // Readiness-failure fixtures do not launch the local health server.
+    }
+    for (const stateRoot of ['config', 'data', 'cache'].map(name => join(directory, 'external', name, 'chatgpt-shot'))) {
+      try {
+        await chmod(stateRoot, 0o755);
+        for (const entry of await readdir(stateRoot, { withFileTypes: true })) {
+          if (entry.isFile()) await chmod(join(stateRoot, entry.name), 0o644);
+        }
+      } catch {
+        // Bootstrap fixtures without external state have nothing to restore.
+      }
     }
     await rm(directory, { recursive: true, force: true });
   });
@@ -79,6 +99,7 @@ async function externalReadinessFixture(t, startMode = 'ready') {
   const discovery = join(cacheHome, 'chatgpt-shot', 'runtime.json');
   const serverScript = join(externalRoot, 'health-server.mjs');
   const serverPidFile = join(externalRoot, 'health-server.pid');
+  const serviceRequests = join(externalRoot, 'service-requests.jsonl');
   await Promise.all([
     mkdir(join(configHome, 'chatgpt-shot'), { recursive: true }),
     mkdir(join(dataHome, 'chatgpt-shot'), { recursive: true }),
@@ -88,10 +109,39 @@ async function externalReadinessFixture(t, startMode = 'ready') {
 import http from 'node:http';
 
 const discoveryPath = process.argv[2];
+const requestsPath = process.argv[3];
+const id = '00000000-0000-4000-8000-000000000001';
 const server = http.createServer((request, response) => {
-  const record = JSON.parse(fs.readFileSync(discoveryPath, 'utf8'));
-  response.writeHead(request.url === '/health' && request.headers.authorization === 'Bearer fixture-token' ? 200 : 403, { 'content-type': 'application/json' });
-  response.end(JSON.stringify({ pid: record.pid, protocolVersion: 1, accepting: true }));
+  let body = '';
+  request.setEncoding('utf8');
+  request.on('data', chunk => body += chunk);
+  request.on('end', () => {
+    const record = JSON.parse(fs.readFileSync(discoveryPath, 'utf8'));
+    response.setHeader('content-type', 'application/json');
+    if (request.headers.authorization !== 'Bearer fixture-token') {
+      response.writeHead(403);
+      response.end(JSON.stringify({ code: 'FORBIDDEN', message: 'invalid credential' }));
+      return;
+    }
+    if (request.url === '/health') {
+      response.writeHead(200);
+      response.end(JSON.stringify({ pid: record.pid, protocolVersion: 1, accepting: true }));
+      return;
+    }
+    fs.appendFileSync(requestsPath, JSON.stringify({ method: request.method, url: request.url, body }) + '\\n');
+    if (request.method === 'POST' && request.url === '/jobs') {
+      response.writeHead(200);
+      response.end(JSON.stringify({ id }));
+      return;
+    }
+    if (request.method === 'GET' && request.url === '/jobs/' + id) {
+      response.writeHead(200);
+      response.end(JSON.stringify({ id, state: 'completed', result: 'review result', error: null }));
+      return;
+    }
+    response.writeHead(404);
+    response.end(JSON.stringify({ code: 'NOT_FOUND', message: 'not found' }));
+  });
 });
 server.listen(0, '127.0.0.1', () => {
   fs.writeFileSync(discoveryPath, JSON.stringify({ host: '127.0.0.1', port: server.address().port, pid: process.pid, credential: 'fixture-token' }) + '\\n');
@@ -111,7 +161,7 @@ case "$1" in
   doctor) exit 0 ;;
   start)
     if [ "$CHATGPT_SHOT_START_MODE" = ready ]; then
-      node "$OPERATOR_TEST_HEALTH_SERVER" "$XDG_CACHE_HOME/chatgpt-shot/runtime.json" >/dev/null 2>&1 &
+      node "$OPERATOR_TEST_HEALTH_SERVER" "$XDG_CACHE_HOME/chatgpt-shot/runtime.json" "$OPERATOR_TEST_SERVICE_REQUESTS" >/dev/null 2>&1 &
       printf '%s\\n' "$!" > "$OPERATOR_TEST_SERVER_PID_FILE"
       wait_count=0
       while [ ! -s "$XDG_CACHE_HOME/chatgpt-shot/runtime.json" ]; do
@@ -133,8 +183,56 @@ esac
   env.XDG_CACHE_HOME = cacheHome;
   env.OPERATOR_TEST_HEALTH_SERVER = serverScript;
   env.OPERATOR_TEST_SERVER_PID_FILE = serverPidFile;
+  env.OPERATOR_TEST_SERVICE_REQUESTS = serviceRequests;
   env.CHATGPT_SHOT_START_MODE = startMode;
-  return { ...fixtureValue, env, discovery };
+  return { ...fixtureValue, env, discovery, configHome, dataHome, cacheHome, serverScript, serverPidFile, serviceRequests };
+}
+
+async function startPreparedService(fixtureValue) {
+  const server = spawn(process.execPath, [fixtureValue.serverScript, fixtureValue.discovery, fixtureValue.serviceRequests], { stdio: 'ignore' });
+  if (!server.pid) throw new Error('could not start the prepared chatgpt-shot Service fixture');
+  server.unref();
+  await writeFile(fixtureValue.serverPidFile, `${server.pid}\n`);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      JSON.parse(await readFile(fixtureValue.discovery, 'utf8'));
+      return;
+    } catch {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  }
+  throw new Error('prepared chatgpt-shot Service did not publish discovery');
+}
+
+async function makeOperatorStateReadOnly(fixtureValue) {
+  const roots = [
+    join(fixtureValue.configHome, 'chatgpt-shot'),
+    join(fixtureValue.dataHome, 'chatgpt-shot'),
+    join(fixtureValue.cacheHome, 'chatgpt-shot')
+  ];
+  for (const root of roots) {
+    for (const entry of await readdir(root, { withFileTypes: true })) {
+      if (entry.isFile()) await chmod(join(root, entry.name), 0o444);
+    }
+    await chmod(root, 0o555);
+  }
+}
+
+async function snapshotOperatorState(fixtureValue) {
+  const roots = [
+    join(fixtureValue.configHome, 'chatgpt-shot'),
+    join(fixtureValue.dataHome, 'chatgpt-shot'),
+    join(fixtureValue.cacheHome, 'chatgpt-shot')
+  ];
+  return Promise.all(roots.map(async root => {
+    const directory = await stat(root);
+    const entries = await Promise.all((await readdir(root)).sort().map(async name => {
+      const path = join(root, name);
+      const details = await stat(path);
+      return { name, mode: details.mode & 0o777, mtimeMs: details.mtimeMs, contents: await readFile(path, 'utf8') };
+    }));
+    return { mode: directory.mode & 0o777, mtimeMs: directory.mtimeMs, entries };
+  }));
 }
 
 function environment(fixture) {
@@ -149,15 +247,17 @@ function environment(fixture) {
     SYMPHONY_WORKSPACE_ROOT: fixture.workspace,
     SYMPHONY_GITHUB_REPOSITORY_URL: 'https://github.com/example/repository.git',
     SYMPHONY_GITHUB_BASE_BRANCH: 'main',
+    SYMPHONY_OPERATOR_INTERFACE_ROOT: join(fixture.directory, 'worker-interface'),
     SYMPHONY_OPERATOR_STARTUP_STATUS_FILE: fixture.status
   };
   delete env.CHATGPT_SHOT_WORKER_DISCOVERY_PATH;
+  delete env.SYMPHONY_CHATGPT_SHOT_SMOKE_PROMPT;
   delete env.SYMPHONY_OPERATOR_READINESS_FILE;
   delete env.CHATGPT_SHOT_WORKER_INTERFACE_ROOT;
   return env;
 }
 
-test('skip external readiness reaches the child without reading or preparing external state', async t => {
+test('skip external readiness still prepares the worker interface without inspecting external state', async t => {
   const fixtureValue = await fixture(t);
   const result = await execFile('sh', [bootstrap, '--skip-external-readiness', '--', fixtureValue.child, 'symphony'], { env: environment(fixtureValue) });
   assert.match(result.stdout, /Review service checks were skipped by configuration/);
@@ -166,11 +266,13 @@ test('skip external readiness reaches the child without reading or preparing ext
   assert.match(log, /gh /);
   assert.match(log, /curl /);
   assert.match(log, /child symphony/);
-  assert.match(log, /discovery=\n/);
+  assert.match(log, new RegExp(`discovery=${fixtureValue.blocked}/chatgpt-shot/runtime\\.json`));
   assert.match(log, /readiness=\n/);
-  assert.match(log, /interface=\n/);
+  assert.match(log, new RegExp(`interface=${fixtureValue.directory}/worker-interface`));
+  assert.equal(await readFile(join(fixtureValue.directory, 'worker-interface/chatgpt-shot'), 'utf8'), await readFile(join(root, 'operator/external/chatgpt-shot/chatgpt-shot'), 'utf8'));
+  assert.equal((await stat(join(fixtureValue.directory, 'worker-interface/chatgpt-shot'))).mode & 0o111, 0o111);
   assert.equal((await stat(fixtureValue.blocked)).isFile(), true);
-  await assert.rejects(stat(join(fixtureValue.blocked, 'chatgpt-shot')), /ENOTDIR/);
+  assert.doesNotMatch(log, /chatgpt-shot (?:config|doctor|start|submit|jobs)/);
   assert.equal(await readFile(fixtureValue.status, 'utf8'), 'starting task processing\n');
 });
 
@@ -214,9 +316,10 @@ test('failed Service readiness uses public startup, preserves discovery, and fai
   assert.doesNotMatch(log, /child /);
 });
 
-test('public startup, Service readiness, smoke Job, and worker dispatch continue on success', async t => {
+test('normal startup keeps readiness and dispatches the same worker-facing review commands', async t => {
   const fixtureValue = await externalReadinessFixture(t);
-  const result = await execFile('sh', [bootstrap, '--', fixtureValue.child, 'symphony'], { env: fixtureValue.env });
+  const env = { ...fixtureValue.env, OPERATOR_TEST_USE_WORKER_INTERFACE: 'true' };
+  const result = await execFile('sh', [bootstrap, '--', fixtureValue.child, 'symphony'], { env });
 
   assert.match(result.stdout, /Loop setup checks passed/);
   const log = await readFile(fixtureValue.log, 'utf8');
@@ -224,8 +327,61 @@ test('public startup, Service readiness, smoke Job, and worker dispatch continue
   assert.match(log, /chatgpt-shot submit Operator readiness smoke check/);
   assert.match(log, /chatgpt-shot jobs 00000000-0000-4000-8000-000000000001/);
   assert.match(log, /child symphony/);
+  assert.match(log, new RegExp(`discovery=${fixtureValue.discovery}`));
+  assert.match(log, new RegExp(`interface=${fixtureValue.directory}/worker-interface`));
+  assert.match(log, new RegExp(`selected=${fixtureValue.directory}/worker-interface/chatgpt-shot`));
+  assert.match(log, /worker-job=00000000-0000-4000-8000-000000000001/);
+  assert.match(log, /worker-snapshot=\{"id":"00000000-0000-4000-8000-000000000001","state":"completed","result":"review result","error":null\}/);
   assert.doesNotMatch(log, /chatgpt-shot stop/);
   assert.match(await readFile(fixtureValue.discovery, 'utf8'), /"credential":"fixture-token"/);
+  const serviceRequests = (await readFile(fixtureValue.serviceRequests, 'utf8')).trim().split('\n').map(value => JSON.parse(value));
+  assert.deepEqual(serviceRequests, [
+    { method: 'POST', url: '/jobs', body: JSON.stringify({ prompt: 'worker review request' }) },
+    { method: 'GET', url: '/jobs/00000000-0000-4000-8000-000000000001', body: '' }
+  ]);
+});
+
+test('fast worker submits and reads a Job through the shared interface with read-only Operator state', async t => {
+  const fixtureValue = await externalReadinessFixture(t);
+  await startPreparedService(fixtureValue);
+  await makeOperatorStateReadOnly(fixtureValue);
+  const before = await snapshotOperatorState(fixtureValue);
+  const env = { ...fixtureValue.env, OPERATOR_TEST_USE_WORKER_INTERFACE: 'true' };
+  const result = await execFile('sh', [bootstrap, '--skip-external-readiness', '--', fixtureValue.child, 'symphony'], { env });
+
+  assert.match(result.stdout, /Review service checks were skipped by configuration/);
+  const log = await readFile(fixtureValue.log, 'utf8');
+  assert.match(log, new RegExp(`discovery=${fixtureValue.discovery}`));
+  assert.match(log, new RegExp(`interface=${fixtureValue.directory}/worker-interface`));
+  assert.match(log, new RegExp(`selected=${fixtureValue.directory}/worker-interface/chatgpt-shot`));
+  assert.match(log, /worker-job=00000000-0000-4000-8000-000000000001/);
+  assert.match(log, /worker-snapshot=\{"id":"00000000-0000-4000-8000-000000000001","state":"completed","result":"review result","error":null\}/);
+  assert.doesNotMatch(log, /chatgpt-shot (?:config|doctor|start|submit|jobs)/);
+  const serviceRequests = (await readFile(fixtureValue.serviceRequests, 'utf8')).trim().split('\n').map(value => JSON.parse(value));
+  assert.deepEqual(serviceRequests, [
+    { method: 'POST', url: '/jobs', body: JSON.stringify({ prompt: 'worker review request' }) },
+    { method: 'GET', url: '/jobs/00000000-0000-4000-8000-000000000001', body: '' }
+  ]);
+  assert.deepEqual(await snapshotOperatorState(fixtureValue), before);
+});
+
+test('fast worker reports a missing prepared Service without falling back or changing Operator state', async t => {
+  const fixtureValue = await externalReadinessFixture(t);
+  await makeOperatorStateReadOnly(fixtureValue);
+  const before = await snapshotOperatorState(fixtureValue);
+  const env = { ...fixtureValue.env, OPERATOR_TEST_USE_WORKER_INTERFACE: 'true' };
+
+  await assert.rejects(
+    execFile('sh', [bootstrap, '--skip-external-readiness', '--', fixtureValue.child, 'symphony'], { env }),
+    error => /BROWSER_UNAVAILABLE: No prepared chatgpt-shot Service discovery/.test(String(error.stderr))
+  );
+
+  const log = await readFile(fixtureValue.log, 'utf8');
+  assert.match(log, new RegExp(`selected=${fixtureValue.directory}/worker-interface/chatgpt-shot`));
+  assert.doesNotMatch(log, /chatgpt-shot (?:config|doctor|start|submit|jobs)/);
+  assert.deepEqual(await snapshotOperatorState(fixtureValue), before);
+  await assert.rejects(stat(fixtureValue.discovery), error => error.code === 'ENOENT');
+  await assert.rejects(readFile(fixtureValue.serviceRequests, 'utf8'), error => error.code === 'ENOENT');
 });
 
 test('nested E2E bootstrap permits a run-owned workspace inside the current repository when explicitly configured', async t => {
