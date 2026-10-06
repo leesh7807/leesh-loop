@@ -152,6 +152,21 @@ export class DatabaseReservationAuthority {
     };
   }
 
+  async runHasUnsettledReservation(runId) {
+    const reservationStreams = await this.eventStore.listCurrentStreams('reservations');
+    for (const databaseStream of reservationStreams) {
+      const compactDatabaseId = databaseStream.replaceAll('-', '');
+      if (!/^[0-9a-f]{32}$/i.test(compactDatabaseId)) {
+        throw new Error('reservation identity could not be safely verified');
+      }
+      const databaseId = `${compactDatabaseId.slice(0, 8)}-${compactDatabaseId.slice(8, 12)}-${compactDatabaseId.slice(12, 16)}-${compactDatabaseId.slice(16, 20)}-${compactDatabaseId.slice(20)}`;
+      const state = await this.read(databaseId);
+      if ((state?.status === DATABASE_STATES.IN_USE && state.reservation?.run_id === runId)
+        || (state?.status === DATABASE_STATES.UNAVAILABLE && state.unavailable?.run_id === runId)) return true;
+    }
+    return false;
+  }
+
   async deleteRunLifecycle(runId) {
     const stream = 'runs/' + runId.replaceAll('-', '');
     const current = await this.eventStore.read(stream);
@@ -165,27 +180,17 @@ export class DatabaseReservationAuthority {
     // residue, then continue on a different database. Keep its lifecycle until
     // every reservation it touched is settled so recovery can still establish
     // whether the former run and child runtime are safe to ignore.
-    const reservationStreams = await this.eventStore.listCurrentStreams('reservations');
-    for (const databaseStream of reservationStreams) {
-      const compactDatabaseId = databaseStream.replaceAll('-', '');
-      if (!/^[0-9a-f]{32}$/i.test(compactDatabaseId)) {
-        return { committed: false, reason: 'reservation identity could not be safely verified', lifecycle };
-      }
-      const databaseId = `${compactDatabaseId.slice(0, 8)}-${compactDatabaseId.slice(8, 12)}-${compactDatabaseId.slice(12, 16)}-${compactDatabaseId.slice(16, 20)}-${compactDatabaseId.slice(20)}`;
-      const state = await this.read(databaseId);
-      if ((state?.status === DATABASE_STATES.IN_USE && state.reservation?.run_id === runId)
-        || (state?.status === DATABASE_STATES.UNAVAILABLE && state.unavailable?.run_id === runId)) {
-        return { committed: false, reason: 'database recovery still depends on this run lifecycle', lifecycle };
-      }
-    }
+    let referenced;
+    try { referenced = await this.runHasUnsettledReservation(runId); }
+    catch (error) { return { committed: false, reason: error.message || 'reservation state could not be safely verified', lifecycle }; }
+    if (referenced) return { committed: false, reason: 'database recovery still depends on this run lifecycle', lifecycle };
     const result = await this.eventStore.delete(stream, current);
     return result.committed ? { committed: true, state: result.current } : { committed: false, reason: 'run lifecycle changed before cleanup', state: result.current };
   }
 
   async reconcileCurrentState(databasePool = []) {
     await this.eventStore.migrateLegacyRefs();
-    const databaseIds = [...new Set(databasePool.map(database => database.database_id).filter(Boolean))];
-    for (const databaseId of databaseIds) {
+    for (const databaseId of [...new Set(databasePool.map(database => database.database_id).filter(Boolean))]) {
       const state = await this.read(databaseId);
       if (state.status === DATABASE_STATES.AVAILABLE && state.ref) await this.eventStore.delete('reservations/' + databaseId.replaceAll('-', ''), state);
     }
@@ -198,18 +203,9 @@ export class DatabaseReservationAuthority {
       const lifecycle = current.event?.lifecycle;
       if (!lifecycle || !TERMINAL_RUN_STATES.has(lifecycle.status)
         || !['not_started', 'stopped'].includes(lifecycle.child_runtime?.status)) continue;
-      const relatedDatabaseIds = [...new Set([...databaseIds, lifecycle.selected_database_id].filter(Boolean))];
-      let stillReferenced = false;
-      for (const databaseId of relatedDatabaseIds) {
-        let database;
-        try { database = await this.read(databaseId); }
-        catch { stillReferenced = true; break; }
-        if ((database.status === DATABASE_STATES.IN_USE && database.reservation?.run_id === lifecycle.run_id)
-          || (database.status === DATABASE_STATES.UNAVAILABLE && database.unavailable?.run_id === lifecycle.run_id)) {
-          stillReferenced = true;
-          break;
-        }
-      }
+      let stillReferenced;
+      try { stillReferenced = await this.runHasUnsettledReservation(lifecycle.run_id); }
+      catch { continue; }
       if (!stillReferenced) terminalRefs.push({ stream, current });
     }
     let removedRunLifecycles = 0;

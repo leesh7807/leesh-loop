@@ -126,6 +126,37 @@ test('run lifecycle remains until every database reservation owned by the run is
   assert.equal(await authority.readRunLifecycle('run-a'), null);
 });
 
+test('pool replacement reconciliation preserves lifecycle for an unavailable reservation outside the pool', async t => {
+  const fixture = await gitFixture(t);
+  const authority = new DatabaseReservationAuthority({ eventStore: fixture.store(join(fixture.root, 'workspace', 'runs')) });
+  const replacementPoolDatabaseId = '4ea8a265-8625-812c-8849-fa1087a2272b';
+
+  await authority.reserve(databaseId, { run_id: 'run-a' });
+  const unavailable = await authority.markUnavailable(databaseId, 'run-a', 'stale task residue');
+  assert.equal(unavailable.committed, true);
+  await authority.reserve(replacementPoolDatabaseId, { run_id: 'run-a' });
+  await authority.writeRunLifecycle('run-a', {
+    run_id: 'run-a',
+    status: 'active',
+    selected_database_id: replacementPoolDatabaseId,
+    child_runtime: { status: 'not_started' }
+  });
+  await authority.updateRunLifecycleForReservation(replacementPoolDatabaseId, 'run-a', {
+    status: 'completed',
+    child_runtime: { status: 'stopped' }
+  });
+  assert.equal((await authority.release(replacementPoolDatabaseId, 'run-a')).committed, true);
+
+  await authority.reconcileCurrentState([{ database_id: replacementPoolDatabaseId }]);
+
+  assert.equal((await authority.read(databaseId)).status, DATABASE_STATES.UNAVAILABLE);
+  assert.equal((await authority.readRunLifecycle('run-a')).status, 'completed');
+  const recovery = await authority.beginRecovery(databaseId);
+  assert.equal((await authority.completeRecovery(recovery, {})).recovered, true);
+  assert.equal((await authority.deleteRunLifecycle('run-a')).committed, true);
+  assert.equal(await authority.readRunLifecycle('run-a'), null);
+});
+
 test('separate event-store workspaces observe the same durable run lifecycle', async t => {
   const fixture = await gitFixture(t);
   const first = new DatabaseReservationAuthority({ eventStore: fixture.store(join(fixture.root, 'worker-a', 'runs')) });
