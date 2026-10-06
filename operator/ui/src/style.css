@@ -19,7 +19,7 @@ a:hover { color: var(--accent); text-decoration-color: currentColor; }
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 2rem; padding-bottom: 1.75rem; border-bottom: 1px solid #deded9; }
 .eyebrow, .meta-label { margin: 0; color: #5f5f5a; font-size: .75rem; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
 h1, h2, h3, h4, p { margin-top: 0; }
-h1 { margin-bottom: .25rem; font-size: clamp(2rem, 3.2vw, 3rem); line-height: 1.08; letter-spacing: -.045em; }
+h1 { margin-bottom: .25rem; overflow-wrap: anywhere; font-size: clamp(1.5rem, 2.4vw, 2.1rem); line-height: 1.12; letter-spacing: -.035em; }
 .related-work { display: flex; flex-wrap: wrap; gap: .55rem 1.25rem; font-size: .875rem; }
 .related-work a { color: #555550; text-decoration: none; }
 .related-work .runtime-details { color: #73736d; font-size: .75rem; }

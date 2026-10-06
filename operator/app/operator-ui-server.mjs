@@ -6,6 +6,7 @@ import { basename, extname, join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
+import { githubRepositoryDetails } from './github-repository-url.mjs';
 
 const MIME_TYPES = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -79,10 +80,13 @@ export async function createOperatorUiServer({ root, config, stateDirectory, pub
     const url = new URL(request.url || '/', 'http://127.0.0.1');
     try {
       if (request.method === 'GET' && url.pathname === '/api/v1/config') {
+        const repository = githubRepositoryDetails(config.github_repository_url);
         sendJson(response, 200, {
           states: publisherState.states,
           defaultState: publisherState.defaultState,
-          githubRepositoryUrl: config.github_repository_url,
+          githubRepositoryIdentity: repository.identity,
+          githubRepositoryName: repository.name,
+          githubBrowserRepositoryUrl: repository.browserRepositoryUrl,
           notionTasksUrl: config.notion_database_url,
           dashboardUrl: `http://127.0.0.1:${Number(config.symphony_port || 4100)}`
         });

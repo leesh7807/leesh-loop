@@ -38,6 +38,16 @@ test('runtime details navigation uses a secondary, user-facing label', async () 
   assert.doesNotMatch(source, /Symphony Dashboard/);
 });
 
+test('Project presentation uses the configured repository name, browser URL, and tab title', async () => {
+  const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
+  const html = await readFile(join(root, 'operator/ui/index.html'), 'utf8');
+  assert.match(source, /document\.title = `\$\{config\.githubRepositoryName\} · Loop`/);
+  assert.match(source, /<h1>\{config\?\.githubRepositoryName \|\| 'Project work'\}<\/h1>/);
+  assert.match(source, /href=\{config\.githubBrowserRepositoryUrl\}/);
+  assert.doesNotMatch(source, /href=\{config\.githubRepositoryUrl\}/);
+  assert.match(html, /<title>Loop<\/title>/);
+});
+
 test('Publisher preparation keeps build output off the Operator JSON stdout channel', async () => {
   const moduleUrl = new URL('../leesh-loop.mjs', import.meta.url).href;
   const source = `import { ensurePublisher } from ${JSON.stringify(moduleUrl)}; ensurePublisher(); console.log(JSON.stringify({ ready: true }));`;
@@ -75,7 +85,10 @@ test('task refresh errors do not own or block the independent publication route'
   const config = await fetch(`${base}/api/v1/config`).then(response => response.json());
   assert.deepEqual(config.states, ['Backlog', 'Ready', 'Human Review']);
   assert.equal(config.defaultState, 'Ready');
-  assert.equal(config.githubRepositoryUrl, 'https://github.com/example/project.git');
+  assert.equal(config.githubRepositoryIdentity, 'example/project');
+  assert.equal(config.githubRepositoryName, 'project');
+  assert.equal(config.githubBrowserRepositoryUrl, 'https://github.com/example/project');
+  assert.equal(Object.hasOwn(config, 'githubRepositoryUrl'), false);
   assert.equal(config.dashboardUrl, 'http://127.0.0.1:4100');
 
   const first = await fetch(`${base}/api/v1/tasks`);
