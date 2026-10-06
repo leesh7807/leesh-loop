@@ -1,0 +1,21 @@
+{
+  "kind": "database_reservation",
+  "database_id": "3ea8a265-8625-8034-8507-c385c5e9c594",
+  "state": {
+    "schema_version": 1,
+    "kind": "database_reservation",
+    "database_id": "3ea8a265-8625-8034-8507-c385c5e9c594",
+    "status": "unavailable",
+    "reservation": null,
+    "recovery_marker": "7730ced6-7e63-4bdb-bd01-2036ecdd713a",
+    "unavailable": {
+      "marker": "7730ced6-7e63-4bdb-bd01-2036ecdd713a",
+      "at": "2026-10-06T13:32:13.108Z",
+      "reason": "required run cleanup or settlement did not complete",
+      "run_id": "e17fa6ca-68b5-4532-b245-7fcf95fff273"
+    }
+  },
+  "event_sequence": 2,
+  "previous_event_sha": "0fbb9758633ed4ed95e9c32ef61180bc5a30b1b1",
+  "recorded_at": "2026-10-06T13:32:14.456Z"
+}
