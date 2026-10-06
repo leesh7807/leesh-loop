@@ -15,6 +15,14 @@ class MemoryEventStore {
     this.streams.set(stream, next);
     return { committed: true, current: structuredClone(next) };
   }
+  async delete(stream, expected) {
+    const current = await this.read(stream);
+    if (current.sequence !== expected.sequence || current.sha !== expected.sha) return { committed: false, current };
+    this.streams.delete(stream);
+    return { committed: true, current: { sequence: 0, sha: null, ref: null, event: null } };
+  }
+  async migrateLegacyRefs() { return { migrated_streams: [] }; }
+  async listCurrentStreams(namespace) { return [...this.streams.keys()].filter(stream => stream.startsWith(namespace + '/')).map(stream => stream.slice(namespace.length + 1)); }
 }
 
 const databaseA = { database_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', database_url: 'https://www.notion.so/aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa' };
@@ -62,6 +70,30 @@ test('recovery does not treat a terminal lifecycle marker as dead while the run 
   assert.equal((await authority.read(databaseA.database_id)).reservation.run_id, 'finishing-run');
 });
 
+test('unavailable recovery preserves a terminal run while its owner process is active', async () => {
+  const authority = new DatabaseReservationAuthority({ eventStore: new MemoryEventStore() });
+  const process = await currentProcessIdentity();
+  await authority.reserve(databaseA.database_id, { run_id: 'finishing-unavailable-run', run_process: process, origin: 'direct' });
+  await authority.writeRunLifecycle('finishing-unavailable-run', {
+    run_id: 'finishing-unavailable-run',
+    status: 'failed',
+    run_process: process,
+    selected_database_id: databaseA.database_id,
+    child_runtime: { status: 'stopped' }
+  });
+  await authority.markUnavailable(databaseA.database_id, 'finishing-unavailable-run', 'required cleanup did not complete');
+  let taskReads = 0;
+  const admission = createAdmission({ authority, notionClient: { async listTasks() { taskReads += 1; return []; } } });
+
+  const result = await admission.recoveryPass();
+
+  assert.equal(result[0].status, DATABASE_STATES.UNAVAILABLE);
+  assert.equal(result[0].result, 'still unavailable');
+  assert.equal(taskReads, 0);
+  assert.equal((await authority.read(databaseA.database_id)).unavailable.run_id, 'finishing-unavailable-run');
+  assert.equal((await authority.readRunLifecycle('finishing-unavailable-run')).status, 'failed');
+});
+
 test('recovery preserves an in-use reservation when child runtime startup is unresolved', async () => {
   const authority = new DatabaseReservationAuthority({ eventStore: new MemoryEventStore() });
   const current = await currentProcessIdentity();
@@ -101,7 +133,6 @@ test('dead run recovery cancels stale task only after Workpad provenance readbac
   const current = await currentProcessIdentity();
   const dead = { ...current, pid: 2_000_000_000 };
   await authority.reserve(databaseA.database_id, { run_id: 'old-run', run_process: dead, origin: 'direct' });
-  await authority.updateReservationMetadata(databaseA.database_id, 'old-run', { base_branch: 'base/old-run' });
   await authority.writeRunLifecycle('old-run', { run_id: 'old-run', status: 'active', run_process: dead, origin: 'direct', selected_database_id: databaseA.database_id, child_runtime: { status: 'not_started' } });
 
   const tasks = [
@@ -122,12 +153,13 @@ test('dead run recovery cancels stale task only after Workpad provenance readbac
   assert.equal(result.admitted, true);
   assert.equal(result.database.database_id, databaseA.database_id);
   assert.equal(tasks.find(task => task.id === 'stale').state, 'Cancelled');
-  assert.match(tasks.find(task => task.id === 'stale').workpad, /previous_state: Ready/);
-  assert.match(tasks.find(task => task.id === 'stale').workpad, /previous_run_id: old-run/);
+  assert.match(tasks.find(task => task.id === 'stale').workpad, /이전 상태: Ready/);
+  assert.match(tasks.find(task => task.id === 'stale').workpad, /남아 있던 작업을 취소 상태로 정리/);
+  assert.doesNotMatch(tasks.find(task => task.id === 'stale').workpad, /E2E|reservation|harness|previous_run_id|child_runtime/);
   assert.ok(mutationOrder.indexOf('workpad:stale') < mutationOrder.indexOf('state:stale'));
   assert.deepEqual(tasks.slice(0, 3).map(task => task.state), ['Backlog', 'Done', 'Cancelled']);
   assert.equal((await authority.read(databaseA.database_id)).reservation.run_id, 'new-run');
-  assert.equal((await authority.readRunLifecycle('old-run')).status, 'interrupted');
+  assert.equal(await authority.readRunLifecycle('old-run'), null);
 });
 
 test('recovery classifies the authoritative task State instead of a stale list snapshot', async () => {
@@ -149,7 +181,7 @@ test('recovery classifies the authoritative task State instead of a stale list s
   const result = await admission.recoveryPass();
   assert.equal(result[0].result, 'recovered');
   assert.equal(task.state, 'Cancelled');
-  assert.match(task.workpad, /previous_state: Ready/);
+  assert.match(task.workpad, /이전 상태: Ready/);
   assert.ok(mutationOrder.indexOf('workpad:changed') < mutationOrder.indexOf('state:changed'));
 });
 
@@ -209,11 +241,12 @@ test('recovery releases an unavailable candidate when its former run is now boun
   assert.equal(recovery.find(item => item.database_id === databaseA.database_id).result, 'recovered');
   const recoveredDatabase = await authority.read(databaseA.database_id);
   assert.equal(recoveredDatabase.status, DATABASE_STATES.AVAILABLE);
-  assert.equal(recoveredDatabase.last_transition.evidence.run_lifecycle_database_id, databaseB.database_id);
-  assert.equal(recoveredDatabase.last_transition.evidence.run_lifecycle_bound_to_database, false);
+  assert.equal(recoveredDatabase.ref, null);
+  assert.equal((await authority.readRunLifecycle(firstRun.run_id)).selected_database_id, databaseB.database_id);
   assert.equal((await authority.read(databaseB.database_id)).reservation.run_id, firstRun.run_id);
   assert.equal(residue.state, 'Cancelled');
-  assert.match(residue.workpad, /previous_child_runtime_id: unknown/);
+  assert.match(residue.workpad, /남아 있던 작업을 취소 상태로 정리/);
+  assert.doesNotMatch(residue.workpad, /E2E|reservation|harness|child_runtime/);
   assert.ok(mutationOrder.indexOf('workpad:residue-a') < mutationOrder.indexOf('state:residue-a'));
 
   const secondRun = await admission.checkRunAdmission({ runId: 'next-run', runProcess: current, origin: 'worker-originated' });
@@ -245,4 +278,26 @@ test('capacity contention ends as resource unavailable admission without databas
   assert.equal(admissionRecord.code, 'RESOURCE_UNAVAILABLE_ADMISSION');
   assert.equal((await authority.read(databaseA.database_id)).status, DATABASE_STATES.IN_USE);
   assert.equal((await authority.read(databaseB.database_id)).status, DATABASE_STATES.IN_USE);
+  assert.equal(await authority.readRunLifecycle('new-run'), null);
+});
+
+test('unadmitted lifecycle is retained when its unavailable reservation still needs recovery', async () => {
+  const authority = new DatabaseReservationAuthority({ eventStore: new MemoryEventStore() });
+  const task = { id: 'stale-task', identifier: 'TASK-STALE', state: 'Ready', workpad: '' };
+  let admissionRecord;
+  const admission = createAdmission({
+    authority,
+    notionClient: { async listTasks() { return [task]; } },
+    runRecordStore: { async saveAdmissionFailure(error, metadata) { admissionRecord = { code: error.code, ...metadata }; } }
+  });
+
+  const result = await admission.checkRunAdmission({ runId: 'residue-run', runProcess: await currentProcessIdentity() });
+
+  assert.equal(result.admitted, false);
+  assert.equal(result.failure, 'database_admission_failed');
+  assert.equal((await authority.read(databaseA.database_id)).unavailable.run_id, 'residue-run');
+  assert.equal((await authority.readRunLifecycle('residue-run')).status, 'failed');
+  assert.equal(admissionRecord.databaseReservation.status, 'unavailable');
+  assert.equal(admissionRecord.cleanup.run_lifecycle_coordination_deleted, false);
+  assert.deepEqual(admissionRecord.cleanup.unresolved, ['run_lifecycle_coordination_cleanup']);
 });

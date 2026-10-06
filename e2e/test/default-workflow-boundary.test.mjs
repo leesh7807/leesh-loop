@@ -28,3 +28,9 @@ test('worker E2E requests and root npm script resolve to the same harness entry 
   assert.equal(JSON.parse(packageText).scripts.e2e, 'node e2e/cli.mjs run');
   assert.doesNotMatch(workflow, /node operator\/app\/leesh-loop\.mjs start|operator\/symphony\/mix run/);
 });
+
+test('default workflow keeps recovery Workpad entries focused on task outcomes', async () => {
+  const workflow = await readFile(join(root, 'WORKFLOW.md'), 'utf8');
+  assert.match(workflow, /Keep Workpad entries focused on repository work, verification, delivery, blockers, and recovery/);
+  assert.match(workflow, /Do not explain invocation mechanics or mention\s+internal coordination refs or harness logging there/);
+});

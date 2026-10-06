@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 export const DATABASE_STATES = Object.freeze({ AVAILABLE: 'available', IN_USE: 'in use', UNAVAILABLE: 'unavailable' });
+const TERMINAL_RUN_STATES = new Set(['completed', 'failed', 'interrupted', 'resource_unavailable_admission']);
 
 const initialState = databaseId => ({
   schema_version: 1,
@@ -9,8 +10,7 @@ const initialState = databaseId => ({
   status: DATABASE_STATES.AVAILABLE,
   reservation: null,
   recovery_marker: null,
-  unavailable: null,
-  last_transition: null
+  unavailable: null
 });
 
 const sameSnapshot = (left, right) => left.status === right.status
@@ -38,25 +38,25 @@ export class DatabaseReservationAuthority {
     return { ...state, sequence: current.sequence, sha: current.sha, ref: current.ref };
   }
 
-  async commit(current, nextState, eventType, details = {}) {
+  async commit(current, nextState) {
     const stream = `reservations/${current.database_id.replaceAll('-', '')}`;
     const { sequence: _sequence, sha: _sha, ref: _ref, ...persistentState } = nextState;
     const result = await this.eventStore.compareAndAppend(stream, current, {
       kind: 'database_reservation',
       database_id: current.database_id,
-      state: { ...persistentState, last_transition: { type: eventType, at: this.now(), ...details } }
+      state: persistentState
     });
     return result.committed ? { committed: true, state: { ...result.current.event.state, sequence: result.current.sequence, sha: result.current.sha, ref: result.current.ref } } : { committed: false, state: result.current.event?.state || initialState(current.database_id) };
   }
 
-  async reserve(databaseId, { run_id, origin }) {
+  async reserve(databaseId, { run_id }) {
     const current = await this.read(databaseId);
     if (current.status !== DATABASE_STATES.AVAILABLE) return { reserved: false, current };
     const reservation = {
       run_id,
       acquired_at: this.now()
     };
-    const result = await this.commit(current, { ...current, status: DATABASE_STATES.IN_USE, reservation, recovery_marker: null, unavailable: null }, 'available_to_in_use', { run_id, origin });
+    const result = await this.commit(current, { ...current, status: DATABASE_STATES.IN_USE, reservation, recovery_marker: null, unavailable: null });
     return result.committed ? { reserved: true, state: result.state } : { reserved: false, current: result.state };
   }
 
@@ -68,19 +68,12 @@ export class DatabaseReservationAuthority {
     return { committed: true, state: current, lifecycle: updated };
   }
 
-  async updateReservationMetadata(databaseId, runId, metadata) {
-    const current = await this.read(databaseId);
-    if (current.status !== DATABASE_STATES.IN_USE || current.reservation?.run_id !== runId) return { committed: false, state: current };
-    const reservation = { ...current.reservation, ...metadata };
-    return this.commit(current, { ...current, reservation }, 'reservation_metadata_updated', { run_id: runId, metadata });
-  }
-
   async recordActiveRecoveryObservation(expected, evidence) {
     const current = await this.read(expected.database_id);
     if (current.status !== DATABASE_STATES.IN_USE || current.reservation?.run_id !== expected.reservation?.run_id || current.sha !== expected.sha) {
       return { committed: false, state: current };
     }
-    return this.commit(current, current, 'active_run_protected', { run_id: current.reservation.run_id, evidence });
+    return { committed: true, state: current, evidence };
   }
 
   async release(databaseId, runId, evidence = {}) {
@@ -92,16 +85,18 @@ export class DatabaseReservationAuthority {
       || !['not_started', 'stopped'].includes(lifecycle.child_runtime?.status)) {
       return { committed: false, state: current, reason: 'run lifecycle or child runtime is still active' };
     }
-    const next = { ...initialState(databaseId), status: DATABASE_STATES.AVAILABLE };
-    return this.commit(current, next, 'in_use_to_available', { run_id: runId, ...evidence });
+    const released = await this.eventStore.delete('reservations/' + databaseId.replaceAll('-', ''), current);
+    return released.committed
+      ? { committed: true, state: initialState(databaseId), released_at: this.now() }
+      : { committed: false, state: released.current.event?.state || initialState(databaseId) };
   }
 
   async markUnavailable(databaseId, runId, reason, evidence = {}) {
     const current = await this.read(databaseId);
     if (current.status !== DATABASE_STATES.IN_USE || current.reservation?.run_id !== runId) return { committed: false, state: current };
     const marker = this.identity();
-    const unavailable = { marker, at: this.now(), reason, run_id: runId, evidence };
-    const result = await this.commit(current, { ...current, status: DATABASE_STATES.UNAVAILABLE, reservation: null, recovery_marker: marker, unavailable }, 'in_use_to_unavailable', { run_id: runId, recovery_marker: marker, reason, evidence });
+    const unavailable = { marker, at: this.now(), reason, run_id: runId };
+    const result = await this.commit(current, { ...current, status: DATABASE_STATES.UNAVAILABLE, reservation: null, recovery_marker: marker, unavailable });
     return result.committed ? { ...result, recovery_marker: marker } : result;
   }
 
@@ -111,74 +106,114 @@ export class DatabaseReservationAuthority {
     const marker = this.identity();
     const reason = 'previous E2E run and child runtime are authoritatively inactive';
     const runId = expected.reservation.run_id;
-    const unavailable = { marker, at: this.now(), reason, run_id: runId, evidence };
-    const result = await this.commit(current, { ...current, status: DATABASE_STATES.UNAVAILABLE, reservation: null, recovery_marker: marker, unavailable }, 'dead_run_to_unavailable', { run_id: runId, recovery_marker: marker, reason, evidence });
+    const unavailable = { marker, at: this.now(), reason, run_id: runId };
+    const result = await this.commit(current, { ...current, status: DATABASE_STATES.UNAVAILABLE, reservation: null, recovery_marker: marker, unavailable });
     return result.committed ? { ...result, recovery_marker: marker } : result;
   }
 
   async beginRecovery(databaseId) {
-    for (let retry = 0; retry < 3; retry += 1) {
-      const current = await this.read(databaseId);
-      if (current.status !== DATABASE_STATES.UNAVAILABLE || !current.recovery_marker) return null;
-      const attempt = { id: this.identity(), started_at: this.now(), recovery_marker: current.recovery_marker };
-      const started = await this.commit(current, current, 'recovery_started', { recovery_marker: current.recovery_marker, recovery_attempt_id: attempt.id });
-      if (started.committed) return { ...started.state, recovery_attempt: attempt };
-    }
-    return null;
+    const current = await this.read(databaseId);
+    if (current.status !== DATABASE_STATES.UNAVAILABLE || !current.recovery_marker) return null;
+    const attempt = { id: this.identity(), started_at: this.now(), recovery_marker: current.recovery_marker };
+    return { ...current, recovery_attempt: attempt };
   }
 
   async completeRecovery(snapshot, evidence) {
-    for (let retry = 0; retry < 3; retry += 1) {
-      const current = await this.read(snapshot.database_id);
-      if (current.status !== DATABASE_STATES.UNAVAILABLE || current.recovery_marker !== snapshot.recovery_marker) {
-        return this.recordStaleRecoveryResult(snapshot, current, 'unavailable_to_available');
-      }
-      const next = { ...initialState(snapshot.database_id), status: DATABASE_STATES.AVAILABLE };
-      const result = await this.commit(current, next, 'unavailable_to_available', { recovery_marker: snapshot.recovery_marker, recovery_attempt_id: snapshot.recovery_attempt?.id || null, result: 'recovered', evidence });
-      if (result.committed) return { ...result, recovered: true };
+    const current = await this.read(snapshot.database_id);
+    if (current.status !== DATABASE_STATES.UNAVAILABLE || current.recovery_marker !== snapshot.recovery_marker) {
+      return this.recordStaleRecoveryResult(snapshot, current, 'unavailable_to_available');
     }
-    return this.recordStaleRecoveryResult(snapshot, await this.read(snapshot.database_id), 'unavailable_to_available');
+    const result = await this.eventStore.delete('reservations/' + snapshot.database_id.replaceAll('-', ''), current);
+    if (!result.committed) return this.recordStaleRecoveryResult(snapshot, result.current, 'unavailable_to_available');
+    return { committed: true, state: initialState(snapshot.database_id), recovered: true };
   }
 
   async recordRecoveryFailure(snapshot, evidence) {
-    for (let retry = 0; retry < 3; retry += 1) {
-      const current = await this.read(snapshot.database_id);
-      if (current.status !== DATABASE_STATES.UNAVAILABLE || current.recovery_marker !== snapshot.recovery_marker) {
-        return this.recordStaleRecoveryResult(snapshot, current, 'recovery_attempt_failed');
-      }
-      const attemptResult = { at: this.now(), attempt_id: snapshot.recovery_attempt?.id || null, result: 'still unavailable', evidence };
-      const unavailable = { ...current.unavailable, recovery_attempts: [...(current.unavailable?.recovery_attempts || []), attemptResult] };
-      const result = await this.commit(current, { ...current, unavailable }, 'recovery_attempt_failed', { recovery_marker: snapshot.recovery_marker, recovery_attempt_id: snapshot.recovery_attempt?.id || null, result: 'still unavailable', evidence });
-      if (result.committed) return { ...result, recovered: false };
+    const current = await this.read(snapshot.database_id);
+    if (current.status !== DATABASE_STATES.UNAVAILABLE || current.recovery_marker !== snapshot.recovery_marker) {
+      return this.recordStaleRecoveryResult(snapshot, current, 'recovery_attempt_failed');
     }
-    return this.recordStaleRecoveryResult(snapshot, await this.read(snapshot.database_id), 'recovery_attempt_failed');
+    return { committed: true, state: current, recovered: false, evidence };
   }
 
   async recordStaleRecoveryResult(snapshot, latest, operation) {
-    for (let retry = 0; retry < 3; retry += 1) {
-      const current = await this.read(snapshot.database_id);
-      const evidence = {
+    const current = latest || await this.read(snapshot.database_id);
+    return {
+      committed: false,
+      reason: 'stale_recovery_marker',
+      state: current,
+      evidence: {
         attempted_marker: snapshot.recovery_marker,
         current_status: current.status,
         current_recovery_marker: current.recovery_marker || null,
         authoritative_sequence: current.sequence,
-        result: 'stale recovery rejected',
         attempted_operation: operation
-      };
-      const result = await this.commit(current, current, 'stale_recovery_rejected', {
-        recovery_marker: snapshot.recovery_marker,
-        recovery_attempt_id: snapshot.recovery_attempt?.id || null,
-        result: evidence.result,
-        final_authoritative_state: { status: evidence.current_status, recovery_marker: evidence.current_recovery_marker, sequence: evidence.authoritative_sequence }
-      });
-      if (result.committed) return { committed: false, reason: 'stale_recovery_marker', state: result.state, evidence };
-    }
-    const current = await this.read(snapshot.database_id);
-    return { committed: false, reason: 'stale_recovery_marker', state: current, evidence: { attempted_marker: snapshot.recovery_marker, current_status: current.status, current_recovery_marker: current.recovery_marker || null, authoritative_sequence: current.sequence, result: 'stale recovery evidence could not be appended', attempted_operation: operation, observed_after: latest?.sequence ?? null } };
+      }
+    };
   }
 
-  async recoveryHistory(databaseId) {
-    return this.eventStore.history(`reservations/${databaseId.replaceAll('-', '')}`);
+  async runHasUnsettledReservation(runId) {
+    const reservationStreams = await this.eventStore.listCurrentStreams('reservations');
+    for (const databaseStream of reservationStreams) {
+      const compactDatabaseId = databaseStream.replaceAll('-', '');
+      if (!/^[0-9a-f]{32}$/i.test(compactDatabaseId)) {
+        throw new Error('reservation identity could not be safely verified');
+      }
+      const databaseId = `${compactDatabaseId.slice(0, 8)}-${compactDatabaseId.slice(8, 12)}-${compactDatabaseId.slice(12, 16)}-${compactDatabaseId.slice(16, 20)}-${compactDatabaseId.slice(20)}`;
+      const state = await this.read(databaseId);
+      if ((state?.status === DATABASE_STATES.IN_USE && state.reservation?.run_id === runId)
+        || (state?.status === DATABASE_STATES.UNAVAILABLE && state.unavailable?.run_id === runId)) return true;
+    }
+    return false;
+  }
+
+  async deleteRunLifecycle(runId) {
+    const stream = 'runs/' + runId.replaceAll('-', '');
+    const current = await this.eventStore.read(stream);
+    const lifecycle = current.event?.lifecycle;
+    if (!lifecycle) return { committed: true, already_absent: true };
+    if (lifecycle.run_id !== runId || !TERMINAL_RUN_STATES.has(lifecycle.status)
+      || !['not_started', 'stopped'].includes(lifecycle.child_runtime?.status)) {
+      return { committed: false, reason: 'run lifecycle is not safely settled', lifecycle };
+    }
+    // A run can mark one candidate unavailable because it contains stale task
+    // residue, then continue on a different database. Keep its lifecycle until
+    // every reservation it touched is settled so recovery can still establish
+    // whether the former run and child runtime are safe to ignore.
+    let referenced;
+    try { referenced = await this.runHasUnsettledReservation(runId); }
+    catch (error) { return { committed: false, reason: error.message || 'reservation state could not be safely verified', lifecycle }; }
+    if (referenced) return { committed: false, reason: 'database recovery still depends on this run lifecycle', lifecycle };
+    const result = await this.eventStore.delete(stream, current);
+    return result.committed ? { committed: true, state: result.current } : { committed: false, reason: 'run lifecycle changed before cleanup', state: result.current };
+  }
+
+  async reconcileCurrentState(databasePool = []) {
+    await this.eventStore.migrateLegacyRefs();
+    for (const databaseId of [...new Set(databasePool.map(database => database.database_id).filter(Boolean))]) {
+      const state = await this.read(databaseId);
+      if (state.status === DATABASE_STATES.AVAILABLE && state.ref) await this.eventStore.delete('reservations/' + databaseId.replaceAll('-', ''), state);
+    }
+
+    const streams = await this.eventStore.listCurrentStreams('runs');
+    const terminalRefs = [];
+    for (const streamId of streams) {
+      const stream = 'runs/' + streamId;
+      const current = await this.eventStore.read(stream);
+      const lifecycle = current.event?.lifecycle;
+      if (!lifecycle || !TERMINAL_RUN_STATES.has(lifecycle.status)
+        || !['not_started', 'stopped'].includes(lifecycle.child_runtime?.status)) continue;
+      let stillReferenced;
+      try { stillReferenced = await this.runHasUnsettledReservation(lifecycle.run_id); }
+      catch { continue; }
+      if (!stillReferenced) terminalRefs.push({ stream, current });
+    }
+    let removedRunLifecycles = 0;
+    for (const item of terminalRefs) {
+      const result = await this.eventStore.delete(item.stream, item.current);
+      if (result.committed) removedRunLifecycles += 1;
+    }
+    return { legacy_migrated: true, terminal_run_lifecycles_removed: removedRunLifecycles };
   }
 
   async readRunLifecycle(runId) {
@@ -192,7 +227,19 @@ export class DatabaseReservationAuthority {
       const current = await this.eventStore.read(stream);
       const previous = current.event?.lifecycle || {};
       if (lifecycle.status === 'active' && previous.status) throw new Error(`E2E run identity ${runId} already has an authoritative lifecycle`);
-      const next = { ...previous, ...lifecycle, updated_at: this.now() };
+      const next = { ...previous };
+      for (const key of ['run_id', 'status', 'started_at', 'ended_at', 'run_process', 'selected_database_id', 'child_runtime_id']) {
+        if (lifecycle[key] !== undefined) next[key] = lifecycle[key];
+      }
+      if (lifecycle.child_runtime !== undefined) {
+        const child = lifecycle.child_runtime || {};
+        next.child_runtime = {
+          ...(child.runtime_id === undefined ? {} : { runtime_id: child.runtime_id }),
+          ...(child.status === undefined ? {} : { status: child.status }),
+          ...(child.process_identity === undefined ? {} : { process_identity: child.process_identity })
+        };
+      }
+      next.updated_at = this.now();
       const result = await this.eventStore.compareAndAppend(stream, current, { kind: 'e2e_run_lifecycle', run_id: runId, lifecycle: next });
       if (result.committed) return result.current.event.lifecycle;
     }

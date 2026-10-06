@@ -30,8 +30,10 @@ npm run e2e -- --plan ./accepted-plan.md --hard-cap-ms 600000
 `LEESH_LOOP_E2E_NOTION_DATABASE_URL` is the legacy single-URL input and starts the initial pool with
 the four empty database URLs in `model/e2e-runtime-config.mjs`. Set
 `LEESH_LOOP_E2E_NOTION_DATABASE_URLS` to replace that set with newline- or comma-separated URLs.
-Candidate order and pool size do not define database identity. Reservations and recovery evidence
-are conditional Git events under `e2e-internal` refs in the configured production repository.
+Candidate order and pool size do not define database identity. Reservations and recovery authority
+use one compare-and-swap current-state ref per active database or run in the configured production
+repository. Historical sequence refs are folded into current state and removed during admission
+reconciliation; settled reservation and lifecycle refs are removed after cleanup is read back.
 
 The E2E harness resolves `NOTION_TOKEN` from its repository execution environment. Its child runtime
 receives the selected database URL and run-scoped Operator settings; `.env`, production workspace
@@ -46,7 +48,9 @@ Inspect the pool and run the unconditional recovery pass without starting a work
 node e2e/cli.mjs admit
 ```
 
-Run records preserve run origin, database identity, child runtime identity, lifecycle observations,
-workflow/workload snapshots, finalization, cleanup, and authoritative evidence. Reservation events
-are shared across workspaces; other checkouts can read the current lifecycle and recovery result by
-stable database identity.
+Detailed run records preserve run origin, database identity, child runtime identity, lifecycle
+observations, workflow/workload snapshots, finalization, cleanup, and authoritative evidence for
+in-flight diagnosis. Each terminal invocation also writes a compact, run-specific summary to
+`e2e/history/runs/<run-id>.md` in the checkout that invoked it. The summary is an ordinary working
+tree change; the harness does not stage, commit, push, or open a delivery for it. Worker-originated
+summaries can travel with the worker's existing repository delivery.
