@@ -7,9 +7,13 @@ Both entry points use the same detached E2E execution
 boundary, lifecycle, and database reservation contract. The top-level harness owns run preparation,
 runtime isolation, database recovery, finalization, and evidence.
 
-There is no E2E Project configuration file. `operator/project.json` is authoritative only for the
-production Git repository, configured base branch, Codex model, and Codex reasoning effort. E2E
-owns its sandbox-compatible default workflow and policy. A supplied workflow remains a run input:
+There is no user-managed E2E Project configuration file. The root `project.toml` is authoritative
+for the production Git repository, configured base branch, Codex model, and Codex reasoning effort.
+E2E owns its sandbox-compatible default workflow and policy. For every run, E2E writes an isolated
+`project.toml` under that run's directory and passes it to the ordinary Operator start/stop entry
+points. It contains the run-owned workflow snapshot, workspace and state paths, run base branch,
+readiness/browser controls, and dynamically allocated ports. Port-conflict retries update that
+same TOML before restarting. A supplied workflow remains a run input:
 
 ```sh
 npm run e2e -- --workflow ./custom-workflow.md
@@ -30,8 +34,9 @@ Candidate order and pool size do not define database identity. Reservations and 
 are conditional Git events under `e2e-internal` refs in the configured production repository.
 
 The E2E harness resolves `NOTION_TOKEN` from its repository execution environment. Its child runtime
-receives the selected database URL and normal Operator runtime configuration; `.env`, production
-workspace paths, fixed ports, and production `workspace_files` are not copied into the child worker.
+receives the selected database URL and run-scoped Operator settings; `.env`, production workspace
+paths, fixed ports, and production `workspace_files` are not copied into the child worker. Machine
+records such as `run.json` and runtime state remain JSON; only Project configuration uses TOML.
 Default E2E runtime files stay under `e2e/runs/<run-id>` and `e2e/workspaces/<run-id>` in the current
 checkout.
 

@@ -7,12 +7,14 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import { compatible, effective, loadConfig as loadOperatorConfig, operatorBootstrapArgs } from '../leesh-loop.mjs';
 import { materializeWorkspaceFiles, validateWorkspaceFiles } from '../workspace-files.mjs';
+import toml from '../vendor/smol-toml/index.cjs';
 
 const execFile = promisify(execute);
 const root = join(import.meta.dirname, '../../..');
 const cli = join(root, 'operator', 'app', 'leesh-loop.mjs');
 const workflow = join(root, 'WORKFLOW.md');
 const testDatabaseUrl = 'https://notion.example/test-database';
+const { parse, stringify } = toml;
 
 function loadConfig(path, options = {}) {
   return loadOperatorConfig(path, {
@@ -32,7 +34,7 @@ async function fixture(t) {
 }
 
 async function projectConfig(directory, workspaceRoot, workspaceFiles, skipExternalReadiness, codexOverrides = {}) {
-  const path = join(directory, 'project.json');
+  const path = join(directory, 'project.toml');
   const config = {
     workflow_path: join(root, 'WORKFLOW.md'),
     symphony_workspace_root: workspaceRoot,
@@ -42,7 +44,7 @@ async function projectConfig(directory, workspaceRoot, workspaceFiles, skipExter
   if (workspaceFiles !== undefined) config.workspace_files = workspaceFiles;
   if (skipExternalReadiness !== undefined) config.skip_external_readiness = skipExternalReadiness;
   Object.assign(config, codexOverrides);
-  await writeFile(path, JSON.stringify(config));
+  await writeFile(path, stringify(config));
   return path;
 }
 
@@ -75,6 +77,32 @@ test('workspace-file configuration resolves Project-relative and home paths befo
   assert.deepEqual(homeConfig.workspace_files, [homeSource]);
   await materializeWorkspaceFiles(workspace, homeConfig.workspace_files, workspaceRoot);
   assert.equal(await readFile(join(workspace, '.env'), 'utf8'), 'BINDING=home\n');
+});
+
+test('a Git-ignored regular file in the sibling target repository is copied from Project-relative configuration', async t => {
+  const { directory, workspaceRoot, workspace } = await fixture(t);
+  const loopRoot = join(directory, 'sample-loop');
+  const targetRoot = join(directory, 'sample');
+  const ignoredSource = join(targetRoot, '.local-settings.json');
+  await mkdir(loopRoot, { recursive: true });
+  await mkdir(targetRoot, { recursive: true });
+  await execFile('git', ['init', '--quiet', targetRoot]);
+  await writeFile(join(targetRoot, '.gitignore'), '.local-settings.json\n');
+  await writeFile(ignoredSource, '{"local":true}\n');
+  await execFile('git', ['-C', targetRoot, 'check-ignore', '-q', ignoredSource]);
+  const projectPath = join(loopRoot, 'project.toml');
+  await writeFile(projectPath, stringify({
+    workflow_path: 'WORKFLOW.md',
+    symphony_workspace_root: workspaceRoot,
+    github_repository_url: 'https://github.com/example/repository.git',
+    github_base_branch: 'main',
+    workspace_files: ['../sample/.local-settings.json']
+  }));
+
+  const project = await loadConfig(projectPath);
+  assert.deepEqual(project.workspace_files, [ignoredSource]);
+  await materializeWorkspaceFiles(workspace, project.workspace_files, workspaceRoot);
+  assert.equal(await readFile(join(workspace, '.local-settings.json'), 'utf8'), '{"local":true}\n');
 });
 
 test('production Project database binding prefers the process environment and reports a missing binding', async t => {
@@ -114,7 +142,7 @@ test('external readiness skip configuration is boolean and defaults to performin
   const omitted = await loadConfig(configPath);
   assert.equal(omitted.skip_external_readiness, false);
 
-  await writeFile(configPath, JSON.stringify({
+  await writeFile(configPath, stringify({
     workflow_path: workflow,
     symphony_workspace_root: workspaceRoot,
     github_repository_url: 'https://github.com/example/repository.git',
@@ -124,7 +152,7 @@ test('external readiness skip configuration is boolean and defaults to performin
   const explicitFalse = await loadConfig(configPath);
   assert.equal(explicitFalse.skip_external_readiness, false);
 
-  await writeFile(configPath, JSON.stringify({
+  await writeFile(configPath, stringify({
     workflow_path: workflow,
     symphony_workspace_root: workspaceRoot,
     github_repository_url: 'https://github.com/example/repository.git',
@@ -141,7 +169,7 @@ test('external readiness skip configuration is boolean and defaults to performin
   assert.deepEqual(operatorBootstrapArgs(skipped, '/tmp/symphony', 4100).slice(1, 3), ['--skip-external-readiness', '--']);
   assert.deepEqual(operatorBootstrapArgs(explicitFalse, '/tmp/symphony', 4100).slice(1, 2), ['--']);
 
-  await writeFile(configPath, JSON.stringify({
+  await writeFile(configPath, stringify({
     workflow_path: workflow,
     symphony_workspace_root: workspaceRoot,
     github_repository_url: 'https://github.com/example/repository.git',
@@ -157,21 +185,21 @@ test('project surface opening defaults to enabled, is boolean, and does not affe
   const omitted = await loadConfig(configPath);
   assert.equal(omitted.open_project_surfaces, true);
 
-  const config = JSON.parse(await readFile(configPath, 'utf8'));
-  await writeFile(configPath, JSON.stringify({ ...config, open_project_surfaces: false }));
+  const config = parse(await readFile(configPath, 'utf8'));
+  await writeFile(configPath, stringify({ ...config, open_project_surfaces: false }));
   const disabled = await loadConfig(configPath);
   assert.equal(disabled.open_project_surfaces, false);
   assert.equal(disabled.skip_external_readiness, false);
   assert.deepEqual(effective(omitted, 'same-runtime', 4100), effective(disabled, 'same-runtime', 4100));
   assert.equal(compatible(effective(omitted, 'old-runtime', 4100), effective(disabled, 'new-runtime', 4100)), true);
 
-  await writeFile(configPath, JSON.stringify({ ...config, skip_external_readiness: true, open_project_surfaces: false }));
+  await writeFile(configPath, stringify({ ...config, skip_external_readiness: true, open_project_surfaces: false }));
   const independent = await loadConfig(configPath);
   assert.equal(independent.skip_external_readiness, true);
   assert.equal(independent.open_project_surfaces, false);
   assert.notDeepEqual(effective(omitted, 'same-runtime', 4100), effective(independent, 'new-runtime', 4100));
 
-  await writeFile(configPath, JSON.stringify({ ...config, open_project_surfaces: 'false' }));
+  await writeFile(configPath, stringify({ ...config, open_project_surfaces: 'false' }));
   await assert.rejects(loadConfig(configPath), /open_project_surfaces must be a boolean/);
 });
 
@@ -179,9 +207,9 @@ test('stop accepts an invalidated workspace-file source so a live runtime remain
   const { directory, workspaceRoot } = await fixture(t);
   const missingSource = join(directory, '.env');
   const config = await projectConfig(directory, workspaceRoot, [missingSource]);
-  const contents = JSON.parse(await readFile(config, 'utf8'));
+  const contents = parse(await readFile(config, 'utf8'));
   contents.state_directory = join(directory, 'runtime');
-  await writeFile(config, JSON.stringify(contents));
+  await writeFile(config, stringify(contents));
   await execFile(process.execPath, [cli, 'stop', config], { env: { ...process.env, LEESH_LOOP_NOTION_DATABASE_URL: testDatabaseUrl } });
 });
 
@@ -199,21 +227,21 @@ test('workspace files participate in effective runtime identity', async t => {
 test('Git target binding is required and participates in effective runtime identity', async t => {
   const { directory, workspaceRoot } = await fixture(t);
   const configPath = await projectConfig(directory, workspaceRoot);
-  const contents = JSON.parse(await readFile(configPath, 'utf8'));
+  const contents = parse(await readFile(configPath, 'utf8'));
   for (const key of ['github_repository_url', 'github_base_branch']) {
     const missing = { ...contents };
     delete missing[key];
-    await writeFile(configPath, JSON.stringify(missing));
+    await writeFile(configPath, stringify(missing));
     await assert.rejects(loadConfig(configPath), new RegExp(`project configuration requires ${key}`));
   }
 
-  await writeFile(configPath, JSON.stringify(contents));
+  await writeFile(configPath, stringify(contents));
   const baseChanged = { ...contents, github_base_branch: 'e2e/other-run' };
   const repositoryChanged = { ...contents, github_repository_url: 'https://github.com/other/repository.git' };
   const first = await loadConfig(configPath);
-  await writeFile(configPath, JSON.stringify(baseChanged));
+  await writeFile(configPath, stringify(baseChanged));
   const second = await loadConfig(configPath);
-  await writeFile(configPath, JSON.stringify(repositoryChanged));
+  await writeFile(configPath, stringify(repositoryChanged));
   const third = await loadConfig(configPath);
   assert.notDeepEqual(effective(first, 'same-runtime', 4100), effective(second, 'same-runtime', 4100));
   assert.notDeepEqual(effective(first, 'same-runtime', 4100), effective(third, 'same-runtime', 4100));
@@ -222,9 +250,9 @@ test('Git target binding is required and participates in effective runtime ident
 test('Git target binding rejects invalid branch names before startup', async t => {
   const { directory, workspaceRoot } = await fixture(t);
   const configPath = await projectConfig(directory, workspaceRoot);
-  const contents = JSON.parse(await readFile(configPath, 'utf8'));
+  const contents = parse(await readFile(configPath, 'utf8'));
   contents.github_base_branch = 'invalid..branch';
-  await writeFile(configPath, JSON.stringify(contents));
+  await writeFile(configPath, stringify(contents));
   await assert.rejects(loadConfig(configPath), /not a valid Git branch name/);
 });
 
@@ -235,7 +263,7 @@ test('Codex overrides are optional non-empty strings and participate in runtime 
   assert.equal(effective(omitted, 'omitted', 4100).codex_model, null);
   assert.equal(effective(omitted, 'omitted', 4100).codex_reasoning_effort, null);
 
-  await writeFile(configPath, JSON.stringify({
+  await writeFile(configPath, stringify({
     workflow_path: workflow,
     symphony_workspace_root: workspaceRoot,
     github_repository_url: 'https://github.com/example/repository.git',
@@ -250,7 +278,7 @@ test('Codex overrides are optional non-empty strings and participate in runtime 
   const changedModel = { ...effective(modelOnly, 'same-runtime', 4100), codex_model: 'another-model' };
   assert.equal(compatible(effective(modelOnly, 'old-runtime', 4100), changedModel), false);
 
-  await writeFile(configPath, JSON.stringify({
+  await writeFile(configPath, stringify({
     workflow_path: workflow,
     symphony_workspace_root: workspaceRoot,
     github_repository_url: 'https://github.com/example/repository.git',
@@ -265,7 +293,7 @@ test('Codex overrides are optional non-empty strings and participate in runtime 
   const changedEffort = { ...effective(effortOnly, 'same-runtime', 4100), codex_reasoning_effort: 'another-effort' };
   assert.equal(compatible(effective(effortOnly, 'old-runtime', 4100), changedEffort), false);
 
-  await writeFile(configPath, JSON.stringify({
+  await writeFile(configPath, stringify({
     workflow_path: workflow,
     symphony_workspace_root: workspaceRoot,
     github_repository_url: 'https://github.com/example/repository.git',
@@ -282,8 +310,8 @@ test('Codex overrides are optional non-empty strings and participate in runtime 
   delete legacyOmitted.codex_reasoning_effort;
   assert.equal(compatible(legacyOmitted, effective(omitted, 'new-runtime', 4100)), true);
 
-  for (const [key, value] of [['codex_model', ''], ['codex_model', '  '], ['codex_model', null], ['codex_model', 1], ['codex_reasoning_effort', ''], ['codex_reasoning_effort', '  '], ['codex_reasoning_effort', null], ['codex_reasoning_effort', 1]]) {
-    await writeFile(configPath, JSON.stringify({
+  for (const [key, value] of [['codex_model', ''], ['codex_model', '  '], ['codex_model', 1], ['codex_reasoning_effort', ''], ['codex_reasoning_effort', '  '], ['codex_reasoning_effort', 1]]) {
+    await writeFile(configPath, stringify({
       workflow_path: workflow,
       symphony_workspace_root: workspaceRoot,
       github_repository_url: 'https://github.com/example/repository.git',

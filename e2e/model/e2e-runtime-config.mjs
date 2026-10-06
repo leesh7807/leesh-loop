@@ -1,9 +1,9 @@
-import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractNotionDatabaseId } from './notion-database-id.mjs';
-import { assertBranch, normalizeRef } from '../systems/git/git-ref-validation.mjs';
+import { assertBranch } from '../systems/git/git-ref-validation.mjs';
 import { readRepositoryEnvironmentValue } from '../../operator/local-environment.mjs';
+import { readProjectConfiguration } from '../../operator/project-config.mjs';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -46,26 +46,14 @@ export function resolveE2EDatabasePool({ configuredUrls, existingUrl } = {}) {
 
 export async function loadE2ERuntimeConfig({ root = repositoryRoot, environment = process.env, envFile, productionProjectPath } = {}) {
   const absoluteRoot = resolve(root);
-  const projectPath = resolve(productionProjectPath || join(absoluteRoot, 'operator/project.json'));
-  let productionProject;
-  try { productionProject = JSON.parse(await readFile(projectPath, 'utf8')); }
-  catch { throw new Error(`missing or invalid production Operator Project: ${projectPath}`); }
-  if (!productionProject || typeof productionProject !== 'object' || Array.isArray(productionProject)) {
-    throw new Error('production Operator Project must be an object');
-  }
-  for (const key of ['github_repository_url', 'github_base_branch']) {
-    if (typeof productionProject[key] !== 'string' || !productionProject[key].trim()) throw new Error(`production Operator Project requires ${key}`);
-  }
-  for (const key of ['codex_model', 'codex_reasoning_effort']) {
-    const value = productionProject[key];
-    if (value !== undefined && (typeof value !== 'string' || !value.trim())) throw new Error(`production Project ${key} must be a non-empty string`);
-  }
+  const projectPath = resolve(productionProjectPath || join(absoluteRoot, 'project.toml'));
+  const productionProject = await readProjectConfiguration(projectPath, { validateWorkspaceFileSources: true });
 
   const configuredUrls = await readRepositoryEnvironmentValue('LEESH_LOOP_E2E_NOTION_DATABASE_URLS', { environment, envFile });
   const existingUrl = await readRepositoryEnvironmentValue('LEESH_LOOP_E2E_NOTION_DATABASE_URL', { environment, envFile });
   const databasePool = resolveE2EDatabasePool({ configuredUrls, existingUrl });
-  const productionBaseBranch = assertBranch(productionProject.github_base_branch);
-  const seedSourceRef = normalizeRef(`refs/heads/${productionBaseBranch}`);
+  const productionBaseBranch = productionProject.github_base_branch;
+  const seedSourceRef = `refs/heads/${productionBaseBranch}`;
   const workflowPath = join(absoluteRoot, 'e2e/WORKFLOW.md');
   const paths = {
     runRecordDirectory: join(absoluteRoot, 'e2e/runs'),
@@ -97,7 +85,7 @@ export function createRunPaths(config, runId) {
   return {
     directory: runDirectory,
     record: join(runDirectory, 'run.json'),
-    runtimeProject: join(runDirectory, 'project.json'),
+    runtimeProject: join(runDirectory, 'project.toml'),
     runtimeState: join(runDirectory, 'operator-state'),
     workloadInputSnapshot: join(runDirectory, 'workload-input.md'),
     workloadPublisherSnapshot: join(runDirectory, 'workload-publisher.md'),

@@ -9,6 +9,7 @@ import test from 'node:test';
 import { initLoop } from '../init.mjs';
 import { RUNTIME_SNAPSHOT_PATHS, listRuntimeSnapshotFiles } from '../runtime-manifest.mjs';
 import { githubRepositoryDetails, githubRepositoryTransport } from '../github-repository-url.mjs';
+import { readProjectConfiguration } from '../../project-config.mjs';
 
 const execFile = promisify(execute);
 const sourceRoot = resolve(import.meta.dirname, '../../..');
@@ -78,7 +79,9 @@ test('init uses only the current branch configured upstream and creates an indep
   const target = await makeTarget(t);
   const before = (await git(target.targetRoot, 'status', '--porcelain')).stdout;
   const result = await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
-  const project = JSON.parse(await readFile(join(target.destination, 'operator/project.json'), 'utf8'));
+  const projectPath = join(target.destination, 'project.toml');
+  const projectText = await readFile(projectPath, 'utf8');
+  const project = await readProjectConfiguration(projectPath);
   const generatedPackage = JSON.parse(await readFile(join(target.destination, 'package.json'), 'utf8'));
   const workflow = await readFile(join(target.destination, 'WORKFLOW.md'), 'utf8');
   const template = (await readFile(join(sourceRoot, 'docs/WORKFLOW_TEMPLATE.md'), 'utf8')).trim();
@@ -95,10 +98,11 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.equal(project.github_base_branch, 'releases/2026/init');
   assert.equal(project.codex_model, 'gpt-6-luna');
   assert.equal(project.codex_reasoning_effort, 'xhigh');
-  assert.equal(project.workflow_path, '../WORKFLOW.md');
-  assert.equal(resolve(target.destination, 'operator', project.symphony_workspace_root), join(target.destination, '.runtime/workspaces'));
-  assert.equal(resolve(target.destination, 'operator', project.state_directory), join(target.destination, '.runtime/state'));
-  assert.equal(generatedPackage.scripts.stop, 'node operator/app/leesh-loop.mjs stop operator/project.json');
+  assert.equal(project.workflow_path, join(target.destination, 'WORKFLOW.md'));
+  assert.equal(project.symphony_workspace_root, join(target.destination, '.runtime/workspaces'));
+  assert.equal(project.state_directory, join(target.destination, '.runtime/state'));
+  assert.equal(generatedPackage.scripts.start, 'node operator/app/prepare-runtime.mjs && node operator/app/leesh-loop.mjs start project.toml');
+  assert.equal(generatedPackage.scripts.stop, 'node operator/app/leesh-loop.mjs stop project.toml');
   assert.match(generatedPackage.scripts.start, /operator\/app\/prepare-runtime\.mjs/);
   assert.deepEqual(Object.keys(generatedPackage.scripts).sort(), ['start', 'stop']);
   assert.equal(result.workflowPath, join(target.destination, 'WORKFLOW.md'));
@@ -122,13 +126,32 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.ok((await stat(join(target.destination, 'operator/app/operator-bootstrap'))).mode & 0o111);
   const prepareRuntime = await readFile(join(target.destination, 'operator/app/prepare-runtime.mjs'), 'utf8');
   assert.match(prepareRuntime, /mise.*mix.*deps\.get/);
+  assert.match(projectText, /UI port\. Default: 4310/);
+  assert.match(projectText, /Symphony runtime port\. Default: 4100/);
+  assert.match(projectText, /workspace_files = \[\]/);
+  assert.match(projectText, /Relative paths use this project\.toml directory/);
+  assert.match(projectText, /Absolute paths and ~\/ paths are also supported/);
+  assert.match(projectText, /Git tracking does not matter/);
+  assert.match(projectText, /workspace root under its basename/);
+  assert.match(projectText, /same basename are rejected/);
+  assert.match(projectText, /Directories and globs are not supported/);
+  assert.match(projectText, /# Target Git repository and base branch for this Loop\.\ngithub_repository_url = .+\ngithub_base_branch = .+/);
+  assert.match(projectText, /# Worker contract file\. Relative paths use this project\.toml directory\.\nworkflow_path = .+/);
+  assert.match(projectText, /# Optional Codex worker overrides\. Remove either value to use that Codex default\.\ncodex_model = .+\ncodex_reasoning_effort = .+/);
+  assert.ok(projectText.indexOf('# Target Git repository') < projectText.indexOf('# Extra regular files'));
+  assert.ok(projectText.indexOf('# Extra regular files') < projectText.indexOf('# Optional Codex'));
+  assert.match(projectText, /open_project_surfaces = false/);
+  assert.match(projectText, /startup_timeout_ms = 1800000/);
+  assert.doesNotMatch(projectText, /NOTION_TOKEN|LEESH_LOOP_NOTION_DATABASE_URL/);
+  assert.equal(files.includes('operator/project.json'), false);
+  assert.equal(manifestFiles.includes('project.toml'), false, 'project.toml is generated at the Loop root, outside the runtime snapshot manifest');
   for (const file of files) assert.ok(!(await lstat(join(target.destination, file))).isSymbolicLink(), `${file} must be materialized, not linked`);
   const generatedInputs = [generatedPackage, project, workflow, prepareRuntime].map(value => typeof value === 'string' ? value : JSON.stringify(value)).join('\n');
   assert.equal(generatedInputs.includes(sourceRoot), false);
   assert.ok(!files.some(file => file.includes('/test/') || file.startsWith('docs/') || file.startsWith('operator/e2e/')));
   assert.ok(!files.some(file => file.endsWith('node_modules') || file.includes('/node_modules/')));
   assert.ok(!files.some(file => file === '.env'));
-  assert.deepEqual(files.filter(file => !['.env.example', 'WORKFLOW.md', 'package.json', 'operator/project.json'].includes(file)), manifestFiles);
+  assert.deepEqual(files.filter(file => !['.env.example', 'WORKFLOW.md', 'package.json', 'project.toml'].includes(file)), manifestFiles);
   assert.equal((await git(target.targetRoot, 'status', '--porcelain')).stdout, before);
 });
 
@@ -137,7 +160,7 @@ test('the existing Operator configuration loader reads Notion binding from the g
   await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
   const generatedOperatorPath = pathToFileURL(join(target.destination, 'operator/app/leesh-loop.mjs')).href;
   const { loadConfig } = await import(generatedOperatorPath);
-  const projectPath = join(target.destination, 'operator/project.json');
+  const projectPath = join(target.destination, 'project.toml');
   const fromEnvironment = await loadConfig(projectPath, {
     validateWorkspaceFileSources: false,
     environment: { LEESH_LOOP_NOTION_DATABASE_URL: 'https://www.notion.so/example/environment-binding' }
@@ -210,7 +233,7 @@ test('failure after destination creation removes the partial Loop so init can be
   assert.equal((await git(target.targetRoot, 'status', '--porcelain')).stdout, '');
 
   await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
-  assert.equal(JSON.parse(await readFile(join(target.destination, 'operator/project.json'), 'utf8')).github_base_branch, 'releases/2026/init');
+  assert.equal((await readProjectConfiguration(join(target.destination, 'project.toml'))).github_base_branch, 'releases/2026/init');
 });
 
 test('runtime snapshot selection is a tracked whitelist and preserves executable entry points', async t => {
@@ -257,7 +280,7 @@ test('init preserves HTTPS and SSH clone URLs while the generated Loop resolves 
       const target = await makeTarget(t, { remoteUrl });
       const before = (await git(target.targetRoot, 'status', '--porcelain')).stdout;
       await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
-      const project = JSON.parse(await readFile(join(target.destination, 'operator/project.json'), 'utf8'));
+      const project = await readProjectConfiguration(join(target.destination, 'project.toml'));
       const generatedServerUrl = pathToFileURL(join(target.destination, 'operator/app/operator-ui-server.mjs')).href;
       const { createOperatorUiServer } = await import(generatedServerUrl);
       const server = await createOperatorUiServer({

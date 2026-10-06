@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { HOST_PREREQUISITES, listRuntimeSnapshotFiles, materializeRuntimeSnapshot } from './runtime-manifest.mjs';
 import { githubRepositoryTransport } from './github-repository-url.mjs';
 import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
-import { resolveProjectPath } from '../local-path.mjs';
+import { stringifyProjectConfiguration } from '../project-config.mjs';
 
 const runGit = (cwd, args) => execFileSync('git', args, {
   cwd,
@@ -60,16 +61,81 @@ export async function resolveTargetRepository(cwd) {
 
 function generatedProject(target) {
   return {
-    workflow_path: '../WORKFLOW.md',
-    symphony_workspace_root: '../.runtime/workspaces',
-    state_directory: '../.runtime/state',
+    workflow_path: 'WORKFLOW.md',
+    symphony_workspace_root: '.runtime/workspaces',
+    state_directory: '.runtime/state',
     allow_workspace_root_inside_repository: true,
-    workspace_files: [],
     github_repository_url: target.remoteUrl,
     github_base_branch: target.upstreamBranch,
     codex_model: 'gpt-6-luna',
     codex_reasoning_effort: 'xhigh'
   };
+}
+
+function generatedProjectToml(project) {
+  const serialized = stringifyProjectConfiguration(project).trimEnd();
+  const settingLines = new Map(serialized.split('\n').map(line => {
+    const match = line.match(/^([a-z_]+)\s*=/);
+    if (!match) throw new Error(`cannot group generated Project setting: ${line}`);
+    return [match[1], line];
+  }));
+  const setting = key => {
+    const line = settingLines.get(key);
+    if (!line) throw new Error(`missing generated Project setting: ${key}`);
+    settingLines.delete(key);
+    return line;
+  };
+  const lines = [
+    '# Project settings for this Loop. Relative paths start at this file.',
+    '# Absolute paths and ~/ paths are also supported.',
+    '',
+    '# Target Git repository and base branch for this Loop.',
+    setting('github_repository_url'),
+    setting('github_base_branch'),
+    '',
+    '# Worker contract file. Relative paths use this project.toml directory.',
+    setting('workflow_path'),
+    '',
+    '# Worker workspace root. Relative paths use this project.toml directory.',
+    setting('symphony_workspace_root'),
+    '# Init keeps worker workspaces under this generated Loop root.',
+    setting('allow_workspace_root_inside_repository'),
+    '# Runtime state directory. Relative paths use this project.toml directory.',
+    setting('state_directory'),
+    '',
+    '# Extra regular files copied into every newly created worker workspace.',
+    '# Relative paths use this project.toml directory; absolute paths and ~/ paths also work.',
+    '# Git tracking does not matter: a sibling target repository Git-ignored file can be listed.',
+    '# Each source is copied unchanged into the workspace root under its basename.',
+    '# Directories and globs are not supported. Sources with the same basename are rejected.',
+    '# Do not use this setting to pass credentials to workers.',
+    '# Example: workspace_files = ["../your-repository/local-settings.json"]',
+    'workspace_files = []',
+    '',
+    '# Optional Codex worker overrides. Remove either value to use that Codex default.',
+    setting('codex_model'),
+    setting('codex_reasoning_effort'),
+    '',
+    '# Operator UI port. Default: 4310. Change it if another local app uses this port.',
+    '# ui_port = 4311',
+    '',
+    '# Symphony runtime port. Default: 4100. Change it if another local app uses this port.',
+    '# symphony_port = 4101',
+    '',
+    '# Open the Operator page automatically on start. Default: true.',
+    '# open_project_surfaces = false',
+    '',
+    '# Skip external review readiness checks. Default: false; core startup checks still run.',
+    '# skip_external_readiness = true',
+    '',
+    '# Startup timeout in milliseconds. Default: 1800000 (30 minutes).',
+    '# startup_timeout_ms = 1800000',
+    '',
+    '# Browser acknowledgement timeout in milliseconds. Default: 1000.',
+    '# browser_acknowledgement_timeout_ms = 1000',
+  ];
+  if (settingLines.size) throw new Error(`unplaced generated Project settings: ${[...settingLines.keys()].join(', ')}`);
+  return `${lines.join('\n').trimEnd()}\n`;
 }
 
 function generatedPackage(repositoryName) {
@@ -80,8 +146,8 @@ function generatedPackage(repositoryName) {
     version: '0.1.0',
     private: true,
     scripts: {
-      start: 'node operator/app/prepare-runtime.mjs && node operator/app/leesh-loop.mjs start operator/project.json',
-      stop: 'node operator/app/leesh-loop.mjs stop operator/project.json'
+      start: 'node operator/app/prepare-runtime.mjs && node operator/app/leesh-loop.mjs start project.toml',
+      stop: 'node operator/app/leesh-loop.mjs stop project.toml'
     }
   };
 }
@@ -161,7 +227,7 @@ function completionOutput({ destination, project, workflowPath, notionBinding })
     lines.push('The Notion database URL was not found. Add it before starting the Loop.');
   }
   lines.push(
-    'Loop settings are in operator/project.json; the workflow location is controlled by workflow_path.',
+    'Loop settings are in the root project.toml; relative paths are resolved from that file.',
     'npm start prepares this Loop’s dependencies, checks its connections, and opens the Operator page.',
     'Sign in to GitHub CLI and configure Codex CLI and chatgpt-shot on the machine that runs this Loop.',
     'Next:',
@@ -206,14 +272,20 @@ export async function initLoop({ cwd = process.cwd(), sourceRoot, environment = 
   try {
     await materializeRuntimeSnapshot(sourceRoot, destination);
     const project = generatedProject(target);
-    await mkdir(join(destination, 'operator'), { recursive: true });
-    await writeFile(join(destination, 'operator/project.json'), `${JSON.stringify(project, null, 2)}\n`, { mode: 0o600 });
+    await writeFile(join(destination, 'project.toml'), generatedProjectToml(project), { mode: 0o600 });
     await writeFile(join(destination, 'package.json'), `${JSON.stringify(generatedPackage(target.repositoryName), null, 2)}\n`, { mode: 0o644 });
     await writeFile(join(destination, 'WORKFLOW.md'), generatedWorkflow(template), { mode: 0o644 });
     await writeFile(join(destination, '.env.example'), envExample, { mode: 0o600 });
 
-    const projectReadback = JSON.parse(await readFile(join(destination, 'operator/project.json'), 'utf8'));
-    const workflowPath = resolveProjectPath(projectReadback.workflow_path, join(destination, 'operator'));
+    const projectPath = join(destination, 'project.toml');
+    const generatedOperator = await import(pathToFileURL(join(destination, 'operator/app/leesh-loop.mjs')).href);
+    const projectReadback = await generatedOperator.loadConfig(projectPath, {
+      validateWorkspaceFileSources: true,
+      requireNotionDatabase: false,
+      environment,
+      envFile: join(destination, '.env')
+    });
+    const workflowPath = projectReadback.workflow_path;
     const notionBinding = await readNotionBinding(destination, environment);
     const output = completionOutput({ destination, project: projectReadback, workflowPath, notionBinding });
     return { destination, target, project: projectReadback, workflowPath, notionBinding, completionOutput: output };

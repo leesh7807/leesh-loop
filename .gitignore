@@ -8,6 +8,7 @@
 .env.*
 !.env.example
 operator/.runtime/
+/.runtime/
 e2e/runs/*
 !e2e/runs/.gitkeep
 e2e/workspaces/*

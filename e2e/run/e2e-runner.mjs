@@ -14,6 +14,7 @@ import { currentProcessIdentity } from '../model/process-identity.mjs';
 import { materializeRunScopedDefaultWorkflow } from '../model/run-scoped-delivery-branch.mjs';
 import { identifyE2ERunOrigin } from '../model/run-origin.mjs';
 import { isRuntimePortConflict } from '../systems/operator/operator-client.mjs';
+import { writeProjectConfiguration } from '../../operator/project-config.mjs';
 
 async function writeRunInputSnapshots(paths, workload, workflow) {
   await Promise.all([
@@ -135,7 +136,7 @@ export class E2ERunner {
       resolvedRunInput.runtime_options = { ...resolvedRunInput.runtime_options, ...ports };
       record.run_input.runtime_options = { ...record.run_input.runtime_options, ...ports };
       await mkdir(dirname(paths.runtimeProject), { recursive: true, mode: 0o700 });
-      await writeFile(paths.runtimeProject, `${JSON.stringify(project, null, 2)}\n`, { mode: 0o600 });
+      await writeProjectConfiguration(paths.runtimeProject, project, { mode: 0o600 });
       record.runtime = {
         project,
         dashboard: `http://127.0.0.1:${project.symphony_port}`,
@@ -205,7 +206,7 @@ export class E2ERunner {
           record.runtime.dashboard = `http://127.0.0.1:${project.symphony_port}`;
           record.runtime.child_runtime = { ...record.runtime.child_runtime, runtime_id: null, status: 'starting', process_identity: null, requested_at: currentTimeIso(), ports };
           record.run_input.runtime_options = { ...record.run_input.runtime_options, ...ports };
-          await writeFile(paths.runtimeProject, `${JSON.stringify(project, null, 2)}\n`, { mode: 0o600 });
+          await writeProjectConfiguration(paths.runtimeProject, project, { mode: 0o600 });
         }
       }
       this.runTimingRecorder.recordSymphonyStarted(record, currentTimeIso());

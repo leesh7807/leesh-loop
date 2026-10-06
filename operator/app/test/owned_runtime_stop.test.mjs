@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
 import test from 'node:test';
+import { stringifyProjectConfiguration } from '../../project-config.mjs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -35,8 +36,8 @@ async function startOwnedProcess(t) {
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-stop-owned-'));
   const stateDirectory = join(directory, 'runtime');
-  const configPath = join(directory, 'project.json');
-  await writeFile(configPath, JSON.stringify({
+  const configPath = join(directory, 'project.toml');
+  await writeFile(configPath, stringifyProjectConfiguration({
     workflow_path: join(root, 'WORKFLOW.md'),
     symphony_workspace_root: join(directory, 'workspaces'),
     github_repository_url: 'https://github.com/example/repository.git',
