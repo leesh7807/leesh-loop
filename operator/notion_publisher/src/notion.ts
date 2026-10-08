@@ -5,6 +5,7 @@ import {
   PublicationError,
   PUBLISHER_PENDING_STATE,
   PUBLISHER_READY_STATE,
+  buildStateOptions,
   buildPlanBlocks,
   buildPlanProperties,
   normalizePlanText
@@ -152,7 +153,7 @@ export class NotionClient {
     return {
       [policy.identifier]: { rich_text: {} },
       [policy.title]: { title: {} },
-      [policy.state]: { select: { options: policy.stateSeeds.map(name => ({ name })) } },
+      [policy.state]: { select: { options: buildStateOptions(policy.stateSeeds) } },
       [policy.priority]: { number: {} },
       [policy.labels]: { multi_select: {} },
       [policy.blockedBy]: { relation: { data_source_id: dataSource, single_property: {} } },

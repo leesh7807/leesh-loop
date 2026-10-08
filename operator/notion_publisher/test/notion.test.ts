@@ -44,7 +44,17 @@ test("a pristine title-only source is bootstrapped, including title rename and S
     properties: { Identifier: { rich_text: {} }, Title: { title: {} } }
   });
   assert.deepEqual(client.calls[5].body.properties.Plan, { relation: { data_source_id: "plan-source", single_property: {} } });
-  assert.deepEqual(client.calls[5].body.properties.State, { select: { options: DEFAULT_POLICY.stateSeeds.map(name => ({ name })) } });
+  assert.deepEqual(client.calls[5].body.properties.State, { select: { options: [
+    { name: "Backlog", color: "gray" },
+    { name: "Ready", color: "blue" },
+    { name: "In Progress", color: "yellow" },
+    { name: "Human Review", color: "orange" },
+    { name: "Rework", color: "red" },
+    { name: "Merging", color: "purple" },
+    { name: "Done", color: "green" },
+    { name: "Cancelled", color: "gray" },
+    { name: PUBLISHER_PENDING_STATE, color: "gray" }
+  ] } });
   assert.deepEqual(client.calls[5].body.properties["name-id"], { title: {}, name: "Title" });
 });
 
@@ -63,18 +73,45 @@ test("a pristine title property may have a canonical non-Title name", async () =
   assert.deepEqual(await client.ensureDatabase("db", DEFAULT_POLICY), { taskDataSourceId: "task-source", planDataSourceId: "plan-source" });
   const patch = client.calls.find((call) => call.method === "PATCH" && call.path === "/data_sources/task-source");
   assert.deepEqual(patch.body.properties["state-title-id"], { title: {}, name: "Title" });
-  assert.deepEqual(patch.body.properties.State, { select: { options: DEFAULT_POLICY.stateSeeds.map(name => ({ name })) } });
+  assert.deepEqual(patch.body.properties.State.select.options, [
+    { name: "Backlog", color: "gray" },
+    { name: "Ready", color: "blue" },
+    { name: "In Progress", color: "yellow" },
+    { name: "Human Review", color: "orange" },
+    { name: "Rework", color: "red" },
+    { name: "Merging", color: "purple" },
+    { name: "Done", color: "green" },
+    { name: "Cancelled", color: "gray" },
+    { name: PUBLISHER_PENDING_STATE, color: "gray" }
+  ]);
 });
 
 test("existing canonical sources are selected structurally and extras are preserved", async () => {
   const client = new RequestFake([
     { data_sources: [{ id: "plan-source", name: "Tasks" }, { id: "task-source", name: "Not Plans" }] },
     { properties: planSchema.properties, custom: true },
-    { properties: taskSchema("plan-source"), custom: true }
+    { properties: { ...taskSchema("plan-source"), State: { type: "select", select: { options: [{ name: "Ready", color: "brown" }] } } }, custom: true }
   ]);
 
   assert.deepEqual(await client.ensureDatabase("db", DEFAULT_POLICY), { taskDataSourceId: "task-source", planDataSourceId: "plan-source" });
   assert.equal(client.calls.some((call) => call.method === "PATCH"), false);
+});
+
+test("a State color schema request failure is propagated without an uncolored retry", async () => {
+  const task = { id: "task-source", properties: { Name: { id: "name-id", type: "title" } } };
+  const client = new RequestFake([
+    { data_sources: [{ id: "task-source" }] },
+    task,
+    { results: [], has_more: false },
+    { id: "plan-source", properties: planSchema.properties },
+    { properties: planSchema.properties },
+    new Error("provider/API failure (500)")
+  ]);
+
+  await assert.rejects(client.ensureDatabase("db", DEFAULT_POLICY), /provider\/API failure \(500\)/);
+  const statePatches = client.calls.filter((call) => call.method === "PATCH" && call.body.properties?.State?.select);
+  assert.equal(statePatches.length, 1);
+  assert.equal(statePatches[0].body.properties.State.select.options.some((option: any) => !option.color), false);
 });
 
 test("an exact bootstrap prefix resumes without creating a replacement Plan source", async () => {

@@ -4,7 +4,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config.js";
-import { buildPlanBlocks, buildPlanProperties, buildTaskProperties, chunkText, DEFAULT_POLICY, extractPlanTitle, notionId, normalizePlanText, PLAN_PROPERTY, PublicationError, PUBLISHER_PENDING_STATE, PUBLISHER_READY_STATE, resolvePublishDatabase, selectPublicationState, validatePlanTitle } from "../src/core.js";
+import { buildPlanBlocks, buildPlanProperties, buildStateOptions, buildTaskProperties, chunkText, DEFAULT_POLICY, DEFAULT_STATE_COLORS, extractPlanTitle, notionId, normalizePlanText, PLAN_PROPERTY, PublicationError, PUBLISHER_PENDING_STATE, PUBLISHER_READY_STATE, resolvePublishDatabase, selectPublicationState, validatePlanTitle } from "../src/core.js";
 
 test("six-property task metadata and chunked Plan content are canonical", () => {
   const properties = buildTaskProperties(DEFAULT_POLICY, "PLAN-X", "Title");
@@ -23,6 +23,32 @@ test("six-property task metadata and chunked Plan content are canonical", () => 
   assert.equal(blocks.map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "x".repeat(4000));
   assert.equal(normalizePlanText("first\r\nsecond\rthird\nfourth"), "first\nsecond\nthird\nfourth");
   assert.equal(buildPlanBlocks("# Browser\r\naccepted").map((block: any) => block.paragraph.rich_text[0].text.content).join(""), "# Browser\naccepted");
+});
+
+test("default State colors include the temporary Publisher Pending option", () => {
+  assert.deepEqual(DEFAULT_STATE_COLORS, {
+    Backlog: "gray",
+    Ready: "blue",
+    "In Progress": "yellow",
+    "Human Review": "orange",
+    Rework: "red",
+    Merging: "purple",
+    Done: "green",
+    Cancelled: "gray",
+    [PUBLISHER_PENDING_STATE]: "gray"
+  });
+  assert.deepEqual(buildStateOptions(DEFAULT_POLICY.stateSeeds), [
+    { name: "Backlog", color: "gray" },
+    { name: "Ready", color: "blue" },
+    { name: "In Progress", color: "yellow" },
+    { name: "Human Review", color: "orange" },
+    { name: "Rework", color: "red" },
+    { name: "Merging", color: "purple" },
+    { name: "Done", color: "green" },
+    { name: "Cancelled", color: "gray" },
+    { name: PUBLISHER_PENDING_STATE, color: "gray" }
+  ]);
+  assert.deepEqual(DEFAULT_POLICY.stateSeeds, ["Backlog", "Ready", "In Progress", "Human Review", "Rework", "Merging", "Done", "Cancelled"]);
 });
 
 test("typed config keeps only durable task policy", async () => {

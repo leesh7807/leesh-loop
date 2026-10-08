@@ -9,6 +9,22 @@ export const PLAN_PROPERTY="Plan";
 // Keep the bootstrap options aligned with the repository workflow. Backlog is
 // intentionally included as the sole pre-Ready queue state.
 export const DEFAULT_STATE_SEEDS=["Backlog","Ready","In Progress","Human Review","Rework","Merging","Done","Cancelled"];
+export type SelectOptionColor="gray"|"blue"|"yellow"|"orange"|"red"|"purple"|"green";
+export const DEFAULT_STATE_COLORS:Readonly<Record<string,SelectOptionColor>>=Object.freeze({
+ Backlog:"gray",
+ Ready:"blue",
+ "In Progress":"yellow",
+ "Human Review":"orange",
+ Rework:"red",
+ Merging:"purple",
+ Done:"green",
+ Cancelled:"gray",
+ [PUBLISHER_PENDING_STATE]:"gray"
+});
+export function buildStateOptions(stateSeeds:string[]):{name:string;color:SelectOptionColor}[]{
+ const names=stateSeeds.includes(PUBLISHER_PENDING_STATE)?stateSeeds:[...stateSeeds,PUBLISHER_PENDING_STATE];
+ return names.map(name=>({name,color:DEFAULT_STATE_COLORS[name]??"gray"}));
+}
 export const DEFAULT_POLICY: Policy = {identifier:"Identifier",title:"Title",state:"State",priority:"Priority",labels:"Labels",blockedBy:"Blocked By",defaultPriority:3,defaultLabels:[],stateSeeds:DEFAULT_STATE_SEEDS};
 export const NOTION_RICH_TEXT_SAFE_LIMIT=1900;
 export const NOTION_TITLE_SAFE_LIMIT=1900;
