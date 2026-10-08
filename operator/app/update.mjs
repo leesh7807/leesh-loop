@@ -249,7 +249,7 @@ function currentDistributionId(sourcePackage, entries) {
   return hashDistribution(sourcePackage.version, entries);
 }
 
-async function verifyPreflight(loopRoot, { priorFiles, nextFiles }) {
+async function verifyPreflight(loopRoot, { priorFiles, nextFiles, pending }) {
   const prior = new Set(priorFiles);
   const next = new Set(nextFiles);
   for (const file of prior) {
@@ -426,7 +426,7 @@ export async function updateLoop({ cwd = process.cwd(), sourceRoot, workflowOnly
     ? pending.priorManagedFiles
     : target.metadata?.runtime?.managedFiles ?? await collectLegacyManagedFiles(target.loopRoot, currentFiles);
   if (pending && (pending.area !== 'runtime' || pending.distributionId !== distributionId)) throw new Error('an incomplete update must be retried in the same mode from the same distribution');
-  await verifyPreflight(target.loopRoot, { priorFiles, nextFiles: currentFiles });
+  await verifyPreflight(target.loopRoot, { priorFiles, nextFiles: currentFiles, pending: Boolean(pending) });
   const result = await applyArea(target.loopRoot, target.metadata, 'runtime', distributionId, priorFiles, currentFiles, {
     outputEntries
   });

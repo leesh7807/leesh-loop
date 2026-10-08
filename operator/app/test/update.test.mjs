@@ -287,6 +287,38 @@ test('an interrupted runtime update can be retried from its pending journal', as
   assert.equal((await readInstallationMetadata(loopRoot)).runtime.distributionId, currentDistribution);
 });
 
+test('a pending runtime update retries when a newly managed file is already present', async t => {
+  const target = await createLoop(t);
+  const prepared = await createLoop(t);
+  const nextDistribution = await makeCurrentDistribution(t);
+  await updateLoop({ cwd: prepared.destination, sourceRoot: nextDistribution });
+  const nextRuntime = (await readInstallationMetadata(prepared.destination)).runtime;
+  const previousRuntime = (await readInstallationMetadata(target.destination)).runtime;
+  const addedFile = 'operator/ui/src/update-distribution.js';
+
+  assert.equal(previousRuntime.managedFiles.includes(addedFile), false);
+  assert.equal(nextRuntime.managedFiles.includes(addedFile), true);
+  await writeFile(join(target.destination, addedFile), await readFile(join(nextDistribution, addedFile)));
+  await writeFile(join(target.destination, '.leesh-loop/update.json'), `${JSON.stringify({
+    schemaVersion: 1,
+    area: 'runtime',
+    distributionId: nextRuntime.distributionId,
+    previousDistributionId: previousRuntime.distributionId,
+    priorManagedFiles: previousRuntime.managedFiles,
+    nextManagedFiles: nextRuntime.managedFiles,
+    transactionId: 'd44982ac-6b15-4d44-b271-f72266c700f8'
+  }, null, 2)}\n`);
+  const result = await updateLoop({ cwd: target.destination, sourceRoot: nextDistribution });
+
+  assert.equal(result.area, 'runtime');
+  assert.equal(result.distributionId, nextRuntime.distributionId);
+  assert.deepEqual(await readFile(join(target.destination, addedFile)), await readFile(join(nextDistribution, addedFile)));
+  assert.equal(await bytes(join(target.destination, '.leesh-loop/update.json')), null);
+  const updatedRuntime = (await readInstallationMetadata(target.destination)).runtime;
+  assert.equal(updatedRuntime.distributionId, nextRuntime.distributionId);
+  assert.equal(updatedRuntime.managedFiles.includes(addedFile), true);
+});
+
 test('runtime update removes the last managed file and prunes its empty directory', async t => {
   const target = await createLoop(t);
   const loopRoot = target.destination;
