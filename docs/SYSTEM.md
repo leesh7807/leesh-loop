@@ -26,6 +26,10 @@ The generated root `project.toml` sets `workflow_path` to `WORKFLOW.md`. Project
 
 The source repository's root `WORKFLOW.md` is its own concrete agent contract. It is not copied to target repositories.
 
+## Updating a generated Loop
+
+Run `leesh-loop update` from the generated Loop root to replace its Leesh Loop runtime and npm package lock from the distribution that provides the CLI. `leesh-loop update --workflow` independently replaces only the generated root `WORKFLOW.md`. Runtime updates preserve the generated workflow; workflow updates leave runtime and npm files alone. Both preserve `project.toml`, environment files, workspace, and state. Updates do not operate on the target repository and should be run while the Loop is stopped.
+
 ## Project settings and credentials
 
 Project paths are resolved relative to the directory containing root `project.toml`; absolute paths and `~/...` are also supported. The checked-in TOML and each generated Loop TOML document defaults and show optional settings as comments. UI and Symphony ports default to 4310 and 4100; set `ui_port` or `symphony_port` in `project.toml` when another local process uses a default. The core settings are:

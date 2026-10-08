@@ -7,6 +7,8 @@ import { dirname, isAbsolute, resolve, sep } from 'node:path';
 // paths select individual runtime files. Tests, docs, E2E output, and source
 // development files stay outside this list.
 export const RUNTIME_SNAPSHOT_PATHS = Object.freeze([
+  'package.json',
+  'package-lock.json',
   'operator/app/leesh-loop.mjs',
   'operator/app/operator-bootstrap',
   'operator/app/operator-ui-server.mjs',

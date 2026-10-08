@@ -62,6 +62,8 @@ async function makeBrokenSource(t) {
       else await writeFile(file, 'fixture\n');
     }
   }
+  await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'leesh-loop', version: '0.1.0', private: true, bin: { 'leesh-loop': 'bin/leesh-loop.mjs' } }));
+  await writeFile(join(root, 'package-lock.json'), JSON.stringify({ name: 'leesh-loop', version: '0.1.0', lockfileVersion: 3, requires: true, packages: { '': { name: 'leesh-loop', version: '0.1.0' } } }));
   await mkdir(join(root, 'docs'), { recursive: true });
   await writeFile(join(root, 'docs/WORKFLOW_TEMPLATE.md'), '# Reusable template\n');
   await git(root, 'add', '-A');
@@ -89,6 +91,8 @@ test('init uses only the current branch configured upstream and creates an indep
   const project = await readProjectConfiguration(projectPath);
   const loopRuntime = await readFile(join(target.destination, 'operator/app/leesh-loop.mjs'), 'utf8');
   const generatedPackage = JSON.parse(await readFile(join(target.destination, 'package.json'), 'utf8'));
+  const generatedLock = JSON.parse(await readFile(join(target.destination, 'package-lock.json'), 'utf8'));
+  const installation = JSON.parse(await readFile(join(target.destination, '.leesh-loop/installation.json'), 'utf8'));
   const workflow = await readFile(join(target.destination, 'WORKFLOW.md'), 'utf8');
   const template = (await readFile(join(sourceRoot, 'docs/WORKFLOW_TEMPLATE.md'), 'utf8')).trim();
   const templateStart = workflow.indexOf(template);
@@ -109,6 +113,14 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.equal(project.state_directory, join(target.destination, '.runtime/state'));
   assert.equal(generatedPackage.scripts.start, 'node operator/app/prepare-runtime.mjs && node operator/app/leesh-loop.mjs start project.toml');
   assert.equal(generatedPackage.scripts.stop, 'node operator/app/leesh-loop.mjs stop project.toml');
+  assert.equal(generatedLock.name, generatedPackage.name);
+  assert.equal(generatedLock.version, generatedPackage.version);
+  assert.equal(generatedLock.packages[''].name, generatedPackage.name);
+  assert.equal(generatedLock.packages[''].version, generatedPackage.version);
+  assert.equal(installation.schemaVersion, 1);
+  assert.ok(installation.installationId);
+  assert.deepEqual(installation.runtime.managedFiles, manifestFiles);
+  assert.deepEqual(installation.workflow.managedFiles, ['WORKFLOW.md']);
   assert.match(generatedPackage.scripts.start, /operator\/app\/prepare-runtime\.mjs/);
   assert.deepEqual(Object.keys(generatedPackage.scripts).sort(), ['start', 'stop']);
   assert.equal(result.workflowPath, join(target.destination, 'WORKFLOW.md'));
@@ -166,7 +178,7 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.ok(!files.some(file => file.includes('/test/') || file.startsWith('docs/') || file.startsWith('operator/e2e/')));
   assert.ok(!files.some(file => file.endsWith('node_modules') || file.includes('/node_modules/')));
   assert.ok(!files.some(file => file === '.env'));
-  assert.deepEqual(files.filter(file => !['.env.example', 'WORKFLOW.md', 'package.json', 'project.toml'].includes(file)), manifestFiles);
+  assert.deepEqual(files.filter(file => !['.env.example', 'WORKFLOW.md', 'project.toml', '.leesh-loop/installation.json'].includes(file)), manifestFiles);
   assert.equal((await git(target.targetRoot, 'status', '--porcelain')).stdout, before);
 });
 

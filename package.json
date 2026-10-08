@@ -10,6 +10,6 @@
     "start:fast": "node operator/app/leesh-loop.mjs start project.toml --skip-external-readiness",
     "stop": "node operator/app/leesh-loop.mjs stop project.toml",
     "e2e": "node e2e/cli.mjs run",
-    "test": "node --test operator/app/test/init.test.mjs operator/app/test/operator_bootstrap.test.mjs operator/app/test/start_cli.test.mjs"
+    "test": "node --test operator/app/test/init.test.mjs operator/app/test/operator_bootstrap.test.mjs operator/app/test/start_cli.test.mjs operator/app/test/update.test.mjs"
   }
 }
