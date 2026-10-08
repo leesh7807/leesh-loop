@@ -287,6 +287,25 @@ test('an interrupted runtime update can be retried from its pending journal', as
   assert.equal((await readInstallationMetadata(loopRoot)).runtime.distributionId, currentDistribution);
 });
 
+test('runtime update removes the last managed file and prunes its empty directory', async t => {
+  const target = await createLoop(t);
+  const loopRoot = target.destination;
+  const staleFile = 'operator/app/obsolete/nested/last-runtime-file.mjs';
+  await mkdir(join(loopRoot, 'operator/app/obsolete/nested'), { recursive: true });
+  await writeFile(join(loopRoot, staleFile), 'from the previous distribution\n');
+  const metadata = await readInstallationMetadata(loopRoot);
+  metadata.runtime.managedFiles.push(staleFile);
+  await writeInstallationMetadata(loopRoot, metadata);
+
+  const result = await updateLoop({ cwd: loopRoot, sourceRoot });
+
+  assert.equal(result.area, 'runtime');
+  assert.equal(await bytes(join(loopRoot, staleFile)), null);
+  await assert.rejects(lstat(join(loopRoot, 'operator/app/obsolete')), { code: 'ENOENT' });
+  assert.equal(await bytes(join(loopRoot, '.leesh-loop/update.json')), null);
+  assert.equal((await readInstallationMetadata(loopRoot)).runtime.distributionId, result.distributionId);
+});
+
 test('ordinary directories, invalid sources, and symlink collisions fail without changing protected data', async t => {
   const target = await createLoop(t);
   const loopRoot = target.destination;

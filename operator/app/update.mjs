@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { generatedPackage, generatedWorkflow } from './init.mjs';
 import { INSTALLATION_METADATA_PATH, UPDATE_JOURNAL_PATH, createInstallationMetadata, hashDistribution, readDistributionFiles, readInstallationMetadata, writeInstallationMetadata } from './installation-metadata.mjs';
@@ -296,10 +296,10 @@ async function pruneEmptyParents(loopRoot, relativePath) {
       const details = await lstat(directory);
       if (details.isSymbolicLink() || !details.isDirectory()) return;
       if ((await readdir(directory)).length) return;
-      await rm(directory, { recursive: false });
+      await rmdir(directory);
       directory = dirname(directory);
     } catch (error) {
-      if (error?.code === 'ENOENT') return;
+      if (error?.code === 'ENOENT' || error?.code === 'ENOTEMPTY' || error?.code === 'EEXIST') return;
       throw error;
     }
   }
