@@ -249,12 +249,13 @@ function currentDistributionId(sourcePackage, entries) {
   return hashDistribution(sourcePackage.version, entries);
 }
 
-async function verifyPreflight(loopRoot, { priorFiles, nextFiles, pending }) {
+async function verifyPreflight(loopRoot, { priorFiles, nextFiles }) {
   const prior = new Set(priorFiles);
   const next = new Set(nextFiles);
-  const allowedMissing = new Set(pending ? [...prior, ...next] : []);
   for (const file of prior) {
-    await ensureNoSymlink(loopRoot, file, { allowMissingTarget: allowedMissing.has(file) || next.has(file) });
+    // A prior-only path may already be absent because it was removed locally.
+    // Existing path components are still checked for symlinks and collisions.
+    await ensureNoSymlink(loopRoot, file, { allowMissingTarget: true });
   }
   for (const file of next) {
     const details = await ensureNoSymlink(loopRoot, file, { allowMissingTarget: true });
@@ -425,7 +426,7 @@ export async function updateLoop({ cwd = process.cwd(), sourceRoot, workflowOnly
     ? pending.priorManagedFiles
     : target.metadata?.runtime?.managedFiles ?? await collectLegacyManagedFiles(target.loopRoot, currentFiles);
   if (pending && (pending.area !== 'runtime' || pending.distributionId !== distributionId)) throw new Error('an incomplete update must be retried in the same mode from the same distribution');
-  await verifyPreflight(target.loopRoot, { priorFiles, nextFiles: currentFiles, pending: Boolean(pending) });
+  await verifyPreflight(target.loopRoot, { priorFiles, nextFiles: currentFiles });
   const result = await applyArea(target.loopRoot, target.metadata, 'runtime', distributionId, priorFiles, currentFiles, {
     outputEntries
   });

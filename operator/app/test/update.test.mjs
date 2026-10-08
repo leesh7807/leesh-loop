@@ -306,6 +306,27 @@ test('runtime update removes the last managed file and prunes its empty director
   assert.equal((await readInstallationMetadata(loopRoot)).runtime.distributionId, result.distributionId);
 });
 
+test('runtime update accepts an already absent prior-only managed file', async t => {
+  const target = await createLoop(t);
+  const loopRoot = target.destination;
+  const obsoleteFile = 'operator/app/previous-runtime-file.mjs';
+  await writeFile(join(loopRoot, obsoleteFile), 'from the previous distribution\n');
+  const metadata = await readInstallationMetadata(loopRoot);
+  const distributionId = metadata.runtime.distributionId;
+  metadata.runtime.managedFiles.push(obsoleteFile);
+  await writeInstallationMetadata(loopRoot, metadata);
+  await rm(join(loopRoot, obsoleteFile));
+
+  const result = await execFile(process.execPath, [join(sourceRoot, 'bin/leesh-loop.mjs'), 'update'], { cwd: loopRoot });
+
+  assert.match(result.stdout, /Leesh Loop runtime update applied/);
+  assert.equal(await bytes(join(loopRoot, obsoleteFile)), null);
+  assert.equal(await bytes(join(loopRoot, '.leesh-loop/update.json')), null);
+  const metadataAfter = await readInstallationMetadata(loopRoot);
+  assert.equal(metadataAfter.runtime.distributionId, distributionId);
+  assert.equal(metadataAfter.runtime.managedFiles.includes(obsoleteFile), false);
+});
+
 test('ordinary directories, invalid sources, and symlink collisions fail without changing protected data', async t => {
   const target = await createLoop(t);
   const loopRoot = target.destination;
