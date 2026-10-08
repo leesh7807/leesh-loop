@@ -41,6 +41,15 @@ leesh-loop init
 
 Init creates a sibling directory named `<repository-name>-loop`. It reads the target URL and base branch from the current branch's configured upstream and leaves the target repository unchanged. The new Loop contains its own runtime files and agent workflow.
 
+To update that Loop from the currently installed Leesh Loop distribution, run one of these commands from its root:
+
+```sh
+leesh-loop update
+leesh-loop update --workflow
+```
+
+The first command replaces the managed runtime and npm package lock while preserving the Loop's settings, environment files, workflow, workspace, and state. The second replaces only the generated root `WORKFLOW.md`, including local edits. Neither command changes the target Git repository. Updates apply the files owned by Leesh Loop as a complete snapshot; run them while the Loop is stopped.
+
 ### 3. Add the Notion connection
 
 Move into the generated Loop and create its local environment file:

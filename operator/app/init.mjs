@@ -6,6 +6,8 @@ import { HOST_PREREQUISITES, listRuntimeSnapshotFiles, materializeRuntimeSnapsho
 import { githubRepositoryTransport } from './github-repository-url.mjs';
 import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
 import { stringifyProjectConfiguration } from '../project-config.mjs';
+import { createInstallationMetadata, hashDistribution, readDistributionFiles, writeInstallationMetadata } from './installation-metadata.mjs';
+import { stringifyPackageLock } from './package-lock.mjs';
 
 const runGit = (cwd, args) => execFileSync('git', args, {
   cwd,
@@ -138,12 +140,12 @@ function generatedProjectToml(project) {
   return `${lines.join('\n').trimEnd()}\n`;
 }
 
-function generatedPackage(repositoryName) {
+export function generatedPackage(repositoryName, version = '0.1.0') {
   const slug = repositoryName.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 180);
   const packageName = slug ? `${slug}-loop` : 'leesh-loop-instance';
   return {
     name: packageName,
-    version: '0.1.0',
+    version,
     private: true,
     scripts: {
       start: 'node operator/app/prepare-runtime.mjs && node operator/app/leesh-loop.mjs start project.toml',
@@ -156,7 +158,7 @@ function shellQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function generatedWorkflow(template) {
+export function generatedWorkflow(template) {
   const configuration = [
     '---',
     'tracker:',
@@ -262,6 +264,8 @@ export async function initLoop({ cwd = process.cwd(), sourceRoot, environment = 
 
   const runtimeFiles = listRuntimeSnapshotFiles(sourceRoot);
   if (!runtimeFiles.length) throw new Error('runtime snapshot manifest selected no tracked runtime files');
+  const sourcePackage = JSON.parse(await readFile(join(sourceRoot, 'package.json'), 'utf8'));
+  if (typeof sourcePackage.version !== 'string' || !sourcePackage.version) throw new Error('Leesh Loop distribution has no valid package version');
   const template = await readFile(join(sourceRoot, 'docs/WORKFLOW_TEMPLATE.md'), 'utf8');
   try {
     await mkdir(destination);
@@ -271,11 +275,15 @@ export async function initLoop({ cwd = process.cwd(), sourceRoot, environment = 
   }
 
   try {
-    await materializeRuntimeSnapshot(sourceRoot, destination);
+    const runtimeFiles = await materializeRuntimeSnapshot(sourceRoot, destination);
     const project = generatedProject(target);
+    const generatedPackageManifest = generatedPackage(target.repositoryName, sourcePackage.version);
+    const generatedPackageLock = stringifyPackageLock(generatedPackageManifest);
+    const workflow = generatedWorkflow(template);
     await writeFile(join(destination, 'project.toml'), generatedProjectToml(project), { mode: 0o600 });
-    await writeFile(join(destination, 'package.json'), `${JSON.stringify(generatedPackage(target.repositoryName), null, 2)}\n`, { mode: 0o644 });
-    await writeFile(join(destination, 'WORKFLOW.md'), generatedWorkflow(template), { mode: 0o644 });
+    await writeFile(join(destination, 'package.json'), `${JSON.stringify(generatedPackageManifest, null, 2)}\n`, { mode: 0o644 });
+    await writeFile(join(destination, 'package-lock.json'), generatedPackageLock, { mode: 0o644 });
+    await writeFile(join(destination, 'WORKFLOW.md'), workflow, { mode: 0o644 });
     await writeFile(join(destination, '.env.example'), envExample, { mode: 0o600 });
 
     const projectPath = join(destination, 'project.toml');
@@ -289,6 +297,13 @@ export async function initLoop({ cwd = process.cwd(), sourceRoot, environment = 
     const workflowPath = projectReadback.workflow_path;
     const notionBinding = await readNotionBinding(destination, environment);
     const output = completionOutput({ destination, project: projectReadback, workflowPath, notionBinding });
+    await mkdir(join(destination, '.leesh-loop'), { mode: 0o700 });
+    const runtimeDistributionId = hashDistribution(sourcePackage.version, await readDistributionFiles(destination, runtimeFiles));
+    const workflowDistributionId = hashDistribution(sourcePackage.version, [['WORKFLOW.md', workflow, 0o644]]);
+    await writeInstallationMetadata(destination, createInstallationMetadata({
+      runtime: { distributionId: runtimeDistributionId, managedFiles: runtimeFiles },
+      workflow: { distributionId: workflowDistributionId, managedFiles: ['WORKFLOW.md'] }
+    }));
     return { destination, target, project: projectReadback, workflowPath, notionBinding, completionOutput: output };
   } catch (error) {
     try {
