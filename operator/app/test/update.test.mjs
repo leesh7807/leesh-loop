@@ -248,6 +248,19 @@ test('legacy init layout can update without metadata when its ownership structur
   assert.equal(packageLock.name, packageManifest.name);
 });
 
+test('legacy update refuses an unrecorded file that cannot be proven runtime-owned', async t => {
+  const target = await createLoop(t);
+  const loopRoot = target.destination;
+  await rm(join(loopRoot, '.leesh-loop'), { recursive: true });
+  await rm(join(loopRoot, 'package-lock.json'));
+  const localFile = 'operator/ui/src/local-note.js';
+  await writeFile(join(loopRoot, localFile), 'preserve this local file\n');
+  const before = await captureFiles(loopRoot);
+
+  await assert.rejects(updateLoop({ cwd: loopRoot, sourceRoot }), /cannot safely identify legacy runtime ownership/);
+  assertCapturedFilesEqual(before, await captureFiles(loopRoot));
+});
+
 test('an interrupted runtime update can be retried from its pending journal', async t => {
   const target = await createLoop(t);
   const loopRoot = target.destination;

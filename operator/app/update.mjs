@@ -134,6 +134,7 @@ async function validateGeneratedLoop(cwd) {
 
 async function collectLegacyManagedFiles(loopRoot, currentFiles) {
   const manifest = RUNTIME_SNAPSHOT_PATHS;
+  const current = new Set(currentFiles);
   const owned = new Set(['package.json']);
   const walk = async (absolute, prefix) => {
     const entries = await readdir(absolute, { withFileTypes: true });
@@ -143,7 +144,10 @@ async function collectLegacyManagedFiles(loopRoot, currentFiles) {
       const details = await lstat(childPath);
       if (details.isSymbolicLink()) throw new Error(`legacy Loop runtime contains a symlink: ${relativePath}`);
       if (details.isDirectory()) await walk(childPath, relativePath);
-      else if (details.isFile()) owned.add(relativePath);
+      else if (details.isFile()) {
+        if (!current.has(relativePath)) throw new Error(`cannot safely identify legacy runtime ownership for ${relativePath}; leaving the Loop unchanged`);
+        owned.add(relativePath);
+      }
       else throw new Error(`legacy Loop runtime contains an unsupported path: ${relativePath}`);
     }
   };
