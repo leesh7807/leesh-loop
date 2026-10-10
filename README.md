@@ -84,9 +84,21 @@ The first start prepares the included dependencies and opens the Operator page i
 
 _The task list is live, so its tasks and counts will change. Open **Publish a Plan** to enter a Plan and choose its State._
 
+### 5. Manage Loop instances from anywhere
+
+The global command lists registered Loops and can start or stop one by its ID or unique name, from any working directory:
+
+```sh
+leesh-loop list
+leesh-loop start <instance-id>
+leesh-loop stop <instance-id>
+```
+
+The list shows each Loop's ID, name, directory, and current status. Use the ID when names repeat. `init` registers a new Loop; `update` and `update --workflow` enroll existing Loops. Successful local `npm start` calls also register Loops whose runtime includes the start registration hook.
+
 Project settings live in the Loop root `project.toml`. Init creates a separate file for each target with the repository identity and paths already set. Edit it when you need a different worker model, workspace file, local port, or other documented setting; comments in the file explain defaults and path handling. Runtime responsibilities are described in [System responsibilities and configuration](docs/SYSTEM.md).
 
-### 5. Publish a Plan and follow its task
+### 6. Publish a Plan and follow its task
 
 In Operator, use **Publish a Plan**:
 

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { HOST_PREREQUISITES, listRuntimeSnapshotFiles, materializeRuntimeSnapshot } from './runtime-manifest.mjs';
@@ -283,6 +283,8 @@ export async function initLoop({ cwd = process.cwd(), sourceRoot, environment = 
     await writeFile(join(destination, 'project.toml'), generatedProjectToml(project), { mode: 0o600 });
     await writeFile(join(destination, 'package.json'), `${JSON.stringify(generatedPackageManifest, null, 2)}\n`, { mode: 0o644 });
     await writeFile(join(destination, 'package-lock.json'), generatedPackageLock, { mode: 0o644 });
+    await chmod(join(destination, 'package.json'), 0o644);
+    await chmod(join(destination, 'package-lock.json'), 0o644);
     await writeFile(join(destination, 'WORKFLOW.md'), workflow, { mode: 0o644 });
     await writeFile(join(destination, '.env.example'), envExample, { mode: 0o600 });
 

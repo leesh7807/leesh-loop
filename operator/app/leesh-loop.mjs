@@ -10,6 +10,7 @@ import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
 import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
 import { defaultOperatorUiDependencies, readRequestBody, startOperatorUiServer } from './operator-ui-server.mjs';
+import { registerLoopAfterStart } from './instance-registry.mjs';
 
 const appScript = fileURLToPath(import.meta.url);
 const root = resolve(dirname(appScript), '../..');
@@ -430,9 +431,14 @@ if (directExecution && startArgumentError) {
       return undefined;
     }
     return command === 'start' ? start(config) : command === 'stop' ? stop(config) : command === 'stop-owned' ? stopOwnedRuntime(config, commandArgs[1]) : serve(config, { prepared: command === 'serve-prepared' });
-  }).then(value => {
+  }).then(async value => {
     if (!value) return;
     if (command === 'start') {
+      try { await registerLoopAfterStart({ cwd: root }); }
+      catch (error) {
+        console.error(`Leesh Loop started successfully, but global registration failed: ${error.message}`);
+        process.exitCode = 1;
+      }
       const message = value.reused ? 'This Loop is already running.' : 'This Loop is ready.';
       const page = uiUrl(loadedConfig);
       const opening = value.window_error

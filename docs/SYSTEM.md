@@ -17,6 +17,8 @@ Notion State is lifecycle authority. The task page body is the mutable Workpad. 
 
 Run `leesh-loop init` at the root of a target Git repository. Init reads the current branch's configured upstream URL and branch, creates a sibling Loop directory, and materializes a runtime snapshot that runs independently of the source checkout.
 
+The linked `leesh-loop` CLI maintains a per-user discovery registry for independent Loops. `leesh-loop list` reads the current state from each Loop's own runtime files and ownership checks; `leesh-loop start <instance>` and `leesh-loop stop <instance>` invoke that Loop's existing `npm start` and `npm stop` commands. The registry does not own or terminate processes. New Loops register at init, and successful runtime or workflow updates enroll existing Loops.
+
 Init builds the generated root `WORKFLOW.md` from:
 
 1. Runtime settings added at the beginning of the file, including the Notion tracker, workspace root, and Git clone hook.
