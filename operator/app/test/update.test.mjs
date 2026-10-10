@@ -36,6 +36,10 @@ async function makeTarget(t) {
   return { directory, targetRoot, destination: join(directory, 'sample-repository-loop') };
 }
 
+function isolatedCliEnvironment(target) {
+  return { ...process.env, XDG_STATE_HOME: join(target.directory, 'xdg-state') };
+}
+
 async function createLoop(t) {
   const target = await makeTarget(t);
   await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
@@ -349,7 +353,7 @@ test('runtime update accepts an already absent prior-only managed file', async t
   await writeInstallationMetadata(loopRoot, metadata);
   await rm(join(loopRoot, obsoleteFile));
 
-  const result = await execFile(process.execPath, [join(sourceRoot, 'bin/leesh-loop.mjs'), 'update'], { cwd: loopRoot });
+  const result = await execFile(process.execPath, [join(sourceRoot, 'bin/leesh-loop.mjs'), 'update'], { cwd: loopRoot, env: isolatedCliEnvironment(target) });
 
   assert.match(result.stdout, /Leesh Loop runtime update applied/);
   assert.equal(await bytes(join(loopRoot, obsoleteFile)), null);
@@ -398,6 +402,7 @@ test('installed CLI accepts the two update forms and rejects unsupported options
   const target = await createLoop(t);
   const loopRoot = target.destination;
   const cli = join(sourceRoot, 'bin/leesh-loop.mjs');
+  const env = isolatedCliEnvironment(target);
   await writeFile(join(loopRoot, 'WORKFLOW.md'), '# CLI local workflow\n');
   const before = await captureFiles(loopRoot);
   await assert.rejects(execFile(process.execPath, [cli, 'update', '--force'], { cwd: loopRoot }), error => {
@@ -405,20 +410,60 @@ test('installed CLI accepts the two update forms and rejects unsupported options
     return true;
   });
   assertCapturedFilesEqual(before, await captureFiles(loopRoot));
-  const workflowResult = await execFile(process.execPath, [cli, 'update', '--workflow'], { cwd: loopRoot });
+  const workflowResult = await execFile(process.execPath, [cli, 'update', '--workflow'], { cwd: loopRoot, env });
   assert.match(workflowResult.stdout, /Leesh Loop workflow update applied/);
-  const runtimeResult = await execFile(process.execPath, [cli, 'update'], { cwd: loopRoot });
+  const firstRegistration = workflowResult.stdout.match(/Global instance: [^(]+ \(([0-9a-f-]{36})\)/)?.[1];
+  assert.ok(firstRegistration);
+  const firstList = await execFile(process.execPath, [cli, 'list'], { cwd: target.directory, env });
+  assert.match(firstList.stdout, new RegExp(firstRegistration));
+  assert.match(firstList.stdout, /Stopped/);
+  const runtimeResult = await execFile(process.execPath, [cli, 'update'], { cwd: loopRoot, env });
   assert.match(runtimeResult.stdout, /Leesh Loop runtime update applied/);
+  const secondRegistration = runtimeResult.stdout.match(/Global instance: [^(]+ \(([0-9a-f-]{36})\)/)?.[1];
+  assert.equal(secondRegistration, firstRegistration);
+  const secondList = await execFile(process.execPath, [cli, 'list'], { cwd: target.directory, env });
+  assert.equal(secondList.stdout.match(new RegExp(firstRegistration, 'g'))?.length, 1);
+});
+
+test('a completed update reports registration failure and can enroll on retry', async t => {
+  const target = await createLoop(t);
+  const loopRoot = target.destination;
+  const cli = join(sourceRoot, 'bin/leesh-loop.mjs');
+  const expectedRuntime = await readFile(join(sourceRoot, 'operator/app/leesh-loop.mjs'));
+  await writeFile(join(loopRoot, 'operator/app/leesh-loop.mjs'), 'local runtime edit\n');
+  await assert.rejects(execFile(process.execPath, [cli, 'update'], {
+    cwd: loopRoot,
+    env: { ...process.env, XDG_STATE_HOME: 'relative-state-home' }
+  }), error => {
+    assert.equal(error.code, 1);
+    assert.match(error.stdout, /Leesh Loop runtime update applied/);
+    assert.match(error.stderr, /update completed successfully, but global registration failed/);
+    return true;
+  });
+  assert.deepEqual(await readFile(join(loopRoot, 'operator/app/leesh-loop.mjs')), expectedRuntime);
+
+  const env = isolatedCliEnvironment(target);
+  const retry = await execFile(process.execPath, [cli, 'update'], { cwd: loopRoot, env });
+  assert.match(retry.stdout, /Global instance:/);
+  const listed = await execFile(process.execPath, [cli, 'list'], { cwd: target.directory, env });
+  assert.match(listed.stdout, /Stopped/);
+  assert.equal(listed.stdout.split('\n').filter(line => line.includes(loopRoot)).length, 1);
 });
 
 test('actual init CLI creates the independent Loop and its install baseline without changing the target Git worktree', async t => {
   const target = await makeTarget(t);
   const cli = join(sourceRoot, 'bin/leesh-loop.mjs');
   const before = (await git(target.targetRoot, 'status', '--porcelain')).stdout;
-  const result = await execFile(process.execPath, [cli, 'init'], { cwd: target.targetRoot });
+  const result = await execFile(process.execPath, [cli, 'init'], { cwd: target.targetRoot, env: isolatedCliEnvironment(target) });
   assert.match(result.stdout, /Leesh Loop is ready/);
+  const registeredId = result.stdout.match(/Global instance: sample-repository-loop \(([0-9a-f-]{36})\)/)?.[1];
+  assert.ok(registeredId);
   assert.ok(await lstat(join(target.destination, 'package-lock.json')));
   assert.ok(await lstat(join(target.destination, '.leesh-loop/installation.json')));
+  assert.ok(await lstat(join(target.destination, '.leesh-loop/instance.json')));
+  const listed = await execFile(process.execPath, [cli, 'list'], { cwd: target.directory, env: isolatedCliEnvironment(target) });
+  assert.equal(listed.stdout.match(new RegExp(registeredId, 'g'))?.length, 1);
+  assert.match(listed.stdout, /Stopped/);
   assert.equal((await git(target.targetRoot, 'status', '--porcelain')).stdout, before);
   assert.equal((await readInstallationMetadata(target.destination)).runtime.managedFiles.includes('package-lock.json'), true);
 });
