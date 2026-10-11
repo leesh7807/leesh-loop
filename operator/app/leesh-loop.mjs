@@ -11,6 +11,7 @@ import { readProjectConfiguration } from '../project-config.mjs';
 import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
 import { defaultOperatorUiDependencies, readRequestBody, startOperatorUiServer } from './operator-ui-server.mjs';
 import { registerLoopAfterStart } from './instance-registry.mjs';
+import { initializeLoopTaskStore } from './local-task-store-runtime.mjs';
 
 const appScript = fileURLToPath(import.meta.url);
 const root = resolve(dirname(appScript), '../..');
@@ -293,6 +294,11 @@ async function start(config) {
   return withLock(config, async () => {
     const port = Number(config.symphony_port || PROJECT_DEFAULTS.symphony_port); const p = paths(config); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
     if (!existing) console.error('Operator: Checking your Loop setup and getting the task page ready.');
+    try {
+      await initializeLoopTaskStore(p.dir);
+    } catch (error) {
+      console.error(`Operator: Local Task Store initialization failed; Notion task processing will continue: ${String(error?.message || error)}`);
+    }
     ensurePublisher();
     ensureOperatorUi();
     if (existing) {
