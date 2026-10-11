@@ -11,7 +11,7 @@ import { readProjectConfiguration } from '../project-config.mjs';
 import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
 import { defaultOperatorUiDependencies, readRequestBody, startOperatorUiServer } from './operator-ui-server.mjs';
 import { registerLoopAfterStart } from './instance-registry.mjs';
-import { initializeLoopTaskStore } from './local-task-store-runtime.mjs';
+import { initializeLoopTaskStore, localTaskStorePath } from './local-task-store-runtime.mjs';
 
 const appScript = fileURLToPath(import.meta.url);
 const root = resolve(dirname(appScript), '../..');
@@ -47,8 +47,11 @@ async function remove(path) { await rm(path, { force: true }); }
 
 async function loadConfig(file, { validateWorkspaceFileSources = true, requireNotionDatabase = true, environment = process.env, envFile = join(root, '.env'), homeDirectory } = {}) {
   const config = await readProjectConfiguration(file, { validateWorkspaceFileSources: false, homeDirectory });
-  const notion_database_url = await readRepositoryEnvironmentValue('LEESH_LOOP_NOTION_DATABASE_URL', { environment, envFile });
-  if (requireNotionDatabase && !notion_database_url) throw new Error('missing LEESH_LOOP_NOTION_DATABASE_URL: set it in the Operator environment or repository-root .env');
+  const requiresNotion = requireNotionDatabase && config.task_store === 'notion';
+  const notion_database_url = config.task_store === 'notion'
+    ? await readRepositoryEnvironmentValue('LEESH_LOOP_NOTION_DATABASE_URL', { environment, envFile })
+    : undefined;
+  if (requiresNotion && !notion_database_url) throw new Error('missing LEESH_LOOP_NOTION_DATABASE_URL: set it in the Operator environment or repository-root .env');
   if (validateWorkspaceFileSources) await validateWorkspaceFiles(config.workspace_files);
   return { ...config, notion_database_url };
 }
@@ -56,7 +59,14 @@ async function withLock(config, action) {
   return action();
 }
 function effective(config, runtimeId, port) {
-  return { workflow_path: config.workflow_path, notion_database_url: config.notion_database_url, symphony_workspace_root: config.symphony_workspace_root, allow_workspace_root_inside_repository: config.allow_workspace_root_inside_repository === true, workspace_files: config.workspace_files, codex_model: config.codex_model ?? null, codex_reasoning_effort: config.codex_reasoning_effort ?? null, worker_interface_identity: config.worker_interface_identity || 'operator/external/chatgpt-shot/chatgpt-shot', skip_external_readiness: config.skip_external_readiness === true, github_repository_url: config.github_repository_url, github_base_branch: config.github_base_branch, symphony_command: canonical(config.symphony_command || join(root, 'operator/app/run-symphony')), dashboard: `http://127.0.0.1:${port}`, runtime_id: runtimeId };
+  return { workflow_path: config.workflow_path, task_store: config.task_store, notion_database_url: config.notion_database_url, local_task_store_path: config.task_store === 'local' ? localTaskStorePath(stateRoot(config)) : null, symphony_workspace_root: config.symphony_workspace_root, allow_workspace_root_inside_repository: config.allow_workspace_root_inside_repository === true, workspace_files: config.workspace_files, codex_model: config.codex_model ?? null, codex_reasoning_effort: config.codex_reasoning_effort ?? null, worker_interface_identity: config.worker_interface_identity || 'operator/external/chatgpt-shot/chatgpt-shot', skip_external_readiness: config.skip_external_readiness === true, github_repository_url: config.github_repository_url, github_base_branch: config.github_base_branch, symphony_command: canonical(config.symphony_command || join(root, 'operator/app/run-symphony')), dashboard: `http://127.0.0.1:${port}`, runtime_id: runtimeId };
+}
+function configureTaskStoreEnvironment(environment, taskStore, databasePath, runtimeRoot) {
+  environment.LEESH_LOOP_TRACKER_KIND = taskStore;
+  environment.LEESH_LOOP_RUNTIME_ROOT = runtimeRoot;
+  if (taskStore === 'local') environment.LEESH_LOOP_LOCAL_TASK_STORE_PATH = databasePath;
+  else delete environment.LEESH_LOOP_LOCAL_TASK_STORE_PATH;
+  return environment;
 }
 function compatibilityIdentity(value) { const { runtime_id: _runtimeId, skip_external_readiness, codex_model, codex_reasoning_effort, ...identity } = value || {}; return { ...identity, codex_model: codex_model ?? null, codex_reasoning_effort: codex_reasoning_effort ?? null, skip_external_readiness: skip_external_readiness === true }; }
 function compatible(oldValue, current) { return JSON.stringify(compatibilityIdentity(oldValue)) === JSON.stringify(compatibilityIdentity(current)); }
@@ -294,24 +304,30 @@ async function start(config) {
   return withLock(config, async () => {
     const port = Number(config.symphony_port || PROJECT_DEFAULTS.symphony_port); const p = paths(config); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
     if (!existing) console.error('Operator: Checking your Loop setup and getting the task page ready.');
+    let taskStorePath;
     try {
-      await initializeLoopTaskStore(p.dir);
+      taskStorePath = await initializeLoopTaskStore(p.dir);
     } catch (error) {
+      if (config.task_store === 'local') throw new Error(`Local Task Store initialization failed: ${String(error?.message || error)}`);
       console.error(`Operator: Local Task Store initialization failed; Notion task processing will continue: ${String(error?.message || error)}`);
     }
-    ensurePublisher();
-    ensureOperatorUi();
+    if (config.task_store === 'notion') {
+      ensurePublisher();
+      ensureOperatorUi();
+    }
     if (existing) {
       let window_error;
-      try { await ensureUi(config); } catch (error) { window_error = String(error.message || error); }
-      if (config.open_project_surfaces && projectWindowNeedsOpening(existing)) {
+      if (config.task_store === 'notion') {
+        try { await ensureUi(config); } catch (error) { window_error = String(error.message || error); }
+      }
+      if (config.task_store === 'notion' && config.open_project_surfaces && projectWindowNeedsOpening(existing)) {
         try {
           await openWindow(config, existing.effective.dashboard);
           await atomicJson(paths(config).state, { ...existing, project_window_opened_at: new Date().toISOString(), project_window_surfaces: ['operator-ui-v1'] });
           await remove(p.startup_status);
         } catch (error) { window_error = String(error.message || error); }
       }
-      return { reused: true, pid: existing.pid, dashboard: existing.effective.dashboard, ...(window_error ? { window_error } : {}) };
+      return { reused: true, pid: existing.pid, dashboard: existing.effective.dashboard, task_store: config.task_store, ...(window_error ? { window_error } : {}) };
     }
     const runtimeId = randomUUID(); const identity = effective(config, runtimeId, port);
     const starting = { status: 'starting', runtime_id: runtimeId, effective: identity, authorization_path: p.authorization, acknowledgement_path: p.acknowledgement, ownership_path: p.ownership, created_at: new Date().toISOString() };
@@ -319,9 +335,16 @@ async function start(config) {
     try {
       const symphony = identity.symphony_command;
       const args = operatorBootstrapArgs(config, symphony, port);
-      const notionToken = await readRepositoryEnvironmentValue('NOTION_TOKEN');
-      if (!notionToken) throw new Error('missing NOTION_TOKEN: set it in the Operator environment or the project-root .env file');
-      const env = { ...process.env, NOTION_TOKEN: notionToken, LEESH_LOOP_NOTION_DATABASE_URL: config.notion_database_url, LEESH_LOOP_WORKSPACE_FILES: JSON.stringify(config.workspace_files), LEESH_LOOP_RUNTIME_ROOT: root, SYMPHONY_WORKSPACE_ROOT: config.symphony_workspace_root, SYMPHONY_ALLOW_WORKSPACE_ROOT_INSIDE_REPOSITORY: config.allow_workspace_root_inside_repository === true ? 'true' : 'false', SYMPHONY_GITHUB_REPOSITORY_URL: config.github_repository_url, SYMPHONY_GITHUB_BASE_BRANCH: config.github_base_branch, SYMPHONY_DISPATCH_BARRIER: 'closed', SYMPHONY_RUNTIME_ID: runtimeId, SYMPHONY_DISPATCH_AUTHORIZATION_FILE: p.authorization, SYMPHONY_DISPATCH_ACK_FILE: p.acknowledgement, SYMPHONY_OWNERSHIP_FILE: p.ownership, SYMPHONY_OPERATOR_STARTUP_STATUS_FILE: p.startup_status };
+      const env = configureTaskStoreEnvironment({ ...process.env, LEESH_LOOP_WORKSPACE_FILES: JSON.stringify(config.workspace_files), SYMPHONY_WORKSPACE_ROOT: config.symphony_workspace_root, SYMPHONY_ALLOW_WORKSPACE_ROOT_INSIDE_REPOSITORY: config.allow_workspace_root_inside_repository === true ? 'true' : 'false', SYMPHONY_GITHUB_REPOSITORY_URL: config.github_repository_url, SYMPHONY_GITHUB_BASE_BRANCH: config.github_base_branch, SYMPHONY_DISPATCH_BARRIER: 'closed', SYMPHONY_RUNTIME_ID: runtimeId, SYMPHONY_DISPATCH_AUTHORIZATION_FILE: p.authorization, SYMPHONY_DISPATCH_ACK_FILE: p.acknowledgement, SYMPHONY_OWNERSHIP_FILE: p.ownership, SYMPHONY_OPERATOR_STARTUP_STATUS_FILE: p.startup_status }, config.task_store, taskStorePath || localTaskStorePath(p.dir), root);
+      if (config.task_store === 'notion') {
+        const notionToken = await readRepositoryEnvironmentValue('NOTION_TOKEN');
+        if (!notionToken) throw new Error('missing NOTION_TOKEN: set it in the Operator environment or the project-root .env file');
+        env.NOTION_TOKEN = notionToken;
+        env.LEESH_LOOP_NOTION_DATABASE_URL = config.notion_database_url;
+      } else {
+        delete env.NOTION_TOKEN;
+        delete env.LEESH_LOOP_NOTION_DATABASE_URL;
+      }
       if (identity.codex_model === null) delete env.SYMPHONY_CODEX_MODEL;
       else env.SYMPHONY_CODEX_MODEL = identity.codex_model;
       if (identity.codex_reasoning_effort === null) delete env.SYMPHONY_CODEX_REASONING_EFFORT;
@@ -356,16 +379,16 @@ async function start(config) {
       await atomicText(p.startup_status, 'waiting for task processing');
       await waitFor(() => runtimeObserved(running, true), 'task processing', 15_000, reportProgress, () => childFailure('task processing'));
       try {
-        if (config.open_project_surfaces) {
+        if (config.task_store === 'notion' && config.open_project_surfaces) {
           await openWindow(config, identity.dashboard);
           await atomicJson(p.state, { ...running, project_window_opened_at: new Date().toISOString(), project_window_surfaces: ['operator-ui-v1'] });
-        } else {
+        } else if (config.task_store === 'notion') {
           await ensureUi(config);
         }
         await remove(p.startup_status);
-        return { reused: false, pid, dashboard: identity.dashboard };
+        return { reused: false, pid, dashboard: identity.dashboard, task_store: config.task_store };
       }
-      catch (windowError) { return { reused: false, pid, dashboard: identity.dashboard, window_error: String(windowError.message || windowError) }; }
+      catch (windowError) { return { reused: false, pid, dashboard: identity.dashboard, task_store: config.task_store, window_error: String(windowError.message || windowError) }; }
     } catch (error) { const state = await json(p.state); try { const stopped = await stopRuntimeAndClear(config, state); if (!stopped.stopped) throw new Error(runtimeStopFailure(stopped)); } catch (cleanupError) { await atomicJson(p.state, { ...(state || starting), status: 'failed', cleanup_error: String(cleanupError) }); } throw error; }
   });
 }
@@ -446,13 +469,17 @@ if (directExecution && startArgumentError) {
         process.exitCode = 1;
       }
       const message = value.reused ? 'This Loop is already running.' : 'This Loop is ready.';
-      const page = uiUrl(loadedConfig);
-      const opening = value.window_error
-        ? `The browser could not be opened automatically. Open the page at ${page}.`
-        : loadedConfig.open_project_surfaces
-          ? `Operator page: ${page}`
-          : `Operator page is available at ${page}`;
-      console.error(`Leesh Loop: ${message} ${opening}`);
+      if (loadedConfig.task_store === 'local') {
+        console.error(`Leesh Loop: ${message} Task data: Local Task Store (${value.task_store}). Publish with npm run publish-local-plan -- --plan PATH.`);
+      } else {
+        const page = uiUrl(loadedConfig);
+        const opening = value.window_error
+          ? `The browser could not be opened automatically. Open the page at ${page}.`
+          : loadedConfig.open_project_surfaces
+            ? `Operator page: ${page}`
+            : `Operator page is available at ${page}`;
+        console.error(`Leesh Loop: ${message} ${opening}`);
+      }
     }
     console.log(JSON.stringify(value));
   }).catch(error => {
@@ -462,4 +489,4 @@ if (directExecution && startArgumentError) {
   });
 }
 
-export { acknowledgeBrowser, compatible, dispatchBrowser, effective, ensureOperatorUi, ensurePublisher, loadConfig, openProjectSurfaces, operatorBootstrapArgs, parseStartArguments, projectSurfaces, projectWindowNeedsOpening, readRequestBody, runPublisherCommand, startConfiguration, uiIdentity, uiRuntimeSourceFiles };
+export { acknowledgeBrowser, compatible, configureTaskStoreEnvironment, dispatchBrowser, effective, ensureOperatorUi, ensurePublisher, loadConfig, openProjectSurfaces, operatorBootstrapArgs, parseStartArguments, projectSurfaces, projectWindowNeedsOpening, readRequestBody, runPublisherCommand, startConfiguration, uiIdentity, uiRuntimeSourceFiles };

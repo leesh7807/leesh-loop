@@ -1,6 +1,7 @@
 defmodule SymphonyElixirWeb.RuntimeController do
   use Phoenix.Controller, formats: [:json]
 
+  @spec show(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def show(conn, _params) do
     json(conn, %{pid: os_pid(), runtime_id: System.get_env("SYMPHONY_RUNTIME_ID"), dispatch_capable: SymphonyElixir.DispatchBarrier.status()})
   end

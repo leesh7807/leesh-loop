@@ -96,7 +96,7 @@ leesh-loop stop <instance-id>
 
 The list shows each Loop's ID, name, directory, and current status. Use the ID when names repeat. `init` registers a new Loop; `update` and `update --workflow` enroll existing Loops. Successful local `npm start` calls also register Loops whose runtime includes the start registration hook.
 
-Project settings live in the Loop root `project.toml`. Init creates a separate file for each target with the repository identity and paths already set. Edit it when you need a different worker model, workspace file, local port, or other documented setting; comments in the file explain defaults and path handling. Runtime responsibilities are described in [System responsibilities and configuration](docs/SYSTEM.md).
+Project settings live in the Loop root `project.toml`. Init creates a separate file for each target with the repository identity and paths already set. `task_store` selects the task execution path for that Loop: `notion` is the default and `local` uses its own SQLite Task Store. Set `task_store = "local"` to switch the runtime to Local tasks; the Operator page remains available only for Notion tasks. For Local mode, publish with `npm run publish-local-plan -- --plan PATH` and run the independent Local E2E with `npm run local-e2e`. Edit other settings for a different worker model, workspace file, local port, or other documented option. Runtime responsibilities are described in [System responsibilities and configuration](docs/SYSTEM.md).
 
 ### 6. Publish a Plan and follow its task
 

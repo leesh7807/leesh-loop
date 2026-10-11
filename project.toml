@@ -6,6 +6,7 @@ github_base_branch = "main"
 workflow_path = "WORKFLOW.md"
 symphony_workspace_root = "~/.leesh-loop/workspaces"
 state_directory = ".runtime/state"
+task_store = "notion"
 
 # Extra regular files copied into every newly created worker workspace.
 # Relative paths use this project.toml directory. Absolute paths and ~/ paths also work.

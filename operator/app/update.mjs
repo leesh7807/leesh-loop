@@ -12,6 +12,7 @@ const protectedPaths = new Set(['project.toml', '.env', '.env.example', 'WORKFLO
 const protectedRoots = new Set(['.git', '.leesh-loop', '.runtime', 'node_modules']);
 const generatedStart = 'node operator/app/prepare-runtime.mjs && node operator/app/leesh-loop.mjs start project.toml';
 const generatedStop = 'node operator/app/leesh-loop.mjs stop project.toml';
+const generatedPublishLocalPlan = 'node operator/app/publish-local-plan.mjs project.toml';
 
 async function exists(path) {
   try { return await lstat(path); }
@@ -111,8 +112,13 @@ async function validateGeneratedLoop(cwd) {
   if (!packageManifest || packageManifest.private !== true || typeof packageManifest.name !== 'string' || !/^[a-z0-9][a-z0-9-]{0,190}$/.test(packageManifest.name)) {
     throw new Error('directory is not a generated Loop: invalid package identity');
   }
-  if (!packageManifest.scripts || packageManifest.scripts.start !== generatedStart || packageManifest.scripts.stop !== generatedStop || Object.keys(packageManifest.scripts).sort().join(',') !== 'start,stop') {
-    throw new Error('directory is not a generated Loop: package start/stop contract does not match init');
+  const scripts = packageManifest.scripts;
+  const scriptNames = Object.keys(scripts ?? {}).sort().join(',');
+  const validScripts = scripts?.start === generatedStart && scripts?.stop === generatedStop
+    && (scriptNames === 'start,stop'
+      || (scriptNames === 'publish-local-plan,start,stop' && scripts['publish-local-plan'] === generatedPublishLocalPlan));
+  if (!validScripts) {
+    throw new Error('directory is not a generated Loop: package script contract does not match init');
   }
   const metadata = await readInstallationMetadata(loopRoot);
   if (metadata) {

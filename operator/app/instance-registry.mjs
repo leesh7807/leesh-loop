@@ -8,6 +8,7 @@ import { readProjectConfiguration } from '../project-config.mjs';
 
 const expectedStart = 'node operator/app/prepare-runtime.mjs && node operator/app/leesh-loop.mjs start project.toml';
 const expectedStop = 'node operator/app/leesh-loop.mjs stop project.toml';
+const expectedPublishLocalPlan = 'node operator/app/publish-local-plan.mjs project.toml';
 
 function isMissing(error) { return error?.code === 'ENOENT'; }
 
@@ -98,12 +99,15 @@ async function inspectLoopRoot(path) {
   let packageManifest;
   try { packageManifest = JSON.parse(await readFile(join(loopRoot, 'package.json'), 'utf8')); }
   catch { throw new Error('generated Loop package.json is missing or invalid'); }
+  const scripts = packageManifest?.scripts;
+  const scriptNames = Object.keys(scripts ?? {}).sort().join(',');
+  const validScripts = scripts?.start === expectedStart && scripts?.stop === expectedStop
+    && (scriptNames === 'start,stop'
+      || (scriptNames === 'publish-local-plan,start,stop' && scripts['publish-local-plan'] === expectedPublishLocalPlan));
   if (packageManifest?.private !== true || typeof packageManifest.name !== 'string'
     || !/^[a-z0-9][a-z0-9-]{0,190}$/.test(packageManifest.name)
-    || packageManifest.scripts?.start !== expectedStart
-    || packageManifest.scripts?.stop !== expectedStop
-    || Object.keys(packageManifest.scripts ?? {}).sort().join(',') !== 'start,stop') {
-    throw new Error('directory is not an independent generated Loop with the expected npm start/stop contract');
+    || !validScripts) {
+    throw new Error('directory is not an independent generated Loop with the expected npm script contract');
   }
 
   const git = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: loopRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });

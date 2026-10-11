@@ -8,6 +8,11 @@ const packageDirectory = resolve(appDirectory, '../local_task_store');
 const databaseFile = 'local-task-store.sqlite';
 const databaseDirectory = 'local-task-store';
 
+export function localTaskStorePath(stateDirectory) {
+  if (typeof stateDirectory !== 'string' || !stateDirectory.trim()) throw new TypeError('stateDirectory must be a non-empty path');
+  return join(resolve(stateDirectory), databaseDirectory, databaseFile);
+}
+
 function preparePackage() {
   if (existsSync(join(packageDirectory, 'node_modules/better-sqlite3/build/Release/better_sqlite3.node'))) return;
   const install = spawnSync('npm', ['ci'], { cwd: packageDirectory, stdio: ['ignore', process.stderr.fd, 'inherit'], env: process.env });
@@ -16,14 +21,13 @@ function preparePackage() {
 }
 
 export async function openLoopTaskStore(stateDirectory) {
-  if (typeof stateDirectory !== 'string' || !stateDirectory.trim()) throw new TypeError('stateDirectory must be a non-empty path');
   preparePackage();
   const { openLocalTaskStore } = await import('../local_task_store/src/local-task-store.mjs');
-  return openLocalTaskStore(join(resolve(stateDirectory), databaseDirectory, databaseFile));
+  return openLocalTaskStore(localTaskStorePath(stateDirectory));
 }
 
 export async function initializeLoopTaskStore(stateDirectory) {
   const store = await openLoopTaskStore(stateDirectory);
   store.close();
-  return join(resolve(stateDirectory), databaseDirectory, databaseFile);
+  return localTaskStorePath(stateDirectory);
 }

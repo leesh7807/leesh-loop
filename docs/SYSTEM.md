@@ -6,12 +6,12 @@ This document is for operators and maintainers who need the system boundaries be
 
 A Loop instance operates one target Git repository. Its Project configuration is the root `project.toml`; it also has a root `WORKFLOW.md`, a local Operator page, and isolated worker workspaces. `operator/` contains the runtime that reads the Project. The target repository remains separate from the Loop instance.
 
-- **Operator** reads Project settings, checks startup requirements, starts the task runtime, and serves the local task and Plan page.
-- **Publisher** writes a Plan and task to Notion using the configured database and publication State.
+- **Operator** reads Project settings, checks startup requirements, and starts the selected task runtime. The current Operator page serves the Notion path.
+- **Publisher** writes a Plan and task to the selected Notion database or Local Task Store using the requested publication State.
 - **Symphony** dispatches eligible tasks and creates isolated workspaces from the configured Git base branch.
-- **Worker** reads the generated Loop's root `WORKFLOW.md`, performs the task, and records task progress through the Notion task surface.
+- **Worker** reads the generated Loop's root `WORKFLOW.md`, performs the task, and records task progress through the bound task tools for the selected path.
 
-Notion State is lifecycle authority. The task page body is the mutable Workpad. Its related Accepted Plan is stored in a separate Plan page. The Repository Plan in the worker's workspace is the durable execution contract. A worker does not rewrite the Accepted Plan.
+Notion State or Local Task Store State is lifecycle authority for the selected Loop. The Workpad is mutable execution context and the Accepted Plan is immutable input. The Repository Plan in the worker's workspace is the durable execution contract. A worker does not rewrite the Accepted Plan.
 
 ## Init and workflow source
 
@@ -40,6 +40,7 @@ Project paths are resolved relative to the directory containing root `project.to
 | --- | --- |
 | `github_repository_url` | Target GitHub repository. |
 | `github_base_branch` | Target repository's base branch. Set it with the URL; Operator does not guess a branch. |
+| `task_store` | Selects `notion` or `local` for one Loop. Omitted values default to `notion`. |
 | `workflow_path` | Agent execution contract passed to Symphony. Init points this to the generated root `WORKFLOW.md`. |
 | `symphony_workspace_root` | Parent directory for task workspaces. |
 | `state_directory` | Optional Operator runtime state directory. |
@@ -49,7 +50,9 @@ Project paths are resolved relative to the directory containing root `project.to
 | `skip_external_readiness` | Optional setting that skips external review readiness; it does not skip core startup checks. |
 | `startup_timeout_ms`, `browser_acknowledgement_timeout_ms` | Optional startup and browser acknowledgement timeouts. |
 
-The Notion database URL comes from `LEESH_LOOP_NOTION_DATABASE_URL`; the integration token comes from `NOTION_TOKEN`. Operator reads either value from the process environment or the Loop root `.env`. Init does not create a Notion database, copy credentials, or save process-only values. The GitHub repository URL and base branch are always a pair.
+The Notion database URL comes from `LEESH_LOOP_NOTION_DATABASE_URL`; the integration token comes from `NOTION_TOKEN`. Operator reads either value from the process environment or the Loop root `.env` only for a Notion Loop. A Local Loop stores task data in its state directory at `local-task-store/local-task-store.sqlite` and does not pass Notion credentials to Symphony. Init does not create a Notion database, copy credentials, or save process-only values. The GitHub repository URL and base branch are always a pair.
+
+For a Local Loop, use `npm run publish-local-plan -- --plan PATH` to publish a Plan without adding it to the Git repository. The Notion Operator page remains on the Notion path; Local task data is handled by the Local CLI and runtime.
 
 Use `workspace_files` only for regular files workers need. It is not a general credential transfer mechanism. A Git-ignored local file in the sibling target repository can be listed explicitly. The Operator validates the sources before starting and copies each file without recreating its source directories.
 
@@ -76,4 +79,4 @@ On start, Operator checks the Notion connection, workspace, GitHub access, and c
 
 The worker workspace is cloned from the configured base. Task branches, Rework, pull requests, and merge verification use that configured base; the remote default branch is not a substitute. Workspace files and review credentials stay within their separate ownership boundaries.
 
-Repository E2E verification has its own guide and runtime under [`e2e/README.md`](../e2e/README.md). It is not part of the normal `npm start` user flow.
+Repository E2E verification has its own guide and runtime under [`e2e/README.md`](../e2e/README.md). Local execution verification is separate under [`local-e2e/README.md`](../local-e2e/README.md). Neither is part of the normal `npm start` user flow.

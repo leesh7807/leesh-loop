@@ -401,9 +401,10 @@ defmodule SymphonyElixir.Config.Schema do
 
   defp finalize_settings(settings) do
     provider = normalize_optional_map(settings.tracker.provider) || %{}
+    tracker_kind = configured_tracker_kind(settings.tracker.kind)
 
     {api_key, assignee, provider, secret_environment_names} =
-      case settings.tracker.kind do
+      case tracker_kind do
         "linear" ->
           linear_provider =
             provider
@@ -448,7 +449,7 @@ defmodule SymphonyElixir.Config.Schema do
       end
 
     {active_states, terminal_states} =
-      case settings.tracker.kind do
+      case tracker_kind do
         kind when kind in ["linear", "memory"] ->
           {
             settings.tracker.active_states || @linear_active_states,
@@ -464,7 +465,8 @@ defmodule SymphonyElixir.Config.Schema do
 
     tracker = %{
       settings.tracker
-      | endpoint: Map.get(provider, "endpoint", settings.tracker.endpoint),
+      | kind: tracker_kind,
+        endpoint: Map.get(provider, "endpoint", settings.tracker.endpoint),
         api_key: api_key,
         project_slug: Map.get(provider, "project_slug", settings.tracker.project_slug),
         assignee: assignee,
@@ -486,6 +488,13 @@ defmodule SymphonyElixir.Config.Schema do
     }
 
     %{settings | tracker: tracker, workspace: workspace, codex: codex}
+  end
+
+  defp configured_tracker_kind(configured_kind) do
+    case System.get_env("LEESH_LOOP_TRACKER_KIND") do
+      value when is_binary(value) and value != "" -> String.trim(value)
+      _ -> configured_kind
+    end
   end
 
   defp normalize_keys(value) when is_map(value) do
