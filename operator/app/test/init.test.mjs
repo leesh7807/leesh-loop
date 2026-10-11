@@ -146,6 +146,9 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.ok(files.includes('operator/symphony/mise.toml'));
   assert.ok(files.includes('operator/external/chatgpt-shot/chatgpt-shot'));
   assert.ok(files.includes('operator/app/prepare-runtime.mjs'));
+  assert.ok(files.includes('operator/app/local-task-store-runtime.mjs'));
+  assert.ok(files.includes('operator/local_task_store/package-lock.json'));
+  assert.ok(files.includes('operator/local_task_store/src/local-task-store.mjs'));
   assert.ok((await stat(join(target.destination, 'operator/app/operator-bootstrap'))).mode & 0o111);
   assert.equal(
     await readFile(join(target.destination, 'operator/app/operator-bootstrap'), 'utf8'),
