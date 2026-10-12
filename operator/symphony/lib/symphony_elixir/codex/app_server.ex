@@ -86,7 +86,7 @@ defmodule SymphonyElixir.Codex.AppServer do
       ) do
     on_message = Keyword.get(opts, :on_message, &default_on_message/1)
 
-    tool_executor =
+    configured_tool_executor =
       Keyword.get(opts, :tool_executor, fn tool, arguments ->
         DynamicTool.execute(tool, arguments, dynamic_tool_binding, issue: issue)
       end)
@@ -94,6 +94,13 @@ defmodule SymphonyElixir.Codex.AppServer do
     case start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy) do
       {:ok, turn_id} ->
         session_id = "#{thread_id}-#{turn_id}"
+
+        tool_executor = fn tool, arguments ->
+          result = configured_tool_executor.(tool, arguments)
+          log_dynamic_tool_call(issue, session_id, tool, result)
+          result
+        end
+
         Logger.info("Codex session started for #{issue_context(issue)} session_id=#{session_id}")
 
         emit_message(
@@ -718,6 +725,18 @@ defmodule SymphonyElixir.Codex.AppServer do
          _auto_approve_requests
        ) do
     :unhandled
+  end
+
+  defp log_dynamic_tool_call(issue, session_id, nil, _result) do
+    Logger.warning("unsupported dynamic tool call rejected #{issue_context(issue)} session_id=#{session_id}")
+  end
+
+  defp log_dynamic_tool_call(issue, session_id, tool, %{"success" => true}) do
+    Logger.info("dynamic tool call completed (#{tool}) #{issue_context(issue)} session_id=#{session_id}")
+  end
+
+  defp log_dynamic_tool_call(issue, session_id, tool, _result) do
+    Logger.warning("dynamic tool call failed (#{tool}) #{issue_context(issue)} session_id=#{session_id}")
   end
 
   defp normalize_dynamic_tool_result(%{"success" => success} = result) when is_boolean(success) do

@@ -4,8 +4,10 @@ defmodule SymphonyElixir.DispatchBarrier do
 
   @check_interval_ms 100
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
+  @spec subscribe(pid()) :: :ok
   def subscribe(pid) do
     case Process.whereis(__MODULE__) do
       nil ->
@@ -17,6 +19,7 @@ defmodule SymphonyElixir.DispatchBarrier do
     end
   end
 
+  @spec status() :: boolean()
   def status do
     case Process.whereis(__MODULE__) do
       nil -> true

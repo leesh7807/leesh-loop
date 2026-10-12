@@ -66,6 +66,7 @@ function generatedProject(target) {
     workflow_path: 'WORKFLOW.md',
     symphony_workspace_root: '.runtime/workspaces',
     state_directory: '.runtime/state',
+    task_store: 'notion',
     allow_workspace_root_inside_repository: true,
     github_repository_url: target.remoteUrl,
     github_base_branch: target.upstreamBranch,
@@ -94,6 +95,9 @@ function generatedProjectToml(project) {
     '# Target Git repository and base branch for this Loop.',
     setting('github_repository_url'),
     setting('github_base_branch'),
+    '',
+    '# Task data path for this Loop. Choose notion or local; default: notion.',
+    setting('task_store'),
     '',
     '# Worker contract file. Relative paths use this project.toml directory.',
     setting('workflow_path'),
@@ -149,7 +153,8 @@ export function generatedPackage(repositoryName, version = '0.1.0') {
     private: true,
     scripts: {
       start: 'node operator/app/prepare-runtime.mjs && node operator/app/leesh-loop.mjs start project.toml',
-      stop: 'node operator/app/leesh-loop.mjs stop project.toml'
+      stop: 'node operator/app/leesh-loop.mjs stop project.toml',
+      'publish-local-plan': 'node operator/app/publish-local-plan.mjs project.toml'
     }
   };
 }

@@ -122,7 +122,7 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.deepEqual(installation.runtime.managedFiles, manifestFiles);
   assert.deepEqual(installation.workflow.managedFiles, ['WORKFLOW.md']);
   assert.match(generatedPackage.scripts.start, /operator\/app\/prepare-runtime\.mjs/);
-  assert.deepEqual(Object.keys(generatedPackage.scripts).sort(), ['start', 'stop']);
+  assert.deepEqual(Object.keys(generatedPackage.scripts).sort(), ['publish-local-plan', 'start', 'stop']);
   assert.equal(result.workflowPath, join(target.destination, 'WORKFLOW.md'));
   assert.equal(result.notionBinding, 'not configured');
   assert.match(result.completionOutput, /Notion database URL: not configured/);
@@ -138,7 +138,7 @@ test('init uses only the current branch configured upstream and creates an indep
   const materializerIndex = bootstrap.indexOf('node "$LEESH_LOOP_RUNTIME_ROOT/operator/app/workspace-files.mjs" "$PWD"');
   assert.ok(cloneIndex >= 0, 'generated after_create must clone the configured repository');
   assert.ok(materializerIndex > cloneIndex, 'generated after_create must invoke the existing materializer after cloning');
-  assert.match(loopRuntime, /LEESH_LOOP_RUNTIME_ROOT: root/);
+  assert.match(loopRuntime, /environment\.LEESH_LOOP_RUNTIME_ROOT = runtimeRoot/);
   assert.match(bootstrap, /env PATH="\$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:\$PATH"/);
   assert.ok(files.includes('operator/notion_publisher/package-lock.json'));
   assert.ok(files.includes('operator/ui/package-lock.json'));
