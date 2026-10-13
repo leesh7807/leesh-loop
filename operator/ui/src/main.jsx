@@ -24,14 +24,71 @@ function TaskCard({ task, selected, onSelect }) {
         <span className="task-open-state">{task.state}</span>
       </button>
       <p className="task-identifier">{task.identifier}</p>
-      {task.blockedBy.length > 0 && (
-        <p className="task-blockers"><span>Blocked by</span> {task.blockedBy.map(blocker => `${blocker.title} · ${blocker.state}`).join(', ')}</p>
-      )}
+      {task.blockedBy.length > 0 && <BlockerSummary blockers={task.blockedBy} />}
       <div className="task-metadata">
         {task.priority !== null && <span>Priority {task.priority}</span>}
         {task.labels.map(label => <span key={label}>{label}</span>)}
       </div>
     </article>
+  );
+}
+
+function BlockerSummary({ blockers }) {
+  const visibleBlockers = blockers.slice(0, 2);
+  const remainingBlockers = blockers.slice(visibleBlockers.length);
+  return (
+    <div className="task-blockers">
+      <span className="task-blockers-count">Blocked by {blockers.length}</span>
+      <ul className="task-blocker-preview">
+        {visibleBlockers.map(blocker => <li key={blocker.taskId || blocker.id}>{blocker.title} · {blocker.state}</li>)}
+      </ul>
+      {remainingBlockers.length > 0 && (
+        <details className="all-blockers">
+          <summary>Show {remainingBlockers.length} more {remainingBlockers.length === 1 ? 'blocker' : 'blockers'}</summary>
+          <ul>{remainingBlockers.map(blocker => <li key={blocker.taskId || blocker.id}>{blocker.title} · {blocker.state}</li>)}</ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function BlockerOptions({ tasks, selectedItems, onToggle, disabled }) {
+  const [query, setQuery] = useState('');
+  const selectedIds = new Set(selectedItems.map(item => item.id));
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchingTasks = tasks.filter(task => !normalizedQuery || [task.title, task.identifier, task.state]
+    .some(value => String(value || '').toLowerCase().includes(normalizedQuery)));
+
+  return (
+    <>
+      <label className="blocker-search">
+        <span>Find a task by title, identifier, or State</span>
+        <input type="search" value={query} onChange={event => setQuery(event.target.value)} disabled={disabled} />
+      </label>
+      {matchingTasks.length ? (
+        <div className="blocker-options">
+          {matchingTasks.map(task => (
+            <label className="blocker-option" key={task.id}>
+              <input type="checkbox" checked={selectedIds.has(task.id)} disabled={disabled} onChange={() => onToggle(task)} />
+              <span>{task.title} <small>{task.identifier} · {task.state}</small></span>
+            </label>
+          ))}
+        </div>
+      ) : <p className="quiet">No tasks match this search.</p>}
+      {selectedItems.length > 0 && (
+        <details className="selected-blockers">
+          <summary>Review selected blockers · {selectedItems.length}</summary>
+          <ul>
+            {selectedItems.map(item => (
+              <li key={item.id}>
+                <span>{item.title} <small>{item.identifier} · {item.state}</small></span>
+                <button type="button" className="text-button" onClick={() => onToggle(item)} disabled={disabled}>Remove</button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </>
   );
 }
 
@@ -88,7 +145,7 @@ function TaskSurface({ tasks, selectedTaskId, loading, error, refreshedAt, onRet
   );
 }
 
-function PublicationSurface({ config, plan, state, selectedBlockers, publishing, onDraftChange, onRemoveBlocker, onReset, onPublished }) {
+function PublicationSurface({ config, plan, state, selectedBlockers, publishing, onDraftChange, onReset, onPublished }) {
   const [result, setResult] = useState(null);
 
   useEffect(() => {
@@ -139,19 +196,13 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
           <legend>Blocked By</legend>
           <p className="field-help">Choose tasks that must finish before this task can run.</p>
           {config.tasks.length ? (
-            <div className="blocker-options">
-              {config.tasks.map(task => {
-                const checked = selectedBlockers.some(value => value.taskId === task.id);
-                return (
-                  <label className="blocker-option" key={task.id}>
-                    <input type="checkbox" checked={checked} disabled={publishing} onChange={() => onDraftChange({ togglePublishBlocker: task })} />
-                    <span>{task.title} <small>{task.state}</small></span>
-                  </label>
-                );
-              })}
-            </div>
+            <BlockerOptions
+              tasks={config.tasks}
+              selectedItems={selectedBlockers.map(value => ({ id: value.taskId, title: value.title, identifier: value.identifier, state: value.state }))}
+              onToggle={task => onDraftChange({ togglePublishBlocker: task })}
+              disabled={publishing}
+            />
           ) : <p className="quiet">No existing tasks to select.</p>}
-          {selectedBlockers.length > 0 && <p className="selected-blockers-count">{selectedBlockers.length} selected</p>}
         </fieldset>
         <div className="publish-controls">
           <div>
@@ -295,10 +346,9 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
   if (loading && !task) return <section className="work-panel" aria-busy="true"><p className="empty-state">Loading task detail…</p></section>;
   if (!task) return <section className="work-panel"><button type="button" className="text-button" onClick={onBackToPublish}>Back to Plan publication</button><p className="inline-message failure" role="alert">{refreshError || 'Task detail is unavailable.'}</p><button type="button" className="text-button" onClick={refresh}>Try again</button></section>;
 
-  const blockerIds = new Set(blockerDraft);
   const availableBlockers = config.tasks.filter(value => value.id !== taskId);
-  const knownBlockerIds = new Set(availableBlockers.map(value => value.id));
-  const missingBlockers = blockerDraft.filter(id => !knownBlockerIds.has(id));
+  const selectedBlockerItems = blockerDraft.map(id => availableBlockers.find(value => value.id === id)
+    || { id, title: id, identifier: id, state: 'Unavailable' });
   const stateOptions = config.states.includes(task.state) ? config.states : [task.state, ...config.states];
 
   return (
@@ -320,10 +370,13 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       {refreshError && <p className="inline-message failure" role="status">Refresh failed. Showing the last successful detail. {refreshError}</p>}
       {message && <p className={`inline-message ${message.kind}`} role={message.kind === 'failure' ? 'alert' : 'status'}>{message.text}</p>}
 
-      <section className="detail-section" aria-labelledby="accepted-plan-heading">
-        <div className="section-title"><p className="eyebrow">Original input</p><h3 id="accepted-plan-heading">Accepted Plan</h3></div>
+      <details className="detail-section accepted-plan-section" aria-labelledby="accepted-plan-heading">
+        <summary className="section-title">
+          <span className="section-title-copy"><span className="eyebrow">Original input</span><h3 id="accepted-plan-heading">Accepted Plan</h3></span>
+          <span className="disclosure-hint">View original</span>
+        </summary>
         <pre className="long-text">{task.acceptedPlan}</pre>
-      </section>
+      </details>
 
       <section className="detail-section" aria-labelledby="workpad-heading">
         <div className="section-title"><p className="eyebrow">Worker record</p><h3 id="workpad-heading">Workpad</h3></div>
@@ -366,17 +419,14 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
           </div>
         </form>
         <form className="management-form" onSubmit={saveBlockers}>
-          <label>Blocked By</label>
-          {missingBlockers.map(id => <p className="quiet" key={id}>Existing blocker {id}</p>)}
-          {availableBlockers.length ? (
-            <div className="blocker-options">
-              {availableBlockers.map(value => (
-                <label className="blocker-option" key={value.id}>
-                  <input type="checkbox" checked={blockerIds.has(value.id)} onChange={() => setBlockerDraft(current => current.includes(value.id) ? current.filter(id => id !== value.id) : [...current, value.id])} disabled={saving === 'blockers'} />
-                  <span>{value.title} <small>{value.state}</small></span>
-                </label>
-              ))}
-            </div>
+          <span className="field-label">Blocked By</span>
+          {availableBlockers.length || selectedBlockerItems.length ? (
+            <BlockerOptions
+              tasks={availableBlockers}
+              selectedItems={selectedBlockerItems}
+              onToggle={value => setBlockerDraft(current => current.includes(value.id) ? current.filter(id => id !== value.id) : [...current, value.id])}
+              disabled={saving === 'blockers'}
+            />
           ) : <p className="quiet">No other tasks are available as blockers.</p>}
           <button type="submit" disabled={saving === 'blockers'}>{saving === 'blockers' ? 'Saving…' : 'Save Blocked By'}</button>
         </form>
@@ -504,7 +554,6 @@ function App() {
               const { publishing: _publishing, ...draftValues } = values;
               updateDraft(draftValues);
             }}
-            onRemoveBlocker={taskId => updateDraft({ selectedBlockers: selectedBlockers.filter(value => value.taskId !== taskId) })}
             onReset={resetDraft}
             onPublished={openPublishedTask}
           />

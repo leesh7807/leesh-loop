@@ -200,6 +200,10 @@ test('rendered UI source keeps Local task navigation, human review actions, and 
   assert.match(source, /Save State/);
   assert.match(source, /Save Blocked By/);
   assert.match(source, /Add comment/);
+  assert.match(source, /<details className="detail-section accepted-plan-section"/);
+  assert.match(source, /Find a task by title, identifier, or State/);
+  assert.match(source, /Review selected blockers/);
+  assert.match(source, /Show \{remainingBlockers.length\} more/);
   assert.doesNotMatch(source, /Notion|Symphony Dashboard|notionTasksUrl/);
   assert.match(styles, /@media \(max-width: 760px\)/);
   const colors = [...styles.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(match => match[0]);
