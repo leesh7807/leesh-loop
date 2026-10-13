@@ -335,7 +335,17 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       <section className="detail-section" aria-labelledby="comments-heading">
         <div className="section-title"><p className="eyebrow">Human input</p><h3 id="comments-heading">Comments</h3></div>
         {comments.length ? (
-          <ol className="record-list comment-list">{comments.map(comment => <li key={comment.id}><p className="record-meta">{comment.author} · {comment.createdAt} · {comment.id}</p><pre className="long-text">{comment.content}</pre></li>)}</ol>
+          <ol className="record-list comment-list">
+            {comments.map(comment => (
+              <li key={comment.id}>
+                <p className="record-meta">
+                  <span>{comment.author} · {comment.createdAt}</span>
+                  <code>{comment.id}</code>
+                </p>
+                <pre className="long-text">{comment.content}</pre>
+              </li>
+            ))}
+          </ol>
         ) : <p className="quiet">No comments yet.</p>}
         <form className="comment-form" onSubmit={addComment}>
           <label htmlFor="comment">Add a comment</label>
