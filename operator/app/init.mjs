@@ -4,7 +4,6 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { HOST_PREREQUISITES, listRuntimeSnapshotFiles, materializeRuntimeSnapshot } from './runtime-manifest.mjs';
 import { githubRepositoryTransport } from './github-repository-url.mjs';
-import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
 import { stringifyProjectConfiguration } from '../project-config.mjs';
 import { createInstallationMetadata, hashDistribution, readDistributionFiles, writeInstallationMetadata } from './installation-metadata.mjs';
 import { stringifyPackageLock } from './package-lock.mjs';
@@ -66,7 +65,6 @@ function generatedProject(target) {
     workflow_path: 'WORKFLOW.md',
     symphony_workspace_root: '.runtime/workspaces',
     state_directory: '.runtime/state',
-    task_store: 'notion',
     allow_workspace_root_inside_repository: true,
     github_repository_url: target.remoteUrl,
     github_base_branch: target.upstreamBranch,
@@ -96,8 +94,7 @@ function generatedProjectToml(project) {
     setting('github_repository_url'),
     setting('github_base_branch'),
     '',
-    '# Task data path for this Loop. Choose notion or local; default: notion.',
-    setting('task_store'),
+    '# Task data is stored in this Loop\'s Local Task Store under the runtime state directory.',
     '',
     '# Worker contract file. Relative paths use this project.toml directory.',
     setting('workflow_path'),
@@ -167,9 +164,7 @@ export function generatedWorkflow(template) {
   const configuration = [
     '---',
     'tracker:',
-    '  kind: notion',
-    '  provider:',
-    '    database_url: $LEESH_LOOP_NOTION_DATABASE_URL',
+    '  kind: local',
     '  active_states:',
     '    - Ready',
     '    - In Progress',
@@ -207,18 +202,11 @@ export function generatedWorkflow(template) {
   return `${configuration}\n\n${template.trim()}\n`;
 }
 
-const envExample = `# Configure in this Loop's process environment or copy this file to .env.
-# The Operator reads both values from the Loop process environment or its root .env.
-LEESH_LOOP_NOTION_DATABASE_URL=
-NOTION_TOKEN=
+const envExample = `# Task data uses this Loop's Local Task Store. No Task database credentials are required.
+# Configure chatgpt-shot separately with its own command and service settings.
 `;
 
-function completionOutput({ destination, project, workflowPath, notionBinding }) {
-  const notionStatus = notionBinding === 'not configured'
-    ? 'not configured'
-    : notionBinding.startsWith('configured in the init process')
-      ? 'available to init only; make it available to npm start too'
-      : 'found in this Loop’s root .env';
+function completionOutput({ destination, project, workflowPath }) {
   const lines = [
     'Leesh Loop is ready.',
     `Loop directory: ${destination}`,
@@ -226,14 +214,11 @@ function completionOutput({ destination, project, workflowPath, notionBinding })
     `Target base branch: ${project.github_base_branch}`,
     `Agent workflow: ${workflowPath}`,
     'Init built the root WORKFLOW.md from docs/WORKFLOW_TEMPLATE.md; the worker reads this contract for each task.',
-    `Notion database URL: ${notionStatus}`,
-    'Before npm start, make LEESH_LOOP_NOTION_DATABASE_URL and NOTION_TOKEN available in this Loop’s environment or root .env.',
+    `Local Task Store: ${project.state_directory || '.runtime/state'}/local-task-store/local-task-store.sqlite`,
+    'Task publication, Operator access, and Worker task tools use this Local Task Store; no Task database credentials are required.',
     'Host prerequisites:'
   ];
   for (const prerequisite of HOST_PREREQUISITES) lines.push(`  - ${prerequisite}`);
-  if (notionBinding === 'not configured') {
-    lines.push('The Notion database URL was not found. Add it before starting the Loop.');
-  }
   lines.push(
     'Loop settings are in the root project.toml; relative paths are resolved from that file.',
     'npm start prepares this Loop’s dependencies, checks its connections, and opens the Operator page.',
@@ -243,17 +228,6 @@ function completionOutput({ destination, project, workflowPath, notionBinding })
     '  npm start'
   );
   return lines.join('\n');
-}
-
-async function readNotionBinding(destination, environment) {
-  if (typeof environment.LEESH_LOOP_NOTION_DATABASE_URL === 'string' && environment.LEESH_LOOP_NOTION_DATABASE_URL.trim()) {
-    return 'configured in the init process environment; ensure npm start receives it too';
-  }
-  const envFileValue = await readRepositoryEnvironmentValue('LEESH_LOOP_NOTION_DATABASE_URL', {
-    environment: {},
-    envFile: join(destination, '.env')
-  });
-  return envFileValue ? 'configured in this Loop root .env' : 'not configured';
 }
 
 async function pathExists(path) {
@@ -295,15 +269,9 @@ export async function initLoop({ cwd = process.cwd(), sourceRoot, environment = 
 
     const projectPath = join(destination, 'project.toml');
     const generatedOperator = await import(pathToFileURL(join(destination, 'operator/app/leesh-loop.mjs')).href);
-    const projectReadback = await generatedOperator.loadConfig(projectPath, {
-      validateWorkspaceFileSources: true,
-      requireNotionDatabase: false,
-      environment,
-      envFile: join(destination, '.env')
-    });
+    const projectReadback = await generatedOperator.loadConfig(projectPath, { validateWorkspaceFileSources: true });
     const workflowPath = projectReadback.workflow_path;
-    const notionBinding = await readNotionBinding(destination, environment);
-    const output = completionOutput({ destination, project: projectReadback, workflowPath, notionBinding });
+    const output = completionOutput({ destination, project: projectReadback, workflowPath });
     await mkdir(join(destination, '.leesh-loop'), { mode: 0o700 });
     const runtimeDistributionId = hashDistribution(sourcePackage.version, await readDistributionFiles(destination, runtimeFiles));
     const workflowDistributionId = hashDistribution(sourcePackage.version, [['WORKFLOW.md', workflow, 0o644]]);
@@ -311,7 +279,7 @@ export async function initLoop({ cwd = process.cwd(), sourceRoot, environment = 
       runtime: { distributionId: runtimeDistributionId, managedFiles: runtimeFiles },
       workflow: { distributionId: workflowDistributionId, managedFiles: ['WORKFLOW.md'] }
     }));
-    return { destination, target, project: projectReadback, workflowPath, notionBinding, completionOutput: output };
+    return { destination, target, project: projectReadback, workflowPath, completionOutput: output };
   } catch (error) {
     try {
       await rm(destination, { recursive: true, force: true });

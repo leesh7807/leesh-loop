@@ -41,9 +41,7 @@ The `after_create` hook clones the configured repository before the agent starts
 
 The worker-facing review interface is `chatgpt-shot`. Use only `chatgpt-shot submit "<prompt>"` and `chatgpt-shot jobs <job-id>`. Do not start, stop, authenticate, repair, or otherwise manage the external Service.
 
-Use the task surface selected by this Loop for the Accepted Plan, Workpad, and State changes. Follow the repository-owned workflow or task instructions for Workpad language; if none exists, use the language of the task. Preserve code, commands, identifiers, paths, API names, and quotations verbatim where accuracy requires it. Use the bound-task tools advertised by Symphony rather than arbitrary provider access.
-
-For a Notion Loop, the bound-task tools are `notion_task_read`, `notion_task_read_workpad`, `notion_task_comments`, `notion_task_set_state`, and `notion_task_append_workpad`. For a Local Loop, the corresponding tools are `local_task_read`, `local_task_read_workpad`, `local_task_comments`, `local_task_set_state`, and `local_task_append_workpad`. Both routes bind reads and mutations to the current task; the Local tools use task IDs for Blocked By relations.
+Use the Local Task surface for the Accepted Plan, Workpad, State changes, and comments. Follow the repository-owned workflow or task instructions for Workpad language; if none exists, use the language of the task. Preserve code, commands, identifiers, paths, API names, and quotations verbatim where accuracy requires it. Use the bound Local task tools advertised by Symphony rather than direct SQLite access.
 
 If the task surface or its authentication is unavailable, it cannot record a Workpad entry or mutate its State. Do not invent a fallback mutation channel or claim a same-surface handoff occurred; end with the concrete external-access blocker.
 
@@ -51,12 +49,10 @@ If the task surface or its authentication is unavailable, it cannot record a Wor
 
 The bound worker session exposes:
 
-* `notion_task_publish_plan`: publish a complete Plan through the Notion Publisher with final State `Backlog`; the Publisher owns database binding, canonical representation, Identifier, Plan relation/content, locking, incomplete-publication handling, and validation, and returns canonical `identifier` and `page_id`.
-* `notion_task_add_blocked_by`: add a canonical blocker page to the bound Notion task's `Blocked By` relation while preserving existing blockers.
-* `local_task_publish_plan`: publish a complete Plan through the selected Local Publisher with final State `Backlog`; it returns the canonical `identifier` and Local task ID as `page_id`.
+* `local_task_publish_plan`: publish a complete Plan through the Local Publisher with final State `Backlog`; it returns the canonical `identifier` and Local task ID as `page_id`.
 * `local_task_add_blocked_by`: add a Local task ID to the bound task's `Blocked By` relation while preserving existing blockers.
 
-These are separate operations. Publication does not mutate the current task relation; Blocked By does not publish or edit Plan content. The current task comes from runtime binding, not worker input. Failures do not authorize worker-side fallback or arbitrary Notion management.
+These are separate operations. Publication does not mutate the current task relation; Blocked By does not publish or edit Plan content. The current task comes from runtime binding, not worker input. Failures do not authorize worker-side fallback or direct Store mutation.
 
 ## Repository state and delivery
 

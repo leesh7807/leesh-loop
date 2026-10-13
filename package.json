@@ -9,9 +9,8 @@
     "start": "node operator/app/leesh-loop.mjs start project.toml",
     "start:fast": "node operator/app/leesh-loop.mjs start project.toml --skip-external-readiness",
     "stop": "node operator/app/leesh-loop.mjs stop project.toml",
-    "e2e": "node e2e/cli.mjs run",
     "local-e2e": "node local-e2e/cli.mjs run",
     "publish-local-plan": "node operator/app/publish-local-plan.mjs project.toml",
-    "test": "node --test operator/app/test/init.test.mjs operator/app/test/instance_registry.test.mjs operator/app/test/operator_bootstrap.test.mjs operator/app/test/start_cli.test.mjs operator/app/test/update.test.mjs"
+    "test": "node --test operator/app/test/*.test.mjs operator/local_task_store/test/*.test.mjs operator/ui/test/*.test.js"
   }
 }

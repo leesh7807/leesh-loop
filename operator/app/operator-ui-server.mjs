@@ -1,12 +1,10 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http';
-import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
-import { basename, extname, join, resolve, sep } from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { pathToFileURL } from 'node:url';
-import { readRepositoryEnvironmentValue } from '../local-environment.mjs';
+import { readFile } from 'node:fs/promises';
+import { basename, extname, resolve, sep } from 'node:path';
 import { githubRepositoryDetails } from './github-repository-url.mjs';
+import { openLoopTaskStore } from './local-task-store-runtime.mjs';
+import { publishAcceptedPlan } from '../local_task_store/src/local-publisher.mjs';
 
 const MIME_TYPES = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -16,6 +14,13 @@ const MIME_TYPES = new Map([
   ['.json', 'application/json; charset=utf-8'],
   ['.svg', 'image/svg+xml'],
   ['.woff2', 'font/woff2']
+]);
+
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+export const WORKFLOW_STATES = Object.freeze([
+  'Backlog', 'Ready', 'In Progress', 'Human Review', 'Rework', 'Merging', 'Done', 'Cancelled'
 ]);
 
 export async function readRequestBody(request) {
@@ -31,101 +36,152 @@ function sendJson(response, status, value) {
   response.end(JSON.stringify(value));
 }
 
-async function collect(stream) {
-  const chunks = [];
-  for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  return Buffer.concat(chunks).toString('utf8');
+function errorStatus(error) {
+  if (error?.status) return error.status;
+  if (/^Task not found:/.test(error?.message || '')) return 404;
+  if (error instanceof TypeError || /^(a task cannot|publicationKey was already used|Task not found:)/.test(error?.message || '') || /FOREIGN KEY constraint failed/.test(error?.message || '')) return 400;
+  return 500;
 }
 
-async function publishPlan({ plan, state, blockedBy, config, root, stateDirectory, publisherConfigPath, notionToken }) {
-  await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
-  const temp = join(stateDirectory, `publish-${randomUUID()}.md`);
+function taskView(task, tasksById) {
+  return {
+    ...task,
+    blockedBy: task.blockedBy.map(taskId => {
+      const blocker = tasksById.get(taskId);
+      return blocker
+        ? { taskId, identifier: blocker.identifier, title: blocker.title, state: blocker.state }
+        : { taskId, identifier: taskId, title: taskId, state: 'Unavailable' };
+    })
+  };
+}
+
+function readTask(store, taskId) {
+  const task = store.getTask(taskId);
+  if (!task) throw Object.assign(new Error(`Task not found: ${taskId}`), { status: 404 });
+  return task;
+}
+
+function requireString(value, name, { allowEmpty = false } = {}) {
+  if (typeof value !== 'string' || (!allowEmpty && !value.trim())) throw Object.assign(new TypeError(`${name} must be a non-empty string`), { status: 400 });
+  return value;
+}
+
+function requireTaskIds(value, name) {
+  if (!Array.isArray(value) || value.some(id => typeof id !== 'string' || !id.trim())) {
+    throw Object.assign(new TypeError(`${name} must be a list of task IDs`), { status: 400 });
+  }
+  return value;
+}
+
+async function requestJson(request) {
+  const mediaType = request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase();
+  if (mediaType !== 'application/json') {
+    throw Object.assign(new Error('Content-Type must be application/json.'), { status: 415 });
+  }
+  try { return JSON.parse(await readRequestBody(request)); }
+  catch { throw Object.assign(new Error('Request body must be valid UTF-8 JSON.'), { status: 400 }); }
+}
+
+function requireLocalSameOriginMutation(request) {
+  const fetchSite = request.headers['sec-fetch-site'];
+  if (fetchSite && fetchSite !== 'same-origin') {
+    throw Object.assign(new Error('Cross-origin task changes are not allowed.'), { status: 403 });
+  }
+
+  const originHeader = request.headers.origin;
+  if (!originHeader) return;
+
+  let origin;
+  let requestOrigin;
   try {
-    await writeFile(temp, plan, { mode: 0o600 });
-    const args = [join(root, 'operator/notion_publisher/dist/src/cli.js'), '--plan', temp, '--config', publisherConfigPath, '--database-url', config.notion_database_url];
-    if (state !== '') args.push('--state', state);
-    if (blockedBy !== undefined) args.push('--blocked-by-json', JSON.stringify(blockedBy));
-    const env = { ...process.env };
-    if (notionToken) env.NOTION_TOKEN = notionToken;
-    const publisher = spawn(process.execPath, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env });
-    const output = collect(publisher.stdout), errors = collect(publisher.stderr);
-    const code = await new Promise((resolveExit, rejectExit) => {
-      publisher.once('error', rejectExit);
-      publisher.once('close', resolveExit);
-    });
-    const [stdout, stderr] = await Promise.all([output, errors]);
-    if (code !== 0) throw Object.assign(new Error(stderr.trim() || 'Publishing failed.'), { status: 400 });
-    try { return JSON.parse(stdout.trim()); }
-    catch { throw Object.assign(new Error('Publisher returned a successful response that the Operator could not read. Check Notion Tasks before retrying.'), { status: 502 }); }
-  } finally {
-    await rm(temp, { force: true });
+    origin = new URL(originHeader);
+    requestOrigin = new URL(`http://${request.headers.host}`);
+  } catch {
+    throw Object.assign(new Error('A valid same-origin request is required.'), { status: 403 });
+  }
+
+  if (origin.protocol !== 'http:' || !LOOPBACK_HOSTS.has(origin.hostname) || origin.origin !== requestOrigin.origin) {
+    throw Object.assign(new Error('Cross-origin task changes are not allowed.'), { status: 403 });
   }
 }
 
-export async function createOperatorUiServer({ root, config, stateDirectory, publisherConfigPath, loadTaskReader, publisherState, notionToken: configuredToken, runPublisher }) {
+export async function createOperatorUiServer({ root, config, stateDirectory, taskStore }) {
   const uiDirectory = resolve(root, 'operator/ui/dist');
-  const notionToken = configuredToken ?? await readRepositoryEnvironmentValue('NOTION_TOKEN');
-  let taskReaderPromise;
-  const getTaskReader = async () => {
-    if (!taskReaderPromise) {
-      taskReaderPromise = Promise.resolve().then(async () => {
-        if (!notionToken) throw new Error('missing NOTION_TOKEN: task read requires server-side Notion credentials');
-        return loadTaskReader(notionToken);
-      }).catch(error => { taskReaderPromise = undefined; throw error; });
-    }
-    return taskReaderPromise;
-  };
+  const store = taskStore || await openLoopTaskStore(stateDirectory);
 
   const server = createServer(async (request, response) => {
     const url = new URL(request.url || '/', 'http://127.0.0.1');
     try {
+      if (MUTATING_METHODS.has(request.method) && url.pathname.startsWith('/api/v1/')) {
+        requireLocalSameOriginMutation(request);
+      }
       if (request.method === 'GET' && url.pathname === '/api/v1/config') {
         const repository = githubRepositoryDetails(config.github_repository_url);
         sendJson(response, 200, {
-          states: publisherState.states,
-          defaultState: publisherState.defaultState,
+          states: WORKFLOW_STATES,
+          defaultState: 'Ready',
           githubRepositoryIdentity: repository.identity,
           githubRepositoryName: repository.name,
-          githubBrowserRepositoryUrl: repository.browserRepositoryUrl,
-          notionTasksUrl: config.notion_database_url,
-          dashboardUrl: `http://127.0.0.1:${Number(config.symphony_port || 4100)}`
+          githubBrowserRepositoryUrl: repository.browserRepositoryUrl
         });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/v1/tasks') {
-        try {
-          const reader = await getTaskReader();
-          sendJson(response, 200, { tasks: await reader.listTasks() });
-        } catch (error) {
-          sendJson(response, 503, { error: error instanceof Error ? error.message : 'Task refresh failed.' });
-        }
+        const tasks = store.listTasks();
+        const tasksById = new Map(tasks.map(task => [task.id, task]));
+        sendJson(response, 200, { tasks: tasks.map(task => taskView(task, tasksById)) });
         return;
       }
+      const taskRoute = url.pathname.match(/^\/api\/v1\/tasks\/([^/]+)(?:\/(state|blocked-by|comments))?$/);
+      if (taskRoute) {
+        let taskId;
+        try { taskId = decodeURIComponent(taskRoute[1]); }
+        catch { throw Object.assign(new Error('Task ID is malformed.'), { status: 400 }); }
+        const operation = taskRoute[2];
+        if (request.method === 'GET' && !operation) {
+          const task = readTask(store, taskId);
+          sendJson(response, 200, {
+            task,
+            workpad: store.listRecords(taskId, { kind: 'workpad' }),
+            comments: store.listRecords(taskId, { kind: 'comment' })
+          });
+          return;
+        }
+        if (request.method === 'PUT' && operation === 'state') {
+          const submitted = await requestJson(request);
+          const state = requireString(submitted?.state, 'State');
+          const task = store.updateTask(taskId, { state });
+          sendJson(response, 200, { task });
+          return;
+        }
+        if (request.method === 'PUT' && operation === 'blocked-by') {
+          const submitted = await requestJson(request);
+          const blockedBy = requireTaskIds(submitted?.blockedBy, 'Blocked By');
+          store.setBlockedBy(taskId, blockedBy);
+          sendJson(response, 200, { task: readTask(store, taskId) });
+          return;
+        }
+        if (request.method === 'POST' && operation === 'comments') {
+          const submitted = await requestJson(request);
+          const content = requireString(submitted?.content, 'Comment');
+          const comment = store.appendComment(taskId, content, 'user');
+          sendJson(response, 201, { comment });
+          return;
+        }
+        throw Object.assign(new Error('Method not allowed.'), { status: 405 });
+      }
       if (request.method === 'POST' && url.pathname === '/api/v1/publish') {
-        let submitted;
-        try { submitted = JSON.parse(await readRequestBody(request)); }
-        catch { sendJson(response, 400, { error: 'Plan request body must be valid UTF-8 JSON.' }); return; }
-        if (!submitted || typeof submitted.plan !== 'string' || typeof submitted.state !== 'string') {
-          sendJson(response, 400, { error: 'Plan and publication State must be strings.' });
-          return;
-        }
-        if (submitted.blockedBy !== undefined && (!Array.isArray(submitted.blockedBy) || submitted.blockedBy.some(id => typeof id !== 'string' || !id.trim()))) {
-          sendJson(response, 400, { error: 'Blocked By must be a list of task identities.' });
-          return;
-        }
-        const publishInput = {
-          plan: submitted.plan,
-          state: submitted.state,
-          ...(submitted.blockedBy === undefined ? {} : { blockedBy: submitted.blockedBy })
-        };
-        try {
-          const publication = await (runPublisher
-            ? runPublisher(publishInput)
-            : publishPlan({ ...publishInput, config, root, stateDirectory, publisherConfigPath, notionToken }));
-          sendJson(response, 200, publication);
-        } catch (error) {
-          sendJson(response, error?.status || 500, { error: error instanceof Error ? error.message : 'Publishing failed.' });
-        }
+        const submitted = await requestJson(request);
+        const plan = requireString(submitted?.plan, 'Plan');
+        const state = requireString(submitted?.state, 'State');
+        const blockedBy = submitted?.blockedBy === undefined ? [] : requireTaskIds(submitted.blockedBy, 'Blocked By');
+        const publication = publishAcceptedPlan(store, plan, { state, blockedBy });
+        sendJson(response, 201, {
+          identifier: publication.identifier,
+          page_id: publication.page_id,
+          state: publication.state,
+          task: publication.task
+        });
         return;
       }
       if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -143,10 +199,11 @@ export async function createOperatorUiServer({ root, config, stateDirectory, pub
       response.end(request.method === 'HEAD' ? undefined : body);
     } catch (error) {
       if (error?.code === 'ENOENT' || error instanceof URIError) { response.statusCode = 404; response.end(); return; }
-      if (!response.headersSent) sendJson(response, 500, { error: error instanceof Error ? error.message : 'Operator UI request failed.' });
+      if (!response.headersSent) sendJson(response, errorStatus(error), { error: error instanceof Error ? error.message : 'Operator UI request failed.' });
       else response.destroy(error);
     }
   });
+  server.once('close', () => { if (!taskStore) store.close(); });
   return server;
 }
 
@@ -156,34 +213,6 @@ export async function startOperatorUiServer(options) {
   return server;
 }
 
-export async function loadPublisherUiState(root) {
-  const publisherRoot = join(root, 'operator/notion_publisher');
-  const configModule = await import(pathToFileURL(join(publisherRoot, 'dist/src/config.js')).href);
-  const core = await import(pathToFileURL(join(publisherRoot, 'dist/src/core.js')).href);
-  const { policy } = await configModule.loadConfig(join(publisherRoot, 'examples/publisher-config.json'));
-  return { states: policy.stateSeeds, defaultState: core.PUBLISHER_READY_STATE };
-}
-
-export async function loadPublisherTaskReader(root, databaseUrl, notionToken) {
-  const publisherRoot = join(root, 'operator/notion_publisher');
-  const [{ policy }, notionModule, readerModule] = await Promise.all([
-    import(pathToFileURL(join(publisherRoot, 'dist/src/config.js')).href).then(configModule => configModule.loadConfig(join(publisherRoot, 'examples/publisher-config.json'))),
-    import(pathToFileURL(join(publisherRoot, 'dist/src/notion.js')).href),
-    import(pathToFileURL(join(publisherRoot, 'dist/src/task-reader.js')).href)
-  ]);
-  return new readerModule.NotionTaskReader(new notionModule.NotionClient(notionToken), databaseUrl, policy);
-}
-
 export async function defaultOperatorUiDependencies(root, config, stateDirectory) {
-  const publisherRoot = join(root, 'operator/notion_publisher');
-  const publisherConfigPath = join(publisherRoot, 'examples/publisher-config.json');
-  const publisherState = await loadPublisherUiState(root);
-  return {
-    root,
-    config,
-    stateDirectory,
-    publisherConfigPath,
-    publisherState,
-    loadTaskReader: notionToken => loadPublisherTaskReader(root, config.notion_database_url, notionToken)
-  };
+  return { root, config, stateDirectory };
 }

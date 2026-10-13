@@ -11,7 +11,6 @@ const operatorRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export async function publishLocalPlan({ projectFile, planPath, state = 'Ready', blockedBy = [] }) {
   if (!projectFile || !planPath) throw new Error('usage: publish-local-plan PROJECT.toml --plan PATH [--state STATE] [--blocked-by-json JSON]');
   const project = await readProjectConfiguration(resolve(projectFile));
-  if (project.task_store !== 'local') throw new Error('project.toml must set task_store = "local" to publish through the Local Task Store');
   const stateDirectory = project.state_directory || join(operatorRoot, '.runtime');
   const plan = await readFile(resolve(planPath), 'utf8');
   const store = await openLoopTaskStore(stateDirectory);

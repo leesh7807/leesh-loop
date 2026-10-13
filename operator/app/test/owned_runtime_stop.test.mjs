@@ -187,7 +187,7 @@ test('Operator start reconciliation retains ownership when the recorded runtime 
   await mkdir(stateDirectory, { recursive: true });
   await writeFile(join(stateDirectory, 'runtime.json'), JSON.stringify(runtimeState));
   await writeFile(join(stateDirectory, 'ownership.json'), JSON.stringify(ownershipState));
-  const env = { ...process.env, LEESH_LOOP_NOTION_DATABASE_URL: 'https://notion.example/database' };
+  const env = { ...process.env };
 
   await assert.rejects(execFileAsync(process.execPath, [cli, 'start', configPath], { env, timeout: 10_000 }), error => {
     assert.match(error.stderr, /run-owned Symphony runtime runtime-to-reconcile still responds after stop/);
@@ -209,7 +209,7 @@ test('Operator stop retains ownership when the recorded runtime still responds',
   await mkdir(stateDirectory, { recursive: true });
   await writeFile(join(stateDirectory, 'runtime.json'), JSON.stringify(runtimeState));
   await writeFile(join(stateDirectory, 'ownership.json'), JSON.stringify(ownershipState));
-  const env = { ...process.env, LEESH_LOOP_NOTION_DATABASE_URL: 'https://notion.example/database' };
+  const env = { ...process.env };
 
   await assert.rejects(execFileAsync(process.execPath, [cli, 'stop', configPath], { env, timeout: 10_000 }), error => {
     assert.match(error.stderr, /run-owned Symphony runtime runtime-to-stop still responds after stop/);

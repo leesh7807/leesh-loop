@@ -1,19 +1,47 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
-import { execFile as execute } from 'node:child_process';
-import { promisify } from 'node:util';
-import { createOperatorUiServer, readRequestBody } from '../operator-ui-server.mjs';
-import { effective, ensurePublisher, loadConfig as loadOperatorConfig, openProjectSurfaces, projectSurfaces, projectWindowNeedsOpening, uiIdentity, uiRuntimeSourceFiles } from '../leesh-loop.mjs';
-import { stringifyProjectConfiguration } from '../../project-config.mjs';
+import { createOperatorUiServer, readRequestBody, WORKFLOW_STATES } from '../operator-ui-server.mjs';
+import { openLocalTaskStore } from '../../local_task_store/src/local-task-store.mjs';
 
-const execFile = promisify(execute);
 const root = resolve(import.meta.dirname, '../../..');
-const cli = join(root, 'operator/app/leesh-loop.mjs');
-const databaseUrl = 'https://notion.example/project-surface-test';
+
+async function listen(server) {
+  await new Promise((resolveListen, rejectListen) => {
+    server.once('error', rejectListen);
+    server.listen(0, '127.0.0.1', resolveListen);
+  });
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
+async function testServer(t) {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-operator-test-'));
+  const store = await openLocalTaskStore(join(directory, 'local-task-store.sqlite'));
+  const server = await createOperatorUiServer({
+    root,
+    config: { github_repository_url: 'https://github.com/example/project.git' },
+    stateDirectory: join(directory, 'state'),
+    taskStore: store
+  });
+  const base = await listen(server);
+  t.after(async () => {
+    await new Promise(resolveClose => server.close(resolveClose));
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  return base;
+}
+
+async function request(base, path, options) {
+  const response = await fetch(`${base}${path}`, options);
+  return { response, body: await response.json() };
+}
+
+function json(method, value) {
+  return { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) };
+}
 
 test('request decoding preserves Unicode across byte chunk boundaries', async () => {
   const plan = '# 한국어 😀 café — 𐐷\nentity text: &#x1F600; & <tag>';
@@ -31,267 +59,158 @@ test('request decoding preserves Unicode across byte chunk boundaries', async ()
   );
 });
 
-test('runtime details navigation uses a secondary, user-facing label', async () => {
+test('Operator exposes one Local Task Store configuration with no Notion Task links', async t => {
+  const base = await testServer(t);
+  const { response, body } = await request(base, '/api/v1/config');
+  assert.equal(response.status, 200);
+  assert.equal(body.defaultState, 'Ready');
+  assert.deepEqual(body.states, WORKFLOW_STATES);
+  assert.equal(body.githubRepositoryName, 'project');
+  assert.equal(body.githubBrowserRepositoryUrl, 'https://github.com/example/project');
+  assert.equal(Object.hasOwn(body, 'notionTasksUrl'), false);
+  assert.equal(Object.hasOwn(body, 'dashboardUrl'), false);
+  assert.deepEqual((await request(base, '/api/v1/tasks')).body.tasks, []);
+});
+
+test('Operator publication, ordered records, State, and Blocked By use Local Publisher and Store boundaries', async t => {
+  const base = await testServer(t);
+  const blockerPlan = '# 2026-10-13-smoke-blocker\n\n## Objective\n\nA Local blocker.';
+  const plan = '# 2026-10-13-smoke-review\n\n## Objective\n\nA review task with Korean content: 확인합니다.';
+  const blockerPublication = await request(base, '/api/v1/publish', json('POST', {
+    plan: blockerPlan, state: 'Backlog', blockedBy: []
+  }));
+  assert.equal(blockerPublication.response.status, 201);
+  const blockerId = blockerPublication.body.page_id;
+  const publication = await request(base, '/api/v1/publish', json('POST', {
+    plan, state: 'Ready', blockedBy: [blockerId]
+  }));
+  assert.equal(publication.response.status, 201);
+  assert.equal(publication.body.task.acceptedPlan, plan);
+  assert.equal(publication.body.task.title, '2026-10-13-smoke-review');
+  const taskId = publication.body.page_id;
+
+  const list = await request(base, '/api/v1/tasks');
+  const listed = list.body.tasks.find(task => task.id === taskId);
+  assert.equal(listed.blockedBy[0].taskId, blockerId);
+  assert.equal(listed.blockedBy[0].title, '2026-10-13-smoke-blocker');
+  assert.equal(listed.blockedBy[0].state, 'Backlog');
+
+  const detail = await request(base, `/api/v1/tasks/${taskId}`);
+  assert.equal(detail.body.task.acceptedPlan, plan);
+  assert.deepEqual(detail.body.workpad, []);
+  assert.deepEqual(detail.body.comments, []);
+
+  const comment1 = await request(base, `/api/v1/tasks/${taskId}/comments`, json('POST', { content: '첫 검토 입력입니다.' }));
+  const comment2 = await request(base, `/api/v1/tasks/${taskId}/comments`, json('POST', { content: 'Second review input.' }));
+  assert.equal(comment1.response.status, 201);
+  assert.equal(comment2.response.status, 201);
+  const comments = (await request(base, `/api/v1/tasks/${taskId}`)).body.comments;
+  assert.deepEqual(comments.map(comment => comment.id), [comment1.body.comment.id, comment2.body.comment.id]);
+  assert.deepEqual(comments.map(comment => comment.content), ['첫 검토 입력입니다.', 'Second review input.']);
+
+  const state = await request(base, `/api/v1/tasks/${taskId}/state`, json('PUT', { state: 'Human Review' }));
+  assert.equal(state.body.task.state, 'Human Review');
+  const blockers = await request(base, `/api/v1/tasks/${taskId}/blocked-by`, json('PUT', { blockedBy: [] }));
+  assert.deepEqual(blockers.body.task.blockedBy, []);
+  assert.equal((await request(base, `/api/v1/tasks/${taskId}`)).body.task.acceptedPlan, plan);
+
+  const invalid = await request(base, `/api/v1/tasks/${taskId}/blocked-by`, json('PUT', { blockedBy: ['missing-task-id'] }));
+  assert.equal(invalid.response.status, 400);
+  assert.deepEqual((await request(base, `/api/v1/tasks/${taskId}`)).body.task.blockedBy, []);
+  const selfBlocked = await request(base, `/api/v1/tasks/${taskId}/blocked-by`, json('PUT', { blockedBy: [taskId] }));
+  assert.equal(selfBlocked.response.status, 400);
+  assert.equal((await request(base, `/api/v1/tasks/${taskId}`)).body.task.state, 'Human Review');
+});
+
+test('failed publication and missing detail remain explicit', async t => {
+  const base = await testServer(t);
+  const badPlan = await request(base, '/api/v1/publish', json('POST', { plan: 'No H1', state: 'Ready' }));
+  assert.equal(badPlan.response.status, 400);
+  assert.match(badPlan.body.error, /H1/);
+  const missing = await request(base, '/api/v1/tasks/missing-task-id');
+  assert.equal(missing.response.status, 404);
+});
+
+test('Local Task mutations reject cross-origin browser requests and non-JSON bodies', async t => {
+  const base = await testServer(t);
+  const plan = '# 2026-10-13-operator-origin-check\n\n## Objective\n\nKeep browser writes on the Local Operator origin.';
+  const publication = await request(base, '/api/v1/publish', json('POST', { plan, state: 'Ready' }));
+  assert.equal(publication.response.status, 201);
+  const taskId = publication.body.page_id;
+  const crossOrigin = {
+    origin: 'https://attacker.example',
+    'sec-fetch-site': 'cross-site'
+  };
+
+  const crossOriginPublish = await request(base, '/api/v1/publish', {
+    method: 'POST',
+    headers: { ...crossOrigin, 'content-type': 'text/plain' },
+    body: JSON.stringify({ plan: '# 2026-10-13-cross-origin\n\nUnauthorized task.', state: 'Ready' })
+  });
+  assert.equal(crossOriginPublish.response.status, 403);
+
+  const crossOriginComment = await request(base, `/api/v1/tasks/${taskId}/comments`, {
+    method: 'POST',
+    headers: { ...crossOrigin, 'content-type': 'text/plain' },
+    body: JSON.stringify({ content: 'Unauthorized comment.' })
+  });
+  assert.equal(crossOriginComment.response.status, 403);
+
+  const crossOriginState = await request(base, `/api/v1/tasks/${taskId}/state`, {
+    ...json('PUT', { state: 'Human Review' }),
+    headers: { ...crossOrigin, 'content-type': 'application/json' }
+  });
+  assert.equal(crossOriginState.response.status, 403);
+
+  const crossOriginBlocker = await request(base, `/api/v1/tasks/${taskId}/blocked-by`, {
+    ...json('PUT', { blockedBy: [] }),
+    headers: { ...crossOrigin, 'content-type': 'application/json' }
+  });
+  assert.equal(crossOriginBlocker.response.status, 403);
+
+  const nonJsonComment = await request(base, `/api/v1/tasks/${taskId}/comments`, {
+    method: 'POST',
+    headers: { origin: base, 'content-type': 'text/plain' },
+    body: JSON.stringify({ content: 'Wrong media type.' })
+  });
+  assert.equal(nonJsonComment.response.status, 415);
+
+  const unchanged = await request(base, `/api/v1/tasks/${taskId}`);
+  assert.equal((await request(base, '/api/v1/tasks')).body.tasks.length, 1);
+  assert.equal(unchanged.body.task.state, 'Ready');
+  assert.deepEqual(unchanged.body.task.blockedBy, []);
+  assert.deepEqual(unchanged.body.comments, []);
+
+  const sameOriginState = await request(base, `/api/v1/tasks/${taskId}/state`, {
+    ...json('PUT', { state: 'Human Review' }),
+    headers: { origin: base, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' }
+  });
+  assert.equal(sameOriginState.response.status, 200);
+  assert.equal(sameOriginState.body.task.state, 'Human Review');
+});
+
+test('rendered UI source keeps Local task navigation, human review actions, and grayscale responsive styles', async () => {
   const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
   const styles = await readFile(join(root, 'operator/ui/src/style.css'), 'utf8');
-  assert.match(source, /className="runtime-details"[^>]*>Runtime details ↗/);
-  assert.match(styles, /\.related-work \.runtime-details \{ color: #73736d; font-size: \.75rem; \}/);
-  assert.doesNotMatch(source, /Symphony Dashboard/);
-});
-
-test('Project presentation uses the configured repository name, browser URL, and tab title', async () => {
-  const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
-  const html = await readFile(join(root, 'operator/ui/index.html'), 'utf8');
-  assert.match(source, /document\.title = `\$\{config\.githubRepositoryName\} · Loop`/);
-  assert.match(source, /<h1>\{config\?\.githubRepositoryName \|\| 'Project work'\}<\/h1>/);
-  assert.match(source, /href=\{config\.githubBrowserRepositoryUrl\}/);
-  assert.doesNotMatch(source, /href=\{config\.githubRepositoryUrl\}/);
-  assert.match(html, /<title>Loop<\/title>/);
-});
-
-test('Publisher preparation keeps build output off the Operator JSON stdout channel', async () => {
-  const moduleUrl = new URL('../leesh-loop.mjs', import.meta.url).href;
-  const source = `import { ensurePublisher } from ${JSON.stringify(moduleUrl)}; ensurePublisher(); console.log(JSON.stringify({ ready: true }));`;
-  const { stdout } = await execFile(process.execPath, ['--input-type=module', '-e', source], { cwd: root });
-  assert.equal(stdout.trim(), '{"ready":true}');
-});
-
-test('task refresh errors do not own or block the independent publication route', async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-ui-api-'));
-  const calls = [];
-  let reads = 0;
-  const server = await createOperatorUiServer({
-    root,
-    config: { github_repository_url: 'https://github.com/example/project.git', notion_database_url: 'https://www.notion.so/example', ui_port: 4310, symphony_port: 4100 },
-    stateDirectory: directory,
-    publisherConfigPath: join(root, 'operator/notion_publisher/examples/publisher-config.json'),
-    publisherState: { states: ['Backlog', 'Ready', 'Human Review'], defaultState: 'Ready' },
-    notionToken: 'server-only-fixture-token',
-    loadTaskReader: async token => {
-      assert.equal(token, 'server-only-fixture-token');
-      return { listTasks: async () => {
-        reads += 1;
-        if (reads === 2) throw new Error('temporary Notion read failure');
-        return [{ title: reads === 1 ? 'Last successful task' : 'Recovered task', state: 'Backlog', blockedBy: [], priority: 3, labels: [], identifier: 'PLAN-EXAMPLE', taskUrl: 'https://www.notion.so/task', planUrl: 'https://www.notion.so/plan' }];
-      } };
-    },
-    runPublisher: async input => { calls.push(input); return { identifier: 'PLAN-PUBLISHED', state: input.state || 'Ready', url: 'https://www.notion.so/published' }; }
-  });
-  server.listen(0, '127.0.0.1');
-  await new Promise((resolveListen, rejectListen) => { server.once('listening', resolveListen); server.once('error', rejectListen); });
-  t.after(() => new Promise(resolveClose => { server.closeAllConnections(); server.close(resolveClose); }));
-  const address = server.address();
-  const base = `http://127.0.0.1:${address.port}`;
-
-  const config = await fetch(`${base}/api/v1/config`).then(response => response.json());
-  assert.deepEqual(config.states, ['Backlog', 'Ready', 'Human Review']);
-  assert.equal(config.defaultState, 'Ready');
-  assert.equal(config.githubRepositoryIdentity, 'example/project');
-  assert.equal(config.githubRepositoryName, 'project');
-  assert.equal(config.githubBrowserRepositoryUrl, 'https://github.com/example/project');
-  assert.equal(Object.hasOwn(config, 'githubRepositoryUrl'), false);
-  assert.equal(config.dashboardUrl, 'http://127.0.0.1:4100');
-
-  const first = await fetch(`${base}/api/v1/tasks`);
-  assert.equal(first.status, 200);
-  assert.equal((await first.json()).tasks[0].title, 'Last successful task');
-  const failed = await fetch(`${base}/api/v1/tasks`);
-  assert.equal(failed.status, 503);
-  assert.match((await failed.json()).error, /temporary Notion read failure/);
-
-  const publication = await fetch(`${base}/api/v1/publish`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ plan: '# Keep this Plan\n\n## Work', state: 'Human Review', blockedBy: ['task-a', 'task-b'] })
-  });
-  assert.equal(publication.status, 200);
-  assert.equal((await publication.json()).identifier, 'PLAN-PUBLISHED');
-  assert.deepEqual(calls, [{ plan: '# Keep this Plan\n\n## Work', state: 'Human Review', blockedBy: ['task-a', 'task-b'] }]);
-
-  const invalidBlockers = await fetch(`${base}/api/v1/publish`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ plan: '# Invalid blocker list', state: 'Ready', blockedBy: ['task-a', 2] })
-  });
-  assert.equal(invalidBlockers.status, 400);
-  assert.equal(calls.length, 1);
-
-  const withoutBlockers = await fetch(`${base}/api/v1/publish`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ plan: '# Keep the old path', state: '' })
-  });
-  assert.equal(withoutBlockers.status, 200);
-  assert.deepEqual(calls[1], { plan: '# Keep the old path', state: '' });
-
-  const recovered = await fetch(`${base}/api/v1/tasks`);
-  assert.equal(recovered.status, 200);
-  assert.equal((await recovered.json()).tasks[0].title, 'Recovered task');
-});
-
-test('the desktop browser path opens only the Operator UI', { concurrency: false }, async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-browser-'));
-  const bin = join(directory, 'bin');
-  const log = join(directory, 'openers.log');
-  await writeFile(join(directory, 'xdg-open'), `#!/bin/sh\nprintf 'xdg-open %s\\n' "$1" >> "$LEESH_LOOP_TEST_LOG"\ncase "$1" in *43445*) sleep 2;; *43446*) exit 7;; *43447*) kill -TERM $$;; esac\n`);
-  await writeFile(join(directory, 'override'), `#!/bin/sh\nprintf 'override %s\\n' "$*" >> "$LEESH_LOOP_TEST_LOG"\n`);
-  await mkdir(bin);
-  await writeFile(join(bin, 'xdg-open'), await readFile(join(directory, 'xdg-open')));
-  await writeFile(join(bin, 'override'), await readFile(join(directory, 'override')));
-  await Promise.all([chmod(join(bin, 'xdg-open'), 0o755), chmod(join(bin, 'override'), 0o755)]);
-  const originalPath = process.env.PATH;
-  const originalLog = process.env.LEESH_LOOP_TEST_LOG;
-  const originalOverride = process.env.LEESH_LOOP_BROWSER_COMMAND;
-  process.env.PATH = `${bin}:${originalPath}`;
-  process.env.LEESH_LOOP_TEST_LOG = log;
-  delete process.env.LEESH_LOOP_BROWSER_COMMAND;
-  t.after(() => {
-    process.env.PATH = originalPath;
-    if (originalLog === undefined) delete process.env.LEESH_LOOP_TEST_LOG; else process.env.LEESH_LOOP_TEST_LOG = originalLog;
-    if (originalOverride === undefined) delete process.env.LEESH_LOOP_BROWSER_COMMAND; else process.env.LEESH_LOOP_BROWSER_COMMAND = originalOverride;
-  });
-
-  assert.deepEqual(projectSurfaces({ ui_port: 43445, notion_database_url: 'https://notion.example' }, 'http://dashboard.example'), ['http://127.0.0.1:43445']);
-  const started = Date.now();
-  await openProjectSurfaces({ ui_port: 43445, notion_database_url: 'https://notion.example', browser_acknowledgement_timeout_ms: 80 }, 'http://dashboard.example/hang');
-  assert.ok(Date.now() - started < 500, 'a running xdg-open is a successful handoff after the acknowledgement bound');
-  let lines = (await readFile(log, 'utf8')).trim().split('\n');
-  assert.deepEqual(lines, ['xdg-open http://127.0.0.1:43445']);
-
-  await assert.rejects(openProjectSurfaces({ ui_port: 43446, browser_acknowledgement_timeout_ms: 80 }, 'http://dashboard.example'), /exited with status 7/);
-  await assert.rejects(openProjectSurfaces({ ui_port: 43447, browser_acknowledgement_timeout_ms: 80 }, 'http://dashboard.example'), /terminated by SIGTERM/);
-  process.env.PATH = directory;
-  await assert.rejects(openProjectSurfaces({ ui_port: 43448 }, 'http://dashboard.example'), /could not launch xdg-open/);
-  process.env.PATH = `${bin}:${originalPath}`;
-  process.env.LEESH_LOOP_BROWSER_COMMAND = 'override';
-  await openProjectSurfaces({ ui_port: 43449 }, 'http://dashboard.example');
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    lines = (await readFile(log, 'utf8')).trim().split('\n');
-    if (lines.some(line => line.startsWith('override '))) break;
-    await new Promise(done => setTimeout(done, 10));
-  }
-  lines = (await readFile(log, 'utf8')).trim().split('\n');
-  assert.equal(lines.filter(line => line.startsWith('override ')).length, 1);
-  assert.equal(lines.at(-1), 'override http://127.0.0.1:43449');
-});
-
-test('a prior multi-surface startup marker does not suppress the new Operator UI surface', () => {
-  assert.equal(projectWindowNeedsOpening({ project_window_opened_at: '2026-09-26T00:00:00.000Z' }), true);
-  assert.equal(projectWindowNeedsOpening({ project_window_surfaces: ['operator-ui-v1'] }), false);
-});
-
-test('Operator UI reuse identity follows imported modules and served Publisher/UI artifacts', () => {
-  const sources = new Set(uiRuntimeSourceFiles().map(path => path.replaceAll('\\', '/')));
-  assert.ok(sources.has(`${root}/operator/local-environment.mjs`));
-  assert.ok(sources.has(`${root}/operator/app/operator-ui-server.mjs`));
-  assert.ok([...sources].some(path => path.endsWith('/operator/notion_publisher/dist/src/task-reader.js')));
-  assert.ok([...sources].some(path => path.endsWith('/operator/ui/dist/index.html')));
-  assert.equal(uiIdentity({ notion_database_url: 'https://notion.example/db', ui_port: 4310, symphony_port: 4101 }).dashboard_port, 4101);
-});
-
-test('start reuses compatible runtimes, explains incompatible settings, and opens the Operator UI once', async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-surface-policy-'));
-  const stateDirectory = join(directory, 'state');
-  const workspaceRoot = join(directory, 'workspaces');
-  const configPath = join(directory, 'project.toml');
-  const runtimeId = 'surface-policy-runtime';
-  const dashboardServer = createServer((request, response) => {
-    if (request.url === '/api/v1/runtime') {
-      response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify({ pid: process.pid, runtime_id: runtimeId, dispatch_capable: true }));
-      return;
-    }
-    response.statusCode = 404;
-    response.end();
-  });
-  await new Promise(resolveListen => dashboardServer.listen(0, '127.0.0.1', resolveListen));
-  const dashboardPort = dashboardServer.address().port;
-  const temporaryUiServer = createServer();
-  await new Promise(resolveListen => temporaryUiServer.listen(0, '127.0.0.1', resolveListen));
-  const uiPort = temporaryUiServer.address().port;
-  await new Promise(resolveClose => temporaryUiServer.close(resolveClose));
-
-  const browserLog = join(directory, 'browser-dispatch.log');
-  const browserCommand = join(directory, 'browser-test-double');
-  await writeFile(browserCommand, '#!/bin/sh\nprintf \'%s\\n\' "$@" >> "$LEESH_LOOP_TEST_BROWSER_LOG"\n');
-  await chmod(browserCommand, 0o755);
-  const project = {
-    workflow_path: join(root, 'WORKFLOW.md'),
-    symphony_workspace_root: workspaceRoot,
-    github_repository_url: 'https://github.com/example/repository.git',
-    github_base_branch: 'main',
-    open_project_surfaces: false,
-    state_directory: stateDirectory,
-    symphony_port: dashboardPort,
-    ui_port: uiPort,
-    workspace_files: []
-  };
-  await writeFile(configPath, stringifyProjectConfiguration(project));
-  const config = await loadOperatorConfig(configPath, {
-    environment: { LEESH_LOOP_NOTION_DATABASE_URL: databaseUrl },
-    envFile: join(directory, 'missing.env')
-  });
-  const acknowledgementPath = join(stateDirectory, 'dispatch-acknowledgement.json');
-  await mkdir(stateDirectory, { recursive: true });
-  await writeFile(acknowledgementPath, JSON.stringify({ runtime_id: runtimeId, pid: process.pid, dispatch_capable: true }));
-  const running = {
-    status: 'running',
-    runtime_id: runtimeId,
-    pid: process.pid,
-    effective: effective(config, runtimeId, dashboardPort),
-    acknowledgement_path: acknowledgementPath
-  };
-  await writeFile(join(stateDirectory, 'runtime.json'), JSON.stringify(running));
-  const environment = {
-    ...process.env,
-    LEESH_LOOP_NOTION_DATABASE_URL: databaseUrl,
-    LEESH_LOOP_BROWSER_COMMAND: browserCommand,
-    LEESH_LOOP_TEST_BROWSER_LOG: browserLog
-  };
-  t.after(async () => {
-    dashboardServer.close();
-    await rm(join(stateDirectory, 'runtime.json'), { force: true });
-    await execFile(process.execPath, [cli, 'stop', configPath], { env: environment }).catch(() => {});
-    await rm(directory, { recursive: true, force: true });
-  });
-
-  const disabledStart = await execFile(process.execPath, [cli, 'start', configPath], { env: environment, timeout: 60_000 });
-  assert.equal(JSON.parse(disabledStart.stdout).reused, true);
-  await assert.rejects(readFile(browserLog, 'utf8'), { code: 'ENOENT' });
-  const disabledState = JSON.parse(await readFile(join(stateDirectory, 'runtime.json'), 'utf8'));
-  assert.equal(Object.hasOwn(disabledState, 'project_window_opened_at'), false);
-  assert.equal(Object.hasOwn(disabledState, 'project_window_surfaces'), false);
-  assert.equal((await fetch(`http://127.0.0.1:${uiPort}`)).status, 200);
-  assert.deepEqual(await (await fetch(`http://127.0.0.1:${dashboardPort}/api/v1/runtime`)).json(), { pid: process.pid, runtime_id: runtimeId, dispatch_capable: true });
-
-  delete project.open_project_surfaces;
-  await writeFile(configPath, stringifyProjectConfiguration(project));
-  const enabledStart = await execFile(process.execPath, [cli, 'start', configPath], { env: environment, timeout: 60_000 });
-  assert.equal(JSON.parse(enabledStart.stdout).reused, true);
-  let launches = [];
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    launches = (await readFile(browserLog, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean);
-    if (launches.length === 1) break;
-    await new Promise(done => setTimeout(done, 20));
-  }
-  assert.deepEqual(launches, [`http://127.0.0.1:${uiPort}`]);
-  const enabledState = JSON.parse(await readFile(join(stateDirectory, 'runtime.json'), 'utf8'));
-  assert.ok(enabledState.project_window_opened_at);
-  assert.deepEqual(enabledState.project_window_surfaces, ['operator-ui-v1']);
-
-  await execFile(process.execPath, [cli, 'start', configPath], { env: environment, timeout: 60_000 });
-  await new Promise(done => setTimeout(done, 30));
-  launches = (await readFile(browserLog, 'utf8')).trim().split('\n').filter(Boolean);
-  assert.equal(launches.length, 1);
-
-  project.codex_model = 'changed-model';
-  await writeFile(configPath, stringifyProjectConfiguration(project));
-  await assert.rejects(
-    execFile(process.execPath, [cli, 'start', configPath], { env: environment, timeout: 60_000 }),
-    error => {
-      assert.equal(error.stdout, '');
-      assert.match(error.stderr, /The Loop is already running with different settings\. Run npm stop, then npm start again\./);
-      return true;
-    }
-  );
+  assert.match(source, /Human Review/);
+  assert.match(source, /Accepted Plan/);
+  assert.match(source, /publicationReceipt\?\.page_id === taskId/);
+  assert.match(source, /Task ID/);
+  assert.match(source, /Workpad/);
+  assert.match(source, /Save State/);
+  assert.match(source, /Save Blocked By/);
+  assert.match(source, /Add comment/);
+  assert.match(source, /<details className="detail-section accepted-plan-section"/);
+  assert.match(source, /Find a task by title, identifier, or State/);
+  assert.match(source, /Review selected blockers/);
+  assert.match(source, /Show \{remainingBlockers.length\} more/);
+  assert.doesNotMatch(source, /Notion|Symphony Dashboard|notionTasksUrl/);
+  assert.match(styles, /@media \(max-width: 760px\)/);
+  const colors = [...styles.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(match => match[0]);
+  assert.ok(colors.length > 0);
+  assert.ok(colors.every(value => {
+    const hex = value.slice(1);
+    const normalized = hex.length === 3 ? [...hex].map(char => char + char).join('') : hex.slice(0, 6);
+    return normalized.slice(0, 2) === normalized.slice(2, 4) && normalized.slice(2, 4) === normalized.slice(4, 6);
+  }), `expected grayscale-only CSS colors, received: ${colors.join(', ')}`);
 });

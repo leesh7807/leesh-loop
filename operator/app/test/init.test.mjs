@@ -124,14 +124,13 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.match(generatedPackage.scripts.start, /operator\/app\/prepare-runtime\.mjs/);
   assert.deepEqual(Object.keys(generatedPackage.scripts).sort(), ['publish-local-plan', 'start', 'stop']);
   assert.equal(result.workflowPath, join(target.destination, 'WORKFLOW.md'));
-  assert.equal(result.notionBinding, 'not configured');
-  assert.match(result.completionOutput, /Notion database URL: not configured/);
-  assert.match(result.completionOutput, /make LEESH_LOOP_NOTION_DATABASE_URL and NOTION_TOKEN available/);
+  assert.match(result.completionOutput, /Local Task Store:/);
+  assert.match(result.completionOutput, /no Task database credentials are required/);
   assert.match(result.completionOutput, /docs\/WORKFLOW_TEMPLATE\.md/);
   assert.match(result.completionOutput, /npm start/);
   assert.doesNotMatch(result.completionOutput, /npm (?:install|ci)|mix deps\.get/);
-  assert.match(bootstrap, /^---\ntracker:\n  kind: notion/m);
-  assert.match(bootstrap, /database_url: \$LEESH_LOOP_NOTION_DATABASE_URL/);
+  assert.match(bootstrap, /^---\ntracker:\n  kind: local/m);
+  assert.doesNotMatch(bootstrap, /kind: notion|LEESH_LOOP_NOTION_DATABASE_URL|NOTION_TOKEN/);
   assert.match(bootstrap, /root: \$SYMPHONY_WORKSPACE_ROOT/);
   assert.match(bootstrap, /git clone --branch "\$SYMPHONY_GITHUB_BASE_BRANCH" "\$SYMPHONY_GITHUB_REPOSITORY_URL"/);
   const cloneIndex = bootstrap.indexOf('git clone --branch "$SYMPHONY_GITHUB_BASE_BRANCH" "$SYMPHONY_GITHUB_REPOSITORY_URL" .');
@@ -140,7 +139,7 @@ test('init uses only the current branch configured upstream and creates an indep
   assert.ok(materializerIndex > cloneIndex, 'generated after_create must invoke the existing materializer after cloning');
   assert.match(loopRuntime, /environment\.LEESH_LOOP_RUNTIME_ROOT = runtimeRoot/);
   assert.match(bootstrap, /env PATH="\$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:\$PATH"/);
-  assert.ok(files.includes('operator/notion_publisher/package-lock.json'));
+  assert.ok(!files.some(file => file.startsWith('operator/notion_publisher/')));
   assert.ok(files.includes('operator/ui/package-lock.json'));
   assert.ok(files.includes('operator/symphony/mix.lock'));
   assert.ok(files.includes('operator/symphony/mise.toml'));
@@ -178,7 +177,7 @@ test('init uses only the current branch configured upstream and creates an indep
   for (const file of files) assert.ok(!(await lstat(join(target.destination, file))).isSymbolicLink(), `${file} must be materialized, not linked`);
   const generatedInputs = [generatedPackage, project, workflow, prepareRuntime].map(value => typeof value === 'string' ? value : JSON.stringify(value)).join('\n');
   assert.equal(generatedInputs.includes(sourceRoot), false);
-  assert.ok(!files.some(file => file.includes('/test/') || file.startsWith('docs/') || file.startsWith('operator/e2e/')));
+  assert.ok(!files.some(file => file.includes('/test/') || file.startsWith('docs/')));
   assert.ok(!files.some(file => file.endsWith('node_modules') || file.includes('/node_modules/')));
   assert.ok(!files.some(file => file === '.env'));
   assert.deepEqual(files.filter(file => !['.env.example', 'WORKFLOW.md', 'project.toml', '.leesh-loop/installation.json'].includes(file)), manifestFiles);
@@ -279,33 +278,18 @@ chatgpt-shot submit 'independent Loop review'
   );
 });
 
-test('the existing Operator configuration loader reads Notion binding from the generated Loop root', async t => {
+test('the generated Operator configuration loads without Task database settings', async t => {
   const target = await makeTarget(t);
   await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
   const generatedOperatorPath = pathToFileURL(join(target.destination, 'operator/app/leesh-loop.mjs')).href;
   const { loadConfig } = await import(generatedOperatorPath);
   const projectPath = join(target.destination, 'project.toml');
-  const fromEnvironment = await loadConfig(projectPath, {
-    validateWorkspaceFileSources: false,
-    environment: { LEESH_LOOP_NOTION_DATABASE_URL: 'https://www.notion.so/example/environment-binding' }
-  });
-  assert.equal(fromEnvironment.notion_database_url, 'https://www.notion.so/example/environment-binding');
-
-  await writeFile(join(target.destination, '.env'), 'LEESH_LOOP_NOTION_DATABASE_URL=https://www.notion.so/example/root-binding\n');
-  const fromLoopEnvFile = await loadConfig(projectPath, { validateWorkspaceFileSources: false, environment: {} });
-  assert.equal(fromLoopEnvFile.notion_database_url, 'https://www.notion.so/example/root-binding');
-
-  const processBoundTarget = await makeTarget(t);
-  const processBoundUrl = 'https://www.notion.so/example/never-write-this-value';
-  const processBoundResult = await initLoop({
-    cwd: processBoundTarget.targetRoot,
-    sourceRoot,
-    environment: { LEESH_LOOP_NOTION_DATABASE_URL: processBoundUrl }
-  });
-  assert.match(processBoundResult.notionBinding, /configured in the init process environment/);
-  assert.equal(processBoundResult.completionOutput.includes(processBoundUrl), false);
-  assert.equal(await readFile(join(processBoundTarget.destination, '.env.example'), 'utf8').then(value => value.includes(processBoundUrl)), false);
-  await assert.rejects(lstat(join(processBoundTarget.destination, '.env')), error => error.code === 'ENOENT');
+  const config = await loadConfig(projectPath, { validateWorkspaceFileSources: false });
+  assert.equal(config.state_directory, join(target.destination, '.runtime/state'));
+  assert.equal(Object.hasOwn(config, 'task_store'), false);
+  assert.equal(Object.hasOwn(config, 'notion_database_url'), false);
+  assert.equal(await readFile(join(target.destination, '.env.example'), 'utf8').then(value => /NOTION_TOKEN|LEESH_LOOP_NOTION_DATABASE_URL/.test(value)), false);
+  await assert.rejects(lstat(join(target.destination, '.env')), error => error.code === 'ENOENT');
 });
 
 test('init fails without a resolvable configured upstream and leaves no destination', async t => {
@@ -366,7 +350,6 @@ test('runtime snapshot selection is a tracked whitelist and preserves executable
   assert.ok(files.includes('operator/app/run-symphony'));
   assert.ok(!files.some(file => file.startsWith('operator/app/test/')));
   assert.ok(!files.some(file => file.startsWith('operator/symphony/test/')));
-  assert.ok(!files.some(file => file.startsWith('operator/e2e/')));
   assert.ok(!files.some(file => file.startsWith('docs/plans/')));
 });
 
@@ -409,11 +392,8 @@ test('init preserves HTTPS and SSH clone URLs while the generated Loop resolves 
       const { createOperatorUiServer } = await import(generatedServerUrl);
       const server = await createOperatorUiServer({
         root: target.destination,
-        config: { ...project, notion_database_url: 'https://www.notion.so/example', ui_port: 4310, symphony_port: 4100 },
-        stateDirectory: join(target.destination, '.runtime/state'),
-        publisherConfigPath: join(target.destination, 'operator/notion_publisher/examples/publisher-config.json'),
-        publisherState: { states: ['Backlog', 'Ready', 'Human Review'], defaultState: 'Ready' },
-        loadTaskReader: async () => ({ listTasks: async () => [] })
+        config: { ...project, ui_port: 4310, symphony_port: 4100 },
+        stateDirectory: join(target.destination, '.runtime/state')
       });
       server.listen(0, '127.0.0.1');
       await new Promise((resolveListen, rejectListen) => { server.once('listening', resolveListen); server.once('error', rejectListen); });
@@ -428,6 +408,7 @@ test('init preserves HTTPS and SSH clone URLs while the generated Loop resolves 
       assert.equal(config.githubRepositoryName, 'sample-repository');
       assert.equal(config.githubBrowserRepositoryUrl, 'https://github.com/example/sample-repository');
       assert.equal(Object.hasOwn(config, 'githubRepositoryUrl'), false, 'the UI read model must not expose the clone URL as a browser destination');
+      assert.equal(Object.hasOwn(config, 'notionTasksUrl'), false);
       assert.equal((await git(target.targetRoot, 'status', '--porcelain')).stdout, before);
     });
   }

@@ -8,8 +8,8 @@ This directory is the Elixir/OTP implementation of Symphony, based on [`SPEC.md`
 
 ## How it works
 
-1. Polls the configured tracker for candidate work (included adapters: Linear, GitHub Issues, Jira
-   Cloud, Asana, and GitLab)
+1. Polls the configured tracker for candidate work (included adapters: Local Task Store, Linear,
+   GitHub Issues, Jira Cloud, Asana, and GitLab)
 2. Creates a workspace per issue
 3. Launches Codex in [App Server mode](https://developers.openai.com/codex/app-server/) inside the
    workspace
@@ -22,11 +22,9 @@ Linear serves `linear_graphql`, GitHub Issues serves `github_api`, Jira Cloud se
 tools with configured host-side auth and removes declared tracker-token environment variables from
 the Codex child, so the agent does not need a second tracker login.
 
-The concrete Leesh Loop Notion adapter additionally exposes two separate worker capabilities:
-`notion_task_publish_plan` invokes the canonical Publisher with final State `Backlog`, while
-`notion_task_add_blocked_by` additively updates only the runtime-bound task's `Blocked By`
-relation. Neither capability exposes arbitrary Notion page management, and failures are returned
-to the worker without worker-side retry or fallback.
+The Local Task Store adapter reads work from the Loop-owned SQLite database and exposes scoped
+`local_task_*` tools for the runtime-bound task. Publication uses the Local Publisher; tools do not
+connect to an external Task database or manage arbitrary records.
 
 If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or `Duplicate`),
 Symphony stops the active agent for that issue and cleans up matching workspaces.

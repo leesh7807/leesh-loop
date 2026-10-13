@@ -92,12 +92,10 @@ defmodule SymphonyElixir.LocalTaskStoreAdapterTest do
 
   defp setup_local_runtime(database, runtime_root) do
     previous = %{
-      "LEESH_LOOP_TRACKER_KIND" => System.get_env("LEESH_LOOP_TRACKER_KIND"),
       "LEESH_LOOP_LOCAL_TASK_STORE_PATH" => System.get_env("LEESH_LOOP_LOCAL_TASK_STORE_PATH"),
       "LEESH_LOOP_RUNTIME_ROOT" => System.get_env("LEESH_LOOP_RUNTIME_ROOT")
     }
 
-    System.put_env("LEESH_LOOP_TRACKER_KIND", "local")
     System.put_env("LEESH_LOOP_LOCAL_TASK_STORE_PATH", database)
     System.put_env("LEESH_LOOP_RUNTIME_ROOT", @source_root)
 
@@ -107,7 +105,7 @@ defmodule SymphonyElixir.LocalTaskStoreAdapterTest do
     end)
 
     write_workflow_file!(Workflow.workflow_file_path(),
-      tracker_kind: "notion",
+      tracker_kind: "local",
       tracker_endpoint: nil,
       tracker_api_token: nil,
       tracker_active_states: ["Ready", "In Progress"],
