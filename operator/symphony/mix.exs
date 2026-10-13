@@ -19,7 +19,6 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.GitLab.Client,
           SymphonyElixir.Jira.Client,
           SymphonyElixir.Linear.Client,
-          SymphonyElixir.Notion.Client,
           SymphonyElixir.SpecsCheck,
           SymphonyElixir.Orchestrator,
           SymphonyElixir.Orchestrator.State,

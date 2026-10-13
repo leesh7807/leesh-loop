@@ -17,8 +17,7 @@ defmodule SymphonyElixir.Tracker do
     "jira" => SymphonyElixir.Jira.Adapter,
     "linear" => SymphonyElixir.Linear.Adapter,
     "local" => SymphonyElixir.LocalTaskStore.Adapter,
-    "memory" => SymphonyElixir.Tracker.Memory,
-    "notion" => SymphonyElixir.Notion.Adapter
+    "memory" => SymphonyElixir.Tracker.Memory
   }
 
   @callback fetch_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}

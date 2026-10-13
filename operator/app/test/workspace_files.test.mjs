@@ -13,15 +13,10 @@ const execFile = promisify(execute);
 const root = join(import.meta.dirname, '../../..');
 const cli = join(root, 'operator', 'app', 'leesh-loop.mjs');
 const workflow = join(root, 'WORKFLOW.md');
-const testDatabaseUrl = 'https://notion.example/test-database';
 const { parse, stringify } = toml;
 
 function loadConfig(path, options = {}) {
-  return loadOperatorConfig(path, {
-    environment: { LEESH_LOOP_NOTION_DATABASE_URL: testDatabaseUrl },
-    envFile: join(tmpdir(), 'leesh-loop-test-no-env-file'),
-    ...options
-  });
+  return loadOperatorConfig(path, options);
 }
 
 async function fixture(t) {
@@ -105,17 +100,15 @@ test('a Git-ignored regular file in the sibling target repository is copied from
   assert.equal(await readFile(join(workspace, '.local-settings.json'), 'utf8'), '{"local":true}\n');
 });
 
-test('production Project database binding prefers the process environment and reports a missing binding', async t => {
+test('Project task operations ignore legacy Task database environment values', async t => {
   const { directory, workspaceRoot } = await fixture(t);
   const configPath = await projectConfig(directory, workspaceRoot);
   const envFile = join(directory, '.env');
-  await writeFile(envFile, 'LEESH_LOOP_NOTION_DATABASE_URL=https://notion.example/file-database\n');
-  const environmentUrl = 'https://notion.example/environment-database';
-  const config = await loadConfig(configPath, { environment: { LEESH_LOOP_NOTION_DATABASE_URL: environmentUrl }, envFile });
-  assert.equal(config.notion_database_url, environmentUrl);
-  const fromFile = await loadConfig(configPath, { environment: {}, envFile });
-  assert.equal(fromFile.notion_database_url, 'https://notion.example/file-database');
-  await assert.rejects(loadConfig(configPath, { environment: {}, envFile: join(directory, 'missing.env') }), /missing LEESH_LOOP_NOTION_DATABASE_URL/);
+  await writeFile(envFile, 'LEESH_LOOP_NOTION_DATABASE_URL=https://notion.example/file-database\nNOTION_TOKEN=legacy-token\n');
+  const config = await loadConfig(configPath);
+  assert.equal(Object.hasOwn(config, 'notion_database_url'), false);
+  assert.equal(Object.hasOwn(config, 'task_store'), false);
+  assert.equal(config.github_repository_url, 'https://github.com/example/repository.git');
 });
 
 test('workspace-file configuration rejects invalid paths and destination collisions', async t => {
@@ -210,7 +203,7 @@ test('stop accepts an invalidated workspace-file source so a live runtime remain
   const contents = parse(await readFile(config, 'utf8'));
   contents.state_directory = join(directory, 'runtime');
   await writeFile(config, stringify(contents));
-  await execFile(process.execPath, [cli, 'stop', config], { env: { ...process.env, LEESH_LOOP_NOTION_DATABASE_URL: testDatabaseUrl } });
+  await execFile(process.execPath, [cli, 'stop', config]);
 });
 
 test('workspace files participate in effective runtime identity', async t => {
@@ -382,7 +375,8 @@ test('the actual after_create materialization command copies files into the clon
   await execFile('git', ['remote', 'add', 'origin', remote], { cwd: seed });
   await execFile('git', ['push', 'origin', 'HEAD:main'], { cwd: seed });
   const contents = await readFile(workflow, 'utf8');
-  assert.match(contents, /git clone --branch "\$SYMPHONY_GITHUB_BASE_BRANCH" "\$SYMPHONY_GITHUB_REPOSITORY_URL" \.\n    node operator\/app\/workspace-files\.mjs "\$PWD"\n    \(cd operator\/notion_publisher/);
+  assert.match(contents, /git clone --branch "\$SYMPHONY_GITHUB_BASE_BRANCH" "\$SYMPHONY_GITHUB_REPOSITORY_URL" \.\n    node operator\/app\/workspace-files\.mjs "\$PWD"\n    if command -v mise/);
+  assert.doesNotMatch(contents, /notion_publisher|LEESH_LOOP_NOTION_DATABASE_URL/);
   await execFile('sh', ['-ec', ': "${SYMPHONY_GITHUB_REPOSITORY_URL:?}"\n: "${SYMPHONY_GITHUB_BASE_BRANCH:?}"\ngit clone --branch "$SYMPHONY_GITHUB_BASE_BRANCH" "$SYMPHONY_GITHUB_REPOSITORY_URL" .\nnode operator/app/workspace-files.mjs "$PWD"\ntest "$(cat .env)" = AFTER_CREATE_SENTINEL\ntest "$(cat cloned.txt)" = "repository clone completed"', 'after_create'], {
     cwd: workspace,
     env: { ...process.env, SYMPHONY_WORKSPACE_ROOT: workspaceRoot, LEESH_LOOP_WORKSPACE_FILES: JSON.stringify([source]), SYMPHONY_GITHUB_REPOSITORY_URL: remote, SYMPHONY_GITHUB_BASE_BRANCH: 'main' }

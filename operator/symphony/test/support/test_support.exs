@@ -22,7 +22,13 @@ defmodule SymphonyElixir.TestSupport do
       alias SymphonyElixir.Workspace
 
       import SymphonyElixir.TestSupport,
-        only: [write_workflow_file!: 1, write_workflow_file!: 2, restore_env: 2, stop_default_http_server: 0]
+        only: [
+          write_workflow_file!: 1,
+          write_workflow_file!: 2,
+          restore_env: 2,
+          ensure_symphony_application!: 0,
+          stop_default_http_server: 0
+        ]
 
       setup do
         workflow_root =
@@ -37,6 +43,11 @@ defmodule SymphonyElixir.TestSupport do
         Application.put_env(:symphony_elixir, :execution_history_file, Path.join(workflow_root, "execution-history.json"))
         write_workflow_file!(workflow_file)
         Workflow.set_workflow_file_path(workflow_file)
+        System.delete_env("SYMPHONY_DISPATCH_BARRIER")
+        System.delete_env("SYMPHONY_DISPATCH_ACK_FILE")
+        System.delete_env("SYMPHONY_DISPATCH_AUTHORIZATION_FILE")
+        System.delete_env("SYMPHONY_RUNTIME_ID")
+        ensure_symphony_application!()
         if Process.whereis(SymphonyElixir.WorkflowStore), do: SymphonyElixir.WorkflowStore.force_reload()
         stop_default_http_server()
 
@@ -77,28 +88,50 @@ defmodule SymphonyElixir.TestSupport do
   def restore_env(key, nil), do: System.delete_env(key)
   def restore_env(key, value), do: System.put_env(key, value)
 
+  def ensure_symphony_application! do
+    required_processes = [
+      SymphonyElixir.Supervisor,
+      SymphonyElixir.PubSub,
+      SymphonyElixir.WorkflowStore,
+      SymphonyElixir.DispatchBarrier,
+      SymphonyElixir.AgentRuntimeSupervisor,
+      SymphonyElixir.TaskSupervisor,
+      SymphonyElixir.Orchestrator,
+      SymphonyElixir.StatusDashboard
+    ]
+
+    {:ok, _started_apps} = Application.ensure_all_started(:symphony_elixir)
+
+    if Enum.any?(required_processes, &(Process.whereis(&1) == nil)) do
+      :ok = Application.stop(:symphony_elixir)
+      {:ok, _started_apps} = Application.ensure_all_started(:symphony_elixir)
+    end
+
+    :ok
+  end
+
   def stop_default_http_server do
     case Process.whereis(SymphonyElixir.Supervisor) do
       nil ->
         :ok
 
       supervisor ->
-        case Enum.find(Supervisor.which_children(supervisor), fn
-               {SymphonyElixir.HttpServer, _pid, _type, _modules} -> true
-               _child -> false
-             end) do
-          {SymphonyElixir.HttpServer, pid, _type, _modules} when is_pid(pid) ->
-            :ok = Supervisor.terminate_child(supervisor, SymphonyElixir.HttpServer)
+        terminate_default_http_server(supervisor)
+    end
+  catch
+    :exit, _reason -> :ok
+  end
 
-            if Process.alive?(pid) do
-              Process.exit(pid, :normal)
-            end
+  defp terminate_default_http_server(supervisor) do
+    case Enum.find(Supervisor.which_children(supervisor), fn
+           {SymphonyElixir.HttpServer, _pid, _type, _modules} -> true
+           _child -> false
+         end) do
+      {SymphonyElixir.HttpServer, _pid, _type, _modules} ->
+        Supervisor.terminate_child(supervisor, SymphonyElixir.HttpServer)
 
-            :ok
-
-          _ ->
-            :ok
-        end
+      _ ->
+        :ok
     end
   end
 

@@ -14,12 +14,14 @@ defmodule SymphonyElixir.LeeshLoopWorkflowContractTest do
     refute "Backlog" in tracker["terminal_states"]
 
     assert {:ok, %{prompt: prompt}} = Workflow.load(workflow_path)
-    assert prompt =~ "`Backlog` is a normal non-active, non-terminal waiting state"
+    assert prompt =~ "`Backlog` is non-active, non-terminal, and never dispatchable"
     assert prompt =~ "delivered_pr: <PR URL or number | none>"
     assert prompt =~ "origin_base: <resolved-remote-base-commit>"
     assert prompt =~ "remote_base: <configured-base remote commit | none>"
-    assert prompt =~ "git fetch origin \"$SYMPHONY_GITHUB_BASE_BRANCH\""
-    assert prompt =~ "gh pr create --base \"$SYMPHONY_GITHUB_BASE_BRANCH\""
+    assert prompt =~ "fetch and resolve the configured remote base"
+    assert prompt =~ "create the PR with explicit configured base"
+    assert prompt =~ "Use the Local Task surface"
+    refute prompt =~ "notion_task_"
     refute prompt =~ "origin/main"
     refute prompt =~ "remote `main`"
   end

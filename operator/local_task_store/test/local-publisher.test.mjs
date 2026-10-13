@@ -44,8 +44,7 @@ test('Local publication CLI uses the selected Loop State directory without a Git
     'github_base_branch = "main"',
     'workflow_path = "WORKFLOW.md"',
     'symphony_workspace_root = "workspaces"',
-    `state_directory = ${JSON.stringify(stateDirectory)}`,
-    'task_store = "local"'
+    `state_directory = ${JSON.stringify(stateDirectory)}`
   ].join('\n') + '\n');
 
   const { stdout } = await execFile(process.execPath, [

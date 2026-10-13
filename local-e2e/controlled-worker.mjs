@@ -9,8 +9,10 @@ const runId = process.env.LOCAL_E2E_RUN_ID;
 const taskId = process.env.LOCAL_E2E_EXPECTED_TASK_ID;
 const planHash = process.env.LOCAL_E2E_EXPECTED_PLAN_SHA256;
 const expectedComment = process.env.LOCAL_E2E_EXPECTED_COMMENT;
+const expectedState = process.env.LOCAL_E2E_EXPECTED_STATE || 'Ready';
+const resultState = process.env.LOCAL_E2E_RESULT_STATE || 'In Progress';
+const workpadText = process.env.LOCAL_E2E_WORKPAD_TEXT || 'Local E2E ' + runId + ': controlled Worker data access completed.';
 const failAt = process.env.LOCAL_E2E_FAIL_AT;
-const workpadText = 'Local E2E ' + runId + ': controlled Worker data access completed.';
 
 if (![eventPath, runId, taskId, planHash, expectedComment].every(value => typeof value === 'string' && value.length > 0)) {
   throw new Error('Local E2E controlled Worker is missing its run binding.');
@@ -18,7 +20,7 @@ if (![eventPath, runId, taskId, planHash, expectedComment].every(value => typeof
 
 const steps = [
   { tool: 'local_task_read', arguments: {}, validate: value => {
-    if (value.id !== taskId || value.state !== 'Ready' || createHash('sha256').update(value.acceptedPlan).digest('hex') !== planHash) {
+    if (value.id !== taskId || value.state !== expectedState || createHash('sha256').update(value.acceptedPlan).digest('hex') !== planHash) {
       throw new Error('bound Task or immutable Accepted Plan did not match the published input');
     }
   } },
@@ -28,14 +30,14 @@ const steps = [
   { tool: 'local_task_read_workpad', arguments: {}, validate: value => {
     if (!Array.isArray(value.records) || value.records.length !== 0) throw new Error('Workpad was not initially empty');
   } },
-  { tool: 'local_task_set_state', arguments: failAt === 'worker-tool' ? { state: '' } : { state: 'In Progress' }, validate: value => {
-    if (failAt !== 'worker-tool' && value.state !== 'In Progress') throw new Error('Worker State change was not returned by the Local tool');
-  } },
   { tool: 'local_task_append_workpad', arguments: { text: workpadText }, validate: value => {
     if (value.taskId !== taskId || value.content !== workpadText || value.kind !== 'workpad') throw new Error('Workpad append did not return the expected record');
   } },
+  { tool: 'local_task_set_state', arguments: failAt === 'worker-tool' ? { state: '' } : { state: resultState }, validate: value => {
+    if (failAt !== 'worker-tool' && value.state !== resultState) throw new Error('Worker State change was not returned by the Local tool');
+  } },
   { tool: 'local_task_read', arguments: {}, validate: value => {
-    if (value.id !== taskId || value.state !== 'In Progress' || createHash('sha256').update(value.acceptedPlan).digest('hex') !== planHash) {
+    if (value.id !== taskId || value.state !== resultState || createHash('sha256').update(value.acceptedPlan).digest('hex') !== planHash) {
       throw new Error('updated Task could not be read back through the Local Worker tool');
     }
   } },

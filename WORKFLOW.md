@@ -1,10 +1,7 @@
 ---
-# The Notion adapter owns provider credentials and its concrete schema. These are
-# the repository's intended state names once that adapter is configured.
+# Local Task Store is the task authority; chatgpt-shot remains an external service.
 tracker:
-  kind: notion
-  provider:
-    database_url: $LEESH_LOOP_NOTION_DATABASE_URL
+  kind: local
   # Backlog is a normal non-dispatch state and therefore intentionally stays
   # outside the active state set below.
   active_states:
@@ -28,7 +25,6 @@ hooks:
     : "${SYMPHONY_GITHUB_BASE_BRANCH:?SYMPHONY_GITHUB_BASE_BRANCH is required}"
     git clone --branch "$SYMPHONY_GITHUB_BASE_BRANCH" "$SYMPHONY_GITHUB_REPOSITORY_URL" .
     node operator/app/workspace-files.mjs "$PWD"
-    (cd operator/notion_publisher && npm ci)
     if command -v mise >/dev/null 2>&1; then
       (cd operator/symphony && mise trust && mise exec -- mix deps.get)
     else
@@ -93,7 +89,7 @@ The `after_create` hook clones the configured repository and installs worker dep
 
 The worker-facing review interface is `chatgpt-shot`. Use only `chatgpt-shot submit "<prompt>"` and `chatgpt-shot jobs <job-id>`. Do not start, stop, authenticate, repair, or otherwise manage the external Service.
 
-Use the Notion task surface for the Accepted Plan, Workpad, and State changes. Write the Workpad in Korean; preserve code, commands, identifiers, paths, API names, and quotations verbatim where accuracy requires it. `notion_task_read_workpad` reads only the complete canonical Workpad of this bound task; use it rather than arbitrary Notion access.
+Use the Local Task surface for the Accepted Plan, Workpad, State changes, and comments. Write the Workpad in Korean; preserve code, commands, identifiers, paths, API names, and quotations verbatim where accuracy requires it. `local_task_read_workpad` reads the complete canonical Workpad of this bound task; use bound task tools rather than direct SQLite access.
 
 If the task surface or its authentication is unavailable, it cannot record a Workpad entry or mutate its State. Do not invent a fallback mutation channel or claim a same-surface handoff occurred; end with the concrete external-access blocker.
 
@@ -101,10 +97,10 @@ If the task surface or its authentication is unavailable, it cannot record a Wor
 
 The bound worker session exposes:
 
-* `notion_task_publish_plan`: publish a complete Plan through the Publisher with final State `Backlog`; the Publisher owns database binding, canonical representation, Identifier, Plan relation/content, locking, incomplete-publication handling, and validation, and returns canonical `identifier` and `page_id`.
-* `notion_task_add_blocked_by`: add a canonical blocker page to the bound task's `Blocked By` relation while preserving existing blockers.
+* `local_task_publish_plan`: publish a complete Plan through the Local Publisher with final State `Backlog`; the Publisher owns canonical representation, Identifier, Plan content, idempotency, atomicity, and validation, and returns canonical `identifier` and Local task ID as `page_id`.
+* `local_task_add_blocked_by`: add a Local task ID to the bound task's `Blocked By` relation while preserving existing blockers.
 
-These are separate operations. Publication does not mutate the current task relation; Blocked By does not publish or edit Plan content. The current task comes from runtime binding, not worker input. Failures do not authorize worker-side fallback or arbitrary Notion management.
+These are separate operations. Publication does not mutate the current task relation; Blocked By does not publish or edit Plan content. The current task comes from runtime binding, not worker input. Failures do not authorize worker-side fallback or direct Store mutation.
 
 ## Repository state and delivery
 
@@ -459,6 +455,6 @@ Incorporate only valid findings. Do not change the Candidate Plan for optional p
 
 Record Candidate Plan identity, Job ID/result, and dispositions in ordinary Workpad context. Do not label a Plan review as PR/HEAD-bound when none was submitted.
 
-Publish with `notion_task_publish_plan`, retain canonical `identifier`/`page_id`, then before `notion_task_add_blocked_by` record review disposition, published identity, and that current work is yielding to that blocker. A successful relation update is the execution's last normal lifecycle mutation. If publication succeeds but relation update fails, record the incomplete relation and use blocker handoff.
+Publish with `local_task_publish_plan`, retain canonical `identifier`/`page_id`, then before `local_task_add_blocked_by` record review disposition, published identity, and that current work is yielding to that blocker. A successful relation update is the execution's last normal lifecycle mutation. If publication succeeds but relation update fails, record the incomplete relation and use blocker handoff.
 
 A blocker resume preserves an unfinished delivery review pass. A human-directed implementation continuation after completed `reason: review` Human Review starts a new pass. `Rework` remains the same task's non-terminal rework; before the next PR handoff apply final Plan comparison and move the Plan back to `completed/`.

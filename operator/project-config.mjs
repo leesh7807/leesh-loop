@@ -36,8 +36,7 @@ const SUPPORTED_PROJECT_SETTINGS = new Set([
   ...OPTIONAL_BOOLEAN_SETTINGS,
   ...OPTIONAL_POSITIVE_INTEGER_SETTINGS,
   ...PORT_SETTINGS,
-  'workspace_files',
-  'task_store'
+  'workspace_files'
 ]);
 const gitEnvironment = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
 
@@ -72,9 +71,6 @@ export function validateProjectConfiguration(config) {
     if (typeof config[key] !== 'string' || !config[key].trim()) throw new Error(`project configuration requires ${key}`);
   }
   validateGitBranchName(config.github_base_branch);
-  if (config.task_store !== undefined && !['notion', 'local'].includes(config.task_store)) {
-    throw new Error('task_store must be either notion or local');
-  }
   for (const key of OPTIONAL_STRING_SETTINGS) {
     if (config[key] !== undefined && (typeof config[key] !== 'string' || !config[key].trim())) {
       throw new Error(`${key} must be a non-empty string`);
@@ -123,7 +119,6 @@ export async function readProjectConfiguration(file, {
   if (validateWorkspaceFileSources) await validateWorkspaceFiles(workspaceFiles);
   return {
     ...config,
-    task_store: config.task_store ?? 'notion',
     symphony_port: config.symphony_port ?? PROJECT_DEFAULTS.symphony_port,
     ui_port: config.ui_port ?? PROJECT_DEFAULTS.ui_port,
     startup_timeout_ms: config.startup_timeout_ms ?? PROJECT_DEFAULTS.startup_timeout_ms,

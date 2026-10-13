@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { configureTaskStoreEnvironment, effective, loadConfig, operatorBootstrapArgs, parseStartArguments, startConfiguration } from '../leesh-loop.mjs';
+import { configureLocalTaskStoreEnvironment, effective, loadConfig, operatorBootstrapArgs, parseStartArguments, startConfiguration } from '../leesh-loop.mjs';
 
 const execFile = promisify(execute);
 const root = join(import.meta.dirname, '../../..');
@@ -39,7 +39,7 @@ test('start:fast uses the same start command and project config with the existin
   assert.deepEqual(fastBootstrapArgs.filter(argument => argument !== '--skip-external-readiness'), normalBootstrapArgs);
 });
 
-test('a Local Project needs no Notion binding and passes only its Local Task Store path to Symphony', async t => {
+test('a Project always uses Local Task Store and removes task database credentials from Symphony', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-local-project-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const configPath = join(directory, 'project.toml');
@@ -50,23 +50,24 @@ test('a Local Project needs no Notion binding and passes only its Local Task Sto
     'workflow_path = "WORKFLOW.md"',
     'symphony_workspace_root = "workspaces"',
     `state_directory = ${JSON.stringify(stateDirectory)}`,
-    'task_store = "local"'
   ].join('\n') + '\n');
 
-  const config = await loadConfig(configPath, { environment: {}, envFile: join(directory, 'missing.env') });
-  assert.equal(config.task_store, 'local');
-  assert.equal(config.notion_database_url, undefined);
+  const config = await loadConfig(configPath);
+  assert.equal(Object.hasOwn(config, 'task_store'), false);
+  assert.equal(Object.hasOwn(config, 'notion_database_url'), false);
   const localIdentity = effective(config, 'local-runtime', 4100);
   assert.equal(localIdentity.local_task_store_path, join(stateDirectory, 'local-task-store', 'local-task-store.sqlite'));
 
-  const localEnvironment = configureTaskStoreEnvironment({}, config.task_store, localIdentity.local_task_store_path, root);
-  assert.equal(localEnvironment.LEESH_LOOP_TRACKER_KIND, 'local');
+  const localEnvironment = configureLocalTaskStoreEnvironment({
+    LEESH_LOOP_TRACKER_KIND: 'notion',
+    LEESH_LOOP_NOTION_DATABASE_URL: 'https://notion.example/database',
+    NOTION_TOKEN: 'task-token'
+  }, localIdentity.local_task_store_path, root);
+  assert.equal(Object.hasOwn(localEnvironment, 'LEESH_LOOP_TRACKER_KIND'), false);
+  assert.equal(Object.hasOwn(localEnvironment, 'LEESH_LOOP_NOTION_DATABASE_URL'), false);
+  assert.equal(Object.hasOwn(localEnvironment, 'NOTION_TOKEN'), false);
   assert.equal(localEnvironment.LEESH_LOOP_LOCAL_TASK_STORE_PATH, localIdentity.local_task_store_path);
   assert.equal(localEnvironment.LEESH_LOOP_RUNTIME_ROOT, root);
-
-  const notionEnvironment = configureTaskStoreEnvironment({ LEESH_LOOP_LOCAL_TASK_STORE_PATH: localIdentity.local_task_store_path }, 'notion', localIdentity.local_task_store_path, root);
-  assert.equal(notionEnvironment.LEESH_LOOP_TRACKER_KIND, 'notion');
-  assert.equal(Object.hasOwn(notionEnvironment, 'LEESH_LOOP_LOCAL_TASK_STORE_PATH'), false);
 });
 
 test('start rejects malformed fast-start arguments before treating an option as a config path', async () => {
