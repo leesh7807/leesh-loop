@@ -131,6 +131,64 @@ test('failed publication and missing detail remain explicit', async t => {
   assert.equal(missing.response.status, 404);
 });
 
+test('Local Task mutations reject cross-origin browser requests and non-JSON bodies', async t => {
+  const base = await testServer(t);
+  const plan = '# 2026-10-13-operator-origin-check\n\n## Objective\n\nKeep browser writes on the Local Operator origin.';
+  const publication = await request(base, '/api/v1/publish', json('POST', { plan, state: 'Ready' }));
+  assert.equal(publication.response.status, 201);
+  const taskId = publication.body.page_id;
+  const crossOrigin = {
+    origin: 'https://attacker.example',
+    'sec-fetch-site': 'cross-site'
+  };
+
+  const crossOriginPublish = await request(base, '/api/v1/publish', {
+    method: 'POST',
+    headers: { ...crossOrigin, 'content-type': 'text/plain' },
+    body: JSON.stringify({ plan: '# 2026-10-13-cross-origin\n\nUnauthorized task.', state: 'Ready' })
+  });
+  assert.equal(crossOriginPublish.response.status, 403);
+
+  const crossOriginComment = await request(base, `/api/v1/tasks/${taskId}/comments`, {
+    method: 'POST',
+    headers: { ...crossOrigin, 'content-type': 'text/plain' },
+    body: JSON.stringify({ content: 'Unauthorized comment.' })
+  });
+  assert.equal(crossOriginComment.response.status, 403);
+
+  const crossOriginState = await request(base, `/api/v1/tasks/${taskId}/state`, {
+    ...json('PUT', { state: 'Human Review' }),
+    headers: { ...crossOrigin, 'content-type': 'application/json' }
+  });
+  assert.equal(crossOriginState.response.status, 403);
+
+  const crossOriginBlocker = await request(base, `/api/v1/tasks/${taskId}/blocked-by`, {
+    ...json('PUT', { blockedBy: [] }),
+    headers: { ...crossOrigin, 'content-type': 'application/json' }
+  });
+  assert.equal(crossOriginBlocker.response.status, 403);
+
+  const nonJsonComment = await request(base, `/api/v1/tasks/${taskId}/comments`, {
+    method: 'POST',
+    headers: { origin: base, 'content-type': 'text/plain' },
+    body: JSON.stringify({ content: 'Wrong media type.' })
+  });
+  assert.equal(nonJsonComment.response.status, 415);
+
+  const unchanged = await request(base, `/api/v1/tasks/${taskId}`);
+  assert.equal((await request(base, '/api/v1/tasks')).body.tasks.length, 1);
+  assert.equal(unchanged.body.task.state, 'Ready');
+  assert.deepEqual(unchanged.body.task.blockedBy, []);
+  assert.deepEqual(unchanged.body.comments, []);
+
+  const sameOriginState = await request(base, `/api/v1/tasks/${taskId}/state`, {
+    ...json('PUT', { state: 'Human Review' }),
+    headers: { origin: base, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' }
+  });
+  assert.equal(sameOriginState.response.status, 200);
+  assert.equal(sameOriginState.body.task.state, 'Human Review');
+});
+
 test('rendered UI source keeps Local task navigation, human review actions, and grayscale responsive styles', async () => {
   const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
   const styles = await readFile(join(root, 'operator/ui/src/style.css'), 'utf8');

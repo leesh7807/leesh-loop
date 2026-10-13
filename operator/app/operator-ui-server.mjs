@@ -16,6 +16,9 @@ const MIME_TYPES = new Map([
   ['.woff2', 'font/woff2']
 ]);
 
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
 export const WORKFLOW_STATES = Object.freeze([
   'Backlog', 'Ready', 'In Progress', 'Human Review', 'Rework', 'Merging', 'Done', 'Cancelled'
 ]);
@@ -71,8 +74,35 @@ function requireTaskIds(value, name) {
 }
 
 async function requestJson(request) {
+  const mediaType = request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase();
+  if (mediaType !== 'application/json') {
+    throw Object.assign(new Error('Content-Type must be application/json.'), { status: 415 });
+  }
   try { return JSON.parse(await readRequestBody(request)); }
   catch { throw Object.assign(new Error('Request body must be valid UTF-8 JSON.'), { status: 400 }); }
+}
+
+function requireLocalSameOriginMutation(request) {
+  const fetchSite = request.headers['sec-fetch-site'];
+  if (fetchSite && fetchSite !== 'same-origin') {
+    throw Object.assign(new Error('Cross-origin task changes are not allowed.'), { status: 403 });
+  }
+
+  const originHeader = request.headers.origin;
+  if (!originHeader) return;
+
+  let origin;
+  let requestOrigin;
+  try {
+    origin = new URL(originHeader);
+    requestOrigin = new URL(`http://${request.headers.host}`);
+  } catch {
+    throw Object.assign(new Error('A valid same-origin request is required.'), { status: 403 });
+  }
+
+  if (origin.protocol !== 'http:' || !LOOPBACK_HOSTS.has(origin.hostname) || origin.origin !== requestOrigin.origin) {
+    throw Object.assign(new Error('Cross-origin task changes are not allowed.'), { status: 403 });
+  }
 }
 
 export async function createOperatorUiServer({ root, config, stateDirectory, taskStore }) {
@@ -82,6 +112,9 @@ export async function createOperatorUiServer({ root, config, stateDirectory, tas
   const server = createServer(async (request, response) => {
     const url = new URL(request.url || '/', 'http://127.0.0.1');
     try {
+      if (MUTATING_METHODS.has(request.method) && url.pathname.startsWith('/api/v1/')) {
+        requireLocalSameOriginMutation(request);
+      }
       if (request.method === 'GET' && url.pathname === '/api/v1/config') {
         const repository = githubRepositoryDetails(config.github_repository_url);
         sendJson(response, 200, {
