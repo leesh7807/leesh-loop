@@ -118,7 +118,7 @@ test('failed npm ci removes the old success record and a later retry recovers au
       component: 'local-task-store',
       environment: { ...environment, TEST_NPM_FAIL: '1' }
     })),
-    /Local Task Store dependency preparation failed/
+    /Local Task Store dependency preparation failed: npm ci failed \(exit code 17\)/
   );
   await assert.rejects(readFile(recordPath(target.loopRoot, 'local-task-store')), { code: 'ENOENT' });
 

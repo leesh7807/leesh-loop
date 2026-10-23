@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const helperPath = fileURLToPath(import.meta.url);
 const stateDirectoryName = 'dependency-preparation';
+const workerFailurePrefix = 'LEESH_LOOP_DEPENDENCY_PREPARATION_ERROR:';
 const LOCK_RETRY_MS = 50;
 const EMPTY_LOCK_STALE_MS = 10_000;
 const NON_LINUX_IDENTITY_CHECK_MS = 1_000;
@@ -411,6 +412,43 @@ function installDependencies(loopRoot, componentName, runtimeEnvironment = proce
   writeInstallationRecord(recordPath, componentName, digest, environment);
 }
 
+function workerFailureFromOutput(stdout) {
+  const lines = Buffer.isBuffer(stdout) ? stdout.toString('utf8').split(/\r?\n/) : String(stdout || '').split(/\r?\n/);
+  let failure = null;
+  const output = [];
+  for (const line of lines) {
+    if (!line.startsWith(workerFailurePrefix)) {
+      output.push(line);
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(line.slice(workerFailurePrefix.length));
+      if (typeof parsed?.message === 'string') failure = parsed.message;
+      else output.push(line);
+    } catch {
+      output.push(line);
+    }
+  }
+  const passthrough = output.join('\n').trimEnd();
+  if (passthrough) process.stderr.write(`${passthrough}\n`);
+  return failure;
+}
+
+function checkWorkerResult(result, component, runner) {
+  const workerFailure = workerFailureFromOutput(result.stdout);
+  if (result.error) throw new Error(`could not start ${runner}: ${result.error.message}`);
+  if (result.status !== 0) {
+    if (workerFailure) throw new Error(`${component.label} dependency preparation failed: ${workerFailure}`);
+    throw new Error(`${runner} did not complete successfully${result.signal ? ` (${result.signal})` : ` (exit code ${result.status ?? 1})`}`);
+  }
+}
+
+function reportWorkerFailure(error) {
+  const message = String(error?.message || error);
+  process.stdout.write(`${workerFailurePrefix}${JSON.stringify({ message })}\n`);
+  process.exitCode = 1;
+}
+
 function prepareWhileLocked(loopRoot, componentName, environment) {
   const component = componentFor(componentName);
   try {
@@ -420,26 +458,20 @@ function prepareWhileLocked(loopRoot, componentName, environment) {
     ensureLockFile(lockPath);
     const result = spawnSync('flock', ['-x', lockPath, process.execPath, helperPath, '--prepare-locked', root, componentName], {
       cwd: root,
-      stdio: 'inherit',
+      stdio: ['ignore', 'pipe', 'inherit'],
       env: environment
     });
     if (result.error?.code === 'ENOENT') {
       const portableLockPath = join(stateDirectory, `${componentName}.portable-lock`);
       const portable = spawnSync(process.execPath, [helperPath, '--prepare-portable-locked', root, componentName], {
         cwd: root,
-        stdio: 'inherit',
+        stdio: ['ignore', 'pipe', 'inherit'],
         env: environment
       });
-      if (portable.error) throw new Error(`could not start portable dependency preparation: ${portable.error.message}`);
-      if (portable.status !== 0) {
-        throw new Error(`portable dependency preparation did not complete successfully${portable.signal ? ` (${portable.signal})` : ` (exit code ${portable.status ?? 1})`}`);
-      }
+      checkWorkerResult(portable, component, 'portable dependency preparation');
       return { component: componentName, prepared: true, lockPath: portableLockPath };
     }
-    if (result.error) throw new Error(`could not start flock: ${result.error.message}`);
-    if (result.status !== 0) {
-      throw new Error(`flock did not complete successfully${result.signal ? ` (${result.signal})` : ` (exit code ${result.status ?? 1})`}`);
-    }
+    checkWorkerResult(result, component, 'flock');
     return { component: componentName, prepared: true };
   } catch (error) {
     const message = String(error?.message || error);
@@ -459,9 +491,7 @@ if (mode === '--prepare-locked' && process.argv[1] && resolve(process.argv[1]) =
   try {
     installDependencies(resolve(workerRoot), workerComponent);
   } catch (error) {
-    const label = COMPONENTS[workerComponent]?.label || workerComponent;
-    console.error(`${label} dependency preparation failed: ${String(error?.message || error)}`);
-    process.exitCode = 1;
+    reportWorkerFailure(error);
   }
 }
 if (mode === '--prepare-portable-locked' && process.argv[1] && resolve(process.argv[1]) === helperPath) {
@@ -471,8 +501,6 @@ if (mode === '--prepare-portable-locked' && process.argv[1] && resolve(process.a
     const portableLockPath = join(stateDirectory, `${workerComponent}.portable-lock`);
     withPortableLock(portableLockPath, () => installDependencies(root, workerComponent));
   } catch (error) {
-    const label = COMPONENTS[workerComponent]?.label || workerComponent;
-    console.error(`${label} dependency preparation failed: ${String(error?.message || error)}`);
-    process.exitCode = 1;
+    reportWorkerFailure(error);
   }
 }
