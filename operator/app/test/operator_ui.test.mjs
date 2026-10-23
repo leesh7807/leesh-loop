@@ -229,3 +229,16 @@ test('rendered UI source keeps Local task navigation, human review actions, and 
     return normalized.slice(0, 2) === normalized.slice(2, 4) && normalized.slice(2, 4) === normalized.slice(4, 6);
   }), `expected grayscale-only CSS colors, received: ${colors.join(', ')}`);
 });
+
+test('detail and list refreshes reject snapshots that predate confirmed task mutations', async () => {
+  const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
+  const detail = source.slice(source.indexOf('function TaskDetail'), source.indexOf('function App'));
+  const app = source.slice(source.indexOf('function App'));
+
+  assert.match(detail, /const requestVersion = \+\+refreshVersion\.current/);
+  assert.match(detail, /if \(requestVersion !== refreshVersion\.current\) return/);
+  assert.match(detail, /async function saveState\(event\)[\s\S]*?refreshVersion\.current \+= 1[\s\S]*?finally \{[\s\S]*?refreshVersion\.current \+= 1/);
+  assert.match(app, /const taskListVersion = useRef\(0\)/);
+  assert.match(app, /if \(requestVersion !== taskListVersion\.current\)/);
+  assert.match(app, /refreshQueued\.current = true/);
+});

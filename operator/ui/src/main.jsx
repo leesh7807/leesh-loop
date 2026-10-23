@@ -254,12 +254,15 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
   const [blockerFeedback, setBlockerFeedback] = useState(null);
   const [commentFeedback, setCommentFeedback] = useState(null);
   const taskRef = useRef(null);
+  const refreshVersion = useRef(0);
   const detailLoaded = useRef(false);
 
   const refresh = useCallback(async () => {
+    const requestVersion = ++refreshVersion.current;
     try {
       const response = await fetch(taskUrl(taskId), { headers: { accept: 'application/json' } });
       const body = await responseJson(response);
+      if (requestVersion !== refreshVersion.current) return;
       const firstRead = !detailLoaded.current;
       const previousTask = taskRef.current;
       if (previousTask && previousTask.state !== body.task.state) {
@@ -278,6 +281,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       }
       detailLoaded.current = true;
     } catch (error) {
+      if (requestVersion !== refreshVersion.current) return;
       setRefreshError(error.message || 'Task detail could not be refreshed.');
       if (!detailLoaded.current) setTask(null);
     } finally {
@@ -305,6 +309,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
 
   async function saveState(event) {
     event.preventDefault();
+    refreshVersion.current += 1;
     setSaving('state');
     setStateFeedback(null);
     try {
@@ -320,11 +325,15 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       onTaskListRefresh();
     } catch (error) {
       setStateFeedback({ kind: 'failure', text: error.message || 'State could not be saved.' });
-    } finally { setSaving(''); }
+    } finally {
+      refreshVersion.current += 1;
+      setSaving('');
+    }
   }
 
   async function saveBlockers(event) {
     event.preventDefault();
+    refreshVersion.current += 1;
     setSaving('blockers');
     setBlockerFeedback(null);
     try {
@@ -340,11 +349,15 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       onTaskListRefresh();
     } catch (error) {
       setBlockerFeedback({ kind: 'failure', text: error.message || 'Blocked By could not be saved.' });
-    } finally { setSaving(''); }
+    } finally {
+      refreshVersion.current += 1;
+      setSaving('');
+    }
   }
 
   async function addComment(event) {
     event.preventDefault();
+    refreshVersion.current += 1;
     setSaving('comment');
     setCommentFeedback(null);
     try {
@@ -358,7 +371,10 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       onTaskListRefresh();
     } catch (error) {
       setCommentFeedback({ kind: 'failure', text: error.message || 'Comment could not be saved.' });
-    } finally { setSaving(''); }
+    } finally {
+      refreshVersion.current += 1;
+      setSaving('');
+    }
   }
 
   if (loading && !task) return <section className="work-panel" aria-busy="true"><p className="empty-state">Loading task detail…</p></section>;
@@ -467,16 +483,26 @@ function App() {
   const [error, setError] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState(null);
   const requestInFlight = useRef(false);
+  const refreshQueued = useRef(false);
+  const taskListVersion = useRef(0);
   const hasReadTasks = useRef(false);
   const { plan, state, selectedBlockers } = draft;
 
   const refresh = useCallback(async () => {
-    if (requestInFlight.current) return;
+    if (requestInFlight.current) {
+      refreshQueued.current = true;
+      return;
+    }
     requestInFlight.current = true;
+    const requestVersion = taskListVersion.current;
     if (!hasReadTasks.current) setLoading(true);
     try {
       const response = await fetch('/api/v1/tasks', { headers: { accept: 'application/json' } });
       const body = await responseJson(response);
+      if (requestVersion !== taskListVersion.current) {
+        refreshQueued.current = true;
+        return;
+      }
       setTasks(body.tasks);
       setDraft(current => {
         const available = new Map(body.tasks.map(task => [task.id, task]));
@@ -493,8 +519,16 @@ function App() {
       setError(false);
       setRefreshedAt(new Date());
       hasReadTasks.current = true;
-    } catch { setError(true); }
-    finally { setLoading(false); requestInFlight.current = false; }
+    } catch {
+      if (requestVersion === taskListVersion.current) setError(true);
+    } finally {
+      setLoading(false);
+      requestInFlight.current = false;
+      if (refreshQueued.current) {
+        refreshQueued.current = false;
+        void refresh();
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -527,6 +561,7 @@ function App() {
     setSelectedTaskId(id);
   }
   function openPublishedTask(publication) {
+    taskListVersion.current += 1;
     resetDraft();
     setPublicationReceipt(publication);
     openTask(publication.page_id);
@@ -542,6 +577,7 @@ function App() {
     setDraft(emptyDraft);
   }
   function handleTaskChanged(task) {
+    taskListVersion.current += 1;
     setTasks(current => current.map(value => value.id === task.id ? { ...value, state: task.state, blockedBy: task.blockedBy.map(id => {
       const blocker = current.find(entry => entry.id === id);
       return blocker ? { taskId: id, identifier: blocker.identifier, title: blocker.title, state: blocker.state } : { taskId: id, identifier: id, title: id, state: 'Unavailable' };
