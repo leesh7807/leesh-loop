@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { createSerializedRefreshQueue } from './refresh-queue.js';
 import { clearPublicationDraft, readPublicationDraft, writePublicationDraft } from './publication-draft.js';
 import { groupTasksForOperatorDisplay } from './operator-task-display-order.js';
 import { readTaskDetailDraft } from './task-detail-draft.js';
@@ -254,24 +255,19 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
   const [blockerFeedback, setBlockerFeedback] = useState(null);
   const [commentFeedback, setCommentFeedback] = useState(null);
   const taskRef = useRef(null);
-  const refreshVersion = useRef(0);
-  const detailRefreshInFlight = useRef(false);
-  const detailRefreshQueued = useRef(false);
+  const detailRefreshQueue = useRef(null);
+  if (!detailRefreshQueue.current) detailRefreshQueue.current = createSerializedRefreshQueue();
   const currentRefresh = useRef(null);
   const mutationInFlight = useRef(false);
   const detailLoaded = useRef(false);
 
   const refresh = useCallback(async () => {
-    if (detailRefreshInFlight.current) {
-      detailRefreshQueued.current = true;
-      return;
-    }
-    detailRefreshInFlight.current = true;
-    const requestVersion = ++refreshVersion.current;
+    const requestVersion = detailRefreshQueue.current.begin();
+    if (requestVersion === null) return;
     try {
       const response = await fetch(taskUrl(taskId), { headers: { accept: 'application/json' } });
       const body = await responseJson(response);
-      if (requestVersion !== refreshVersion.current) return;
+      if (!detailRefreshQueue.current.isCurrent(requestVersion)) return;
       const firstRead = !detailLoaded.current;
       const previousTask = taskRef.current;
       if (previousTask && previousTask.state !== body.task.state) {
@@ -290,23 +286,20 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       }
       detailLoaded.current = true;
     } catch (error) {
-      if (requestVersion !== refreshVersion.current) return;
+      if (!detailRefreshQueue.current.isCurrent(requestVersion)) return;
       setRefreshError(error.message || 'Task detail could not be refreshed.');
       if (!detailLoaded.current) setTask(null);
     } finally {
-      if (requestVersion === refreshVersion.current) setLoading(false);
-      detailRefreshInFlight.current = false;
-      if (detailRefreshQueued.current) {
-        detailRefreshQueued.current = false;
-        void currentRefresh.current?.();
-      }
+      const { current, shouldRefresh } = detailRefreshQueue.current.finish(requestVersion);
+      if (current) setLoading(false);
+      if (shouldRefresh) void currentRefresh.current?.();
     }
   }, [taskId]);
   currentRefresh.current = refresh;
 
   useEffect(() => {
-    refreshVersion.current += 1;
-    detailRefreshQueued.current = false;
+    detailRefreshQueue.current.invalidate();
+    detailRefreshQueue.current.cancelQueued();
     detailLoaded.current = false;
     setTask(null);
     setWorkpad([]);
@@ -323,8 +316,8 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     const timer = window.setInterval(() => { void refresh(); }, REFRESH_INTERVAL_MS);
     return () => {
       window.clearInterval(timer);
-      refreshVersion.current += 1;
-      detailRefreshQueued.current = false;
+      detailRefreshQueue.current.invalidate();
+      detailRefreshQueue.current.cancelQueued();
     };
   }, [refresh]);
 
@@ -332,7 +325,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     event.preventDefault();
     if (mutationInFlight.current) return;
     mutationInFlight.current = true;
-    refreshVersion.current += 1;
+    detailRefreshQueue.current.invalidate();
     setSaving('state');
     setStateFeedback(null);
     try {
@@ -350,7 +343,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       setStateFeedback({ kind: 'failure', text: error.message || 'State could not be saved.' });
     } finally {
       mutationInFlight.current = false;
-      refreshVersion.current += 1;
+      detailRefreshQueue.current.invalidate();
       setSaving('');
     }
   }
@@ -359,7 +352,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     event.preventDefault();
     if (mutationInFlight.current) return;
     mutationInFlight.current = true;
-    refreshVersion.current += 1;
+    detailRefreshQueue.current.invalidate();
     setSaving('blockers');
     setBlockerFeedback(null);
     try {
@@ -377,7 +370,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       setBlockerFeedback({ kind: 'failure', text: error.message || 'Blocked By could not be saved.' });
     } finally {
       mutationInFlight.current = false;
-      refreshVersion.current += 1;
+      detailRefreshQueue.current.invalidate();
       setSaving('');
     }
   }
@@ -386,7 +379,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     event.preventDefault();
     if (mutationInFlight.current) return;
     mutationInFlight.current = true;
-    refreshVersion.current += 1;
+    detailRefreshQueue.current.invalidate();
     setSaving('comment');
     setCommentFeedback(null);
     try {
@@ -402,7 +395,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       setCommentFeedback({ kind: 'failure', text: error.message || 'Comment could not be saved.' });
     } finally {
       mutationInFlight.current = false;
-      refreshVersion.current += 1;
+      detailRefreshQueue.current.invalidate();
       setSaving('');
     }
   }
@@ -512,25 +505,20 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState(null);
-  const requestInFlight = useRef(false);
-  const refreshQueued = useRef(false);
-  const taskListVersion = useRef(0);
+  const taskListRefreshQueue = useRef(null);
+  if (!taskListRefreshQueue.current) taskListRefreshQueue.current = createSerializedRefreshQueue();
   const hasReadTasks = useRef(false);
   const { plan, state, selectedBlockers } = draft;
 
   const refresh = useCallback(async () => {
-    if (requestInFlight.current) {
-      refreshQueued.current = true;
-      return;
-    }
-    requestInFlight.current = true;
-    const requestVersion = taskListVersion.current;
+    const requestVersion = taskListRefreshQueue.current.begin();
+    if (requestVersion === null) return;
     if (!hasReadTasks.current) setLoading(true);
     try {
       const response = await fetch('/api/v1/tasks', { headers: { accept: 'application/json' } });
       const body = await responseJson(response);
-      if (requestVersion !== taskListVersion.current) {
-        refreshQueued.current = true;
+      if (!taskListRefreshQueue.current.isCurrent(requestVersion)) {
+        taskListRefreshQueue.current.markQueued();
         return;
       }
       setTasks(body.tasks);
@@ -550,14 +538,11 @@ function App() {
       setRefreshedAt(new Date());
       hasReadTasks.current = true;
     } catch {
-      if (requestVersion === taskListVersion.current) setError(true);
+      if (taskListRefreshQueue.current.isCurrent(requestVersion)) setError(true);
     } finally {
+      const { shouldRefresh } = taskListRefreshQueue.current.finish(requestVersion);
       setLoading(false);
-      requestInFlight.current = false;
-      if (refreshQueued.current) {
-        refreshQueued.current = false;
-        void refresh();
-      }
+      if (shouldRefresh) void refresh();
     }
   }, []);
 
@@ -591,7 +576,7 @@ function App() {
     setSelectedTaskId(id);
   }
   function openPublishedTask(publication) {
-    taskListVersion.current += 1;
+    taskListRefreshQueue.current.invalidate();
     resetDraft();
     setPublicationReceipt(publication);
     openTask(publication.page_id);
@@ -607,7 +592,7 @@ function App() {
     setDraft(emptyDraft);
   }
   function handleTaskChanged(task) {
-    taskListVersion.current += 1;
+    taskListRefreshQueue.current.invalidate();
     setTasks(current => current.map(value => value.id === task.id ? { ...value, state: task.state, blockedBy: task.blockedBy.map(id => {
       const blocker = current.find(entry => entry.id === id);
       return blocker ? { taskId: id, identifier: blocker.identifier, title: blocker.title, state: blocker.state } : { taskId: id, identifier: id, title: id, state: 'Unavailable' };

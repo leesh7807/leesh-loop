@@ -230,23 +230,27 @@ test('rendered UI source keeps Local task navigation, human review actions, and 
   }), `expected grayscale-only CSS colors, received: ${colors.join(', ')}`);
 });
 
-test('detail and list refreshes serialize polls and reject snapshots that predate task mutations', async () => {
+test('Task detail and list wire the tested serialized refresh queue', async () => {
   const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
   const detail = source.slice(source.indexOf('function TaskDetail'), source.indexOf('function App'));
   const app = source.slice(source.indexOf('function App'));
 
-  assert.match(detail, /const requestVersion = \+\+refreshVersion\.current/);
-  assert.match(detail, /if \(requestVersion !== refreshVersion\.current\) return/);
-  assert.match(detail, /const detailRefreshInFlight = useRef\(false\)/);
-  assert.match(detail, /if \(detailRefreshInFlight\.current\) \{\s*detailRefreshQueued\.current = true;\s*return;\s*\}/);
-  assert.match(detail, /if \(requestVersion === refreshVersion\.current\) setLoading\(false\)/);
+  assert.match(detail, /detailRefreshQueue = useRef\(null\)/);
+  assert.match(detail, /detailRefreshQueue\.current = createSerializedRefreshQueue\(\)/);
+  assert.match(detail, /detailRefreshQueue\.current\.begin\(\)/);
+  assert.match(detail, /detailRefreshQueue\.current\.isCurrent\(requestVersion\)/);
+  assert.match(detail, /detailRefreshQueue\.current\.finish\(requestVersion\)/);
+  assert.match(detail, /detailRefreshQueue\.current\.invalidate\(\)/);
   assert.match(detail, /void currentRefresh\.current\?\.\(\)/);
-  assert.match(detail, /async function saveState\(event\)[\s\S]*?refreshVersion\.current \+= 1[\s\S]*?finally \{[\s\S]*?refreshVersion\.current \+= 1/);
+  assert.match(detail, /async function saveState\(event\)[\s\S]*?detailRefreshQueue\.current\.invalidate\(\)[\s\S]*?finally \{[\s\S]*?detailRefreshQueue\.current\.invalidate\(\)/);
   assert.match(detail, /const mutationInFlight = useRef\(false\)/);
   assert.equal((detail.match(/if \(mutationInFlight\.current\) return/g) || []).length, 3);
   assert.match(detail, /disabled=\{Boolean\(saving\)\}/);
   assert.match(detail, /disabled=\{Boolean\(saving\) \|\| !commentDraft\.trim\(\)\}/);
-  assert.match(app, /const taskListVersion = useRef\(0\)/);
-  assert.match(app, /if \(requestVersion !== taskListVersion\.current\)/);
-  assert.match(app, /refreshQueued\.current = true/);
+  assert.match(app, /taskListRefreshQueue = useRef\(null\)/);
+  assert.match(app, /taskListRefreshQueue\.current = createSerializedRefreshQueue\(\)/);
+  assert.match(app, /taskListRefreshQueue\.current\.begin\(\)/);
+  assert.match(app, /taskListRefreshQueue\.current\.markQueued\(\)/);
+  assert.match(app, /taskListRefreshQueue\.current\.finish\(requestVersion\)/);
+  assert.match(app, /taskListRefreshQueue\.current\.invalidate\(\)/);
 });
