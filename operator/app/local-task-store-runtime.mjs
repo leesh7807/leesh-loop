@@ -1,10 +1,8 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { prepareNpmDependencies } from './dependency-preparation.mjs';
 
 const appDirectory = dirname(fileURLToPath(import.meta.url));
-const packageDirectory = resolve(appDirectory, '../local_task_store');
 const databaseFile = 'local-task-store.sqlite';
 const databaseDirectory = 'local-task-store';
 
@@ -13,15 +11,8 @@ export function localTaskStorePath(stateDirectory) {
   return join(resolve(stateDirectory), databaseDirectory, databaseFile);
 }
 
-function preparePackage() {
-  if (existsSync(join(packageDirectory, 'node_modules/better-sqlite3/build/Release/better_sqlite3.node'))) return;
-  const install = spawnSync('npm', ['ci'], { cwd: packageDirectory, stdio: ['ignore', process.stderr.fd, 'inherit'], env: process.env });
-  if (install.error) throw new Error(`Local Task Store dependency preparation failed: ${install.error.message}`);
-  if (install.status !== 0) throw new Error(`Local Task Store dependency preparation failed${install.signal ? ` (${install.signal})` : ` (exit code ${install.status})`}`);
-}
-
 export async function openLoopTaskStore(stateDirectory) {
-  preparePackage();
+  prepareNpmDependencies({ loopRoot: resolve(appDirectory, '../..'), component: 'local-task-store' });
   const { openLocalTaskStore } = await import('../local_task_store/src/local-task-store.mjs');
   return openLocalTaskStore(localTaskStorePath(stateDirectory));
 }
