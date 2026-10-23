@@ -169,7 +169,7 @@ test('portable lock recovery serializes concurrent preparations without flock an
   const environment = { ...target.environment, PATH: target.binDirectory, TEST_NPM_DELAY: '200' };
   const portableLockPath = join(target.loopRoot, '.leesh-loop/dependency-preparation/local-task-store.portable-lock');
   await mkdir(portableLockPath, { recursive: true });
-  await writeFile(join(portableLockPath, 'owner.json'), JSON.stringify({ pid: 999999999, processStartTicks: null, token: 'abandoned' }));
+  await writeFile(join(portableLockPath, 'owner.json'), JSON.stringify({ pid: 999999999, processStartIdentity: null, token: 'abandoned' }));
 
   await Promise.all([
     runConcurrentPreparation(target.loopRoot, environment),
@@ -187,4 +187,15 @@ test('portable lock recovery serializes concurrent preparations without flock an
   await utimes(portableLockPath, oldTime, oldTime);
   await runConcurrentPreparation(target.loopRoot, environment);
   assert.equal(await installCount(target.installLog), 2, 'an interrupted lock acquisition without owner metadata is reclaimed safely');
+
+  await rm(recordPath(target.loopRoot, 'local-task-store'));
+  await writeFile(join(target.storeDirectory, 'package-lock.json'), JSON.stringify({ name: 'reused-pid-store', lockfileVersion: 3, packages: {} }));
+  await mkdir(portableLockPath);
+  await writeFile(join(portableLockPath, 'owner.json'), JSON.stringify({
+    pid: process.pid,
+    processStartIdentity: process.platform === 'linux' ? 'proc:prior-incarnation' : 'ps:prior-incarnation',
+    token: 'reused-pid'
+  }));
+  await runConcurrentPreparation(target.loopRoot, environment);
+  assert.equal(await installCount(target.installLog), 3, 'a reused PID does not keep an abandoned portable lock alive');
 });

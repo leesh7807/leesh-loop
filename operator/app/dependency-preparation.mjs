@@ -8,6 +8,8 @@ const helperPath = fileURLToPath(import.meta.url);
 const stateDirectoryName = 'dependency-preparation';
 const LOCK_RETRY_MS = 50;
 const EMPTY_LOCK_STALE_MS = 10_000;
+const NON_LINUX_IDENTITY_CHECK_MS = 1_000;
+const nonLinuxProcessIdentityCache = new Map();
 
 const COMPONENTS = Object.freeze({
   'generated-loop': {
@@ -189,18 +191,47 @@ function ensureLockFile(lockPath) {
   }
 }
 
-function processStartTicks(pid) {
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
-    return fields[19] || null;
-  } catch { return null; }
+function processStartIdentity(pid) {
+  if (process.platform === 'linux') {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
+      return fields[19] ? `proc:${fields[19]}` : null;
+    } catch { return null; }
+  }
+
+  const candidates = ['ps', '/bin/ps', '/usr/bin/ps'];
+  for (const command of candidates) {
+    const result = spawnSync(command, ['-p', String(pid), '-o', 'lstart='], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    if (!result.error && result.status === 0) {
+      const startTime = result.stdout.trim();
+      if (startTime) return `ps:${startTime}`;
+    }
+    if (result.error?.code !== 'ENOENT') return null;
+  }
+  return null;
+}
+
+function currentProcessStartIdentity(pid) {
+  if (process.platform === 'linux') return processStartIdentity(pid);
+  const cached = nonLinuxProcessIdentityCache.get(pid);
+  if (cached && Date.now() - cached.checkedAt < NON_LINUX_IDENTITY_CHECK_MS) return cached.identity;
+  const identity = processStartIdentity(pid);
+  nonLinuxProcessIdentityCache.set(pid, { identity, checkedAt: Date.now() });
+  if (nonLinuxProcessIdentityCache.size > 32) {
+    const oldestPid = nonLinuxProcessIdentityCache.keys().next().value;
+    nonLinuxProcessIdentityCache.delete(oldestPid);
+  }
+  return identity;
 }
 
 function lockOwner(pid = process.pid) {
   return {
     pid,
-    processStartTicks: processStartTicks(pid),
+    processStartIdentity: processStartIdentity(pid),
     token: randomUUID(),
     createdAt: Date.now()
   };
@@ -240,9 +271,9 @@ function lockOwnerAlive(owner) {
     if (error?.code === 'ESRCH') return false;
     return true;
   }
-  if (owner.processStartTicks) {
-    const currentStartTicks = processStartTicks(owner.pid);
-    if (currentStartTicks && currentStartTicks !== owner.processStartTicks) return false;
+  if (owner.processStartIdentity) {
+    const currentIdentity = currentProcessStartIdentity(owner.pid);
+    if (currentIdentity && currentIdentity !== owner.processStartIdentity) return false;
   }
   return true;
 }
