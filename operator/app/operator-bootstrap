@@ -167,8 +167,8 @@ github_base_commit=$(node "$repository_root/operator/app/git-target.mjs" "$githu
 
 if [ "$skip_external_readiness" = false ]; then
   report 'checking the review setup'
-  if ! chatgpt-shot doctor >/dev/null 2>&1; then
-    fail 'the review setup is incomplete. Check chatgpt-shot sign-in and configuration, then retry.'
+  if ! chatgpt-shot doctor >/dev/null; then
+    fail 'chatgpt-shot doctor failed; resolve the diagnostic above and retry. For CHATGPT_AUTH_REQUIRED, run chatgpt-shot open, finish sign-in in the retained browser, close Chrome, then confirm with chatgpt-shot doctor.'
   fi
 
 service_accepting() {
