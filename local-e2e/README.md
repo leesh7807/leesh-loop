@@ -3,7 +3,7 @@
 Run the independent Local execution flow with:
 
 ```sh
-npm run local-e2e
+npm run e2e
 ```
 
 Each invocation owns a temporary project, a bare Git target with a `main` base,
@@ -19,14 +19,14 @@ publish a Backlog blocker and a Ready Task, read list/detail data, add a Comment
 change Blocked By, and update State. Symphony then dispatches the released Task
 to the controlled Worker. The run reopens SQLite and checks it against the
 Operator and Worker results. Successful runs remove their temporary resources;
-failures retain logs and a summary. `npm run local-e2e -- --fail-at publisher`
-checks publication error reporting, and `npm run local-e2e -- --fail-at
-worker-tool` checks a failed Worker tool call through Symphony.
+failures retain logs and a summary. `npm run e2e -- --fail-at publisher`
+checks publication error reporting, and `npm run e2e -- --fail-at worker-tool`
+checks a failed Worker tool call through Symphony.
 
 For direct browser evaluation, run:
 
 ```sh
-npm run local-e2e -- --mode interactive
+npm run e2e -- --mode interactive
 ```
 
 The command prints a loopback URL while the Store is still empty. Open it in a

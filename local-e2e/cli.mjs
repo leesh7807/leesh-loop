@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { execFile as execFileCallback, spawn } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -14,6 +15,8 @@ import { createOperatorUiServer } from '../operator/app/operator-ui-server.mjs';
 const execFile = promisify(execFileCallback);
 const sourceRoot = resolve(import.meta.dirname, '..');
 const workerScript = join(import.meta.dirname, 'controlled-worker.mjs');
+const SYMPHONY_POLL_INTERVAL_MS = 100;
+const BLOCKED_OBSERVATION_WINDOW_MS = 1_000;
 const acceptedPlan = runId => [
   '# ' + runId + '-local-execution-e2e',
   '',
@@ -103,7 +106,7 @@ function workflowContents({ root, bareRepository, runId, expectedComment }) {
     '    after_create: ' + JSON.stringify(afterCreate),
     '  timeout_ms: 30000',
     'polling:',
-    '  interval_ms: 100',
+    '  interval_ms: ' + SYMPHONY_POLL_INTERVAL_MS,
     'agent:',
     '  max_concurrent_agents: 1',
     '  max_turns: 1',
@@ -231,6 +234,74 @@ async function startOperator(stateDirectory) {
   return { server, url: `http://127.0.0.1:${address.port}` };
 }
 
+async function reserveLoopbackPort() {
+  const server = createNetServer();
+  await new Promise((resolveListen, rejectListen) => {
+    server.once('error', rejectListen);
+    server.listen(0, '127.0.0.1', resolveListen);
+  });
+  const { port } = server.address();
+  await new Promise((resolveClose, rejectClose) => server.close(error => error ? rejectClose(error) : resolveClose()));
+  return port;
+}
+
+async function readSymphonyState(port) {
+  const response = await fetch(`http://127.0.0.1:${port}/api/v1/state`, {
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(2_000)
+  });
+  if (!response.ok) throw new Error(`Symphony state API returned HTTP ${response.status}.`);
+  const state = await response.json();
+  if (!Array.isArray(state.running) || !Array.isArray(state.retrying) || !Array.isArray(state.blocked)) {
+    throw new Error('Symphony state API returned an incomplete runtime snapshot.');
+  }
+  return state;
+}
+
+async function waitForSymphonyState({ child, port, processOutputPath, timeoutMs = 30_000 }) {
+  const expires = Date.now() + timeoutMs;
+  while (Date.now() < expires) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      const processTail = await readFile(processOutputPath, 'utf8').catch(() => '');
+      throw new StageError('Symphony startup', 'Symphony exited before its state API became ready (exit=' + child.exitCode + ', signal=' + child.signalCode + '). ' + processTail.slice(-3_000));
+    }
+    try { return await readSymphonyState(port); }
+    catch { await new Promise(resolveWait => setTimeout(resolveWait, 50)); }
+  }
+  const processTail = await readFile(processOutputPath, 'utf8').catch(() => '');
+  throw new StageError('Symphony startup', 'Timed out waiting for the Symphony state API. ' + processTail.slice(-3_000));
+}
+
+async function verifyBlockedTaskIsNotDispatched({ child, port, taskId, eventPath, logPath, processOutputPath }) {
+  await waitForSymphonyState({ child, port, processOutputPath });
+
+  const refreshResponse = await fetch(`http://127.0.0.1:${port}/api/v1/refresh`, {
+    method: 'POST',
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(2_000)
+  });
+  const refreshResult = await refreshResponse.json().catch(() => ({}));
+  if (!refreshResponse.ok || refreshResult.queued !== true) {
+    throw new StageError('Blocked By eligibility', 'Symphony did not accept a poll request while the Task remained blocked.');
+  }
+
+  const expires = Date.now() + BLOCKED_OBSERVATION_WINDOW_MS;
+  while (Date.now() < expires) {
+    const state = await readSymphonyState(port).catch(error => {
+      throw new StageError('Blocked By eligibility', `Symphony state became unavailable while observing the blocked Task: ${error.message}`);
+    });
+    const taskWasDispatched = ['running', 'retrying', 'blocked']
+      .some(group => state[group].some(issue => issue.issue_id === taskId));
+    const event = await readFile(eventPath, 'utf8').then(JSON.parse).catch(() => null);
+    const log = await readSymphonyLog(logPath);
+    if (taskWasDispatched || event || log.includes('Dispatching issue to agent: issue_id=' + taskId)) {
+      throw new StageError('Blocked By eligibility', 'Symphony dispatched the Task before Operator removed its Blocked By relation.');
+    }
+    await new Promise(resolveWait => setTimeout(resolveWait, 50));
+  }
+  return BLOCKED_OBSERVATION_WINDOW_MS;
+}
+
 async function closeOperator(server) {
   if (!server?.listening) return;
   server.closeAllConnections?.();
@@ -319,7 +390,8 @@ async function runLocalE2e({ failAt } = {}) {
       }
     });
 
-    runSummary.stage = 'Symphony dispatch and Worker';
+    runSummary.stage = 'Symphony Blocked By eligibility';
+    const symphonyPort = await reserveLoopbackPort();
     const runtimeEnvironment = localEnvironment({
       LEESH_LOOP_LOCAL_TASK_STORE_PATH: databasePath,
       LEESH_LOOP_RUNTIME_ROOT: sourceRoot,
@@ -335,7 +407,7 @@ async function runLocalE2e({ failAt } = {}) {
     });
     runtime = spawn(join(sourceRoot, 'operator/app/run-symphony'), [
       '--logs-root', join(root, 'logs'),
-      '--port', '0',
+      '--port', String(symphonyPort),
       '--i-understand-that-this-will-be-running-without-the-usual-guardrails',
       join(root, 'WORKFLOW.md')
     ], {
@@ -357,8 +429,15 @@ async function runLocalE2e({ failAt } = {}) {
       outputStream.end(() => resolveClose(result));
     }));
 
-    // Release the target through Operator after Symphony starts. This exercises
-    // the existing Blocked By eligibility rule and its Local Store read path.
+    const blockedObservationMs = await verifyBlockedTaskIsNotDispatched({
+      child: runtime,
+      port: symphonyPort,
+      taskId: published.page_id,
+      eventPath: workerEventPath,
+      logPath,
+      processOutputPath
+    });
+    runSummary.stage = 'Symphony dispatch and Worker';
     await operatorRequest(operator.url, `/api/v1/tasks/${encodeURIComponent(published.page_id)}/blocked-by`, {
       method: 'PUT', body: { blockedBy: [] }
     });
@@ -447,6 +526,7 @@ async function runLocalE2e({ failAt } = {}) {
       taskId: published.page_id,
       identifier: published.identifier,
       initialState: published.state,
+      blockedObservationMs,
       workerState: 'In Progress',
       finalState: finalTask.state,
       workerPid: event.workerPid,

@@ -45,11 +45,11 @@ The isolated Local Smoke Run uses the actual Operator server and UI, Local Publi
 
 ```bash
 # Automated publication, Store, Operator API, Symphony, Worker, and readback flow
-npm run local-e2e
+npm run e2e
 
 # Open on an empty Store, type s and Enter in the terminal to seed example Tasks,
 # then type q and Enter to stop
-npm run local-e2e -- --mode interactive
+npm run e2e -- --mode interactive
 ```
 
 Interactive mode prints the local Operator URL while the Store is empty so the Plan screen can be evaluated. After `s`, it prepares three distinct Backlog Tasks and a Human Review scenario through the real Operator, Local Publisher, Symphony, and controlled Worker. The Backlog Tasks stay non-dispatchable. The process removes its temporary files and owned processes after `q`.
@@ -59,7 +59,7 @@ Interactive mode prints the local Operator URL while the Store is empty so the P
 ```bash
 npm test
 (cd operator/symphony && mise exec -- mix test)
-npm run local-e2e
+npm run e2e
 ```
 
 The Smoke Run README describes its isolated setup and interactive controls: [local-e2e/README.md](local-e2e/README.md).
