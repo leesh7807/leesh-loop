@@ -2,126 +2,94 @@
 
 Create and maintain a plan that keeps the work aligned with the objective and makes completion easy to judge.
 
-- Name each plan document using the format `date-summary`.
+- Use `date-summary` as the plan document's H1 heading.
 
-- Use the confirmed objective, intent, verification requirements, repository conventions, and available evidence to settle decisions that could change the outcome, externally observable behavior, contracts, responsibilities, boundaries, or verification. Include implementation details only when they are necessary to preserve one of those decisions or to make the intended work unambiguous.
+- Treat Objective, Intent, and Verification Requirements as the complete top-level contract. A human must be able to review the intended outcome and success conditions from these sections alone.
 
-- Treat Objective, Intent, and Verification Requirements together as the complete top-level contract of the plan. Any fact that materially changes what result is acceptable, what externally observable behavior or boundary must hold, what failure behavior is required, or whether the objective counts as achieved must be expressed within those sections rather than introduced later.
+- Do not change the confirmed top-level contract without an explicit user request. Later sections must not introduce or alter material acceptance conditions.
+
+- Use the confirmed contract, repository conventions, and available evidence to resolve decisions that materially affect behavior, contracts, responsibilities, boundaries, or verification.
+
+- Leave ordinary engineering decisions to execution unless different choices could materially affect those properties. Include implementation details only when needed to preserve a decision or remove material ambiguity.
 
 - Do not invent reasons, tradeoffs, or justifications for the user.
 
-- Define verification in terms of observable evidence. The plan must make clear how the intended result will be demonstrated and what evidence is sufficient to establish each material Verification Requirement.
-
 - Fix terminology before planning. Use one term for one meaning.
 
-- Do not use the plan as an execution log.
+- Define verification through sufficient observable evidence, using representative practical paths when integration or external outcomes matter.
 
-- Keep active plans under `docs/plans/active/`. Before making a Pull Request, move the plan to `docs/plans/completed/`.
+- Keep the plan focused on intended work, not execution history.
 
-When reviewing the plan, check that each planned unit describes a coherent outcome in the problem domain rather than merely an implementation step.
+- Follow KISS, YAGNI, and DRY.
 
-Also check that verification demonstrates the material requirements through representative practical evidence. Use broader integration or end-to-end verification when the requirement depends materially on components, external effects, or authoritative outcomes working together.
+A plan is complete when the top-level contract is reviewable and the decisions necessary for consistent execution and verification have been resolved.
 
-A good planned unit should:
+## Planned Units
 
-- describe one meaningful responsibility or capability;
+Organize work into coherent domain responsibilities or capabilities, not implementation steps or agent convenience.
 
-- have a result that can be understood and verified on its own;
+Each unit should:
 
-- avoid combining unrelated responsibilities just to reduce the number of units.
+- Have one meaningful responsibility or capability.
 
-Do not split the plan just to make the work easier for an agent.
+- Have a clear outcome that can be understood and verified.
 
-If you cannot turn a planned unit into a clear executable issue, check whether you understand its scope and domain boundary well enough.
+- Avoid combining unrelated responsibilities merely to reduce the number of units.
 
-The final plan should resolve the decisions necessary to preserve the objective, intended behavior, contracts, responsibilities, boundaries, and verification requirements. Include implementation details only when they are necessary to carry those decisions into execution or when different choices could materially change the resulting contract, responsibility boundary, externally observable behavior, or verification claim. Leave ordinary engineering decisions to execution.
+Do not split work solely to make it easier for an agent.
 
-Write in Korean.
+## Plan Format
 
-KISS, YANGI, DRY is core principle.
+### Objective
 
-## Plan format
+Record the confirmed outcome the work must achieve.
 
-```markdown
-# date-summary
+Keep it focused on the intended result, without implementation decisions, recovery mechanisms, or verification procedures.
 
-## Objective
+### Intent
 
-Record the confirmed outcome the work must achieve and what the plan must stay aligned with.
+Record the confirmed problem, motivation, and desired direction explaining why the objective exists and how it should be interpreted.
 
-Keep it focused on the intended result. Do not include implementation decisions, recovery mechanisms, or verification procedures here.
+Preserve context that materially affects the meaning of success, failure, or acceptable behavior. Do not repeat detailed contracts or implementation decisions.
 
-Do not modify this section unless the user explicitly changes or asks to revise it.
+### Verification Requirements
 
-## Intent
+Record the confirmed guarantees and observable outcomes required for the objective to count as achieved.
 
-Record the confirmed problem, motivation, or desired direction that explains why the objective exists and how the user intends the objective to be interpreted.
+Include material requirements concerning intended execution paths, external effects, failure behavior, authoritative outcomes, and boundaries.
 
-Preserve context that could materially change the meaning of success, failure, or acceptable behavior when implementation choices arise.
+State what must be proven, not how to prove it. Do not prescribe verification mechanisms unless a particular path or boundary is itself part of the requirement.
 
-Do not repeat implementation decisions, mechanisms, detailed contracts, or verification procedures here.
+### Definitions
 
-Do not modify this section unless the user explicitly changes or asks to revise it.
+Define domain-specific or repository-specific terms that might otherwise be misunderstood.
 
-## Verification Requirements
+### Decisions
 
-Record the confirmed facts, guarantees, or externally observable outcomes that must be demonstrated for the objective to count as achieved.
+Record only decisions, assumptions, and defaults necessary to fulfill the top-level contract consistently.
 
-Together with `Objective` and `Intent`, this section must close the top-level contract. Do not rely on `Definitions`, `Decisions`, or `Verification` to introduce a material condition that changes whether the result is acceptable or whether the objective counts as achieved.
+- Identify existing behavior, responsibilities, and system areas that must remain unchanged. Defer changes crossing that protected scope to a separate plan.
 
-State what must be proven, not how to prove it.
+- Require file, module, type, and major function names to reflect their actual responsibilities and remain meaningful beyond the immediate task. Avoid names based only on local implementation context or speculative abstractions.
 
-Include requirements about the intended execution path, required external effects, failure behavior, authoritative outcomes, or boundaries when they materially affect whether the objective was actually achieved.
+- Include rationale, constraints, alternatives, or tradeoffs only when needed to understand a decision.
 
-Do not prescribe a particular verification mechanism or test level unless that execution path or boundary is itself materially part of the requirement.
+Leave implementation choices that do not materially affect the contract to execution.
 
-Do not replace these requirements with implementation-specific checks or alternative evidence that proves a materially different claim.
+### Verification
 
-Do not modify this section unless the user explicitly changes or asks to revise it.
+For each material Verification Requirement, describe the sufficient observable evidence, how it will be obtained, and what establishes pass or failure.
 
-## Definitions
+- Use integration or end-to-end verification when the requirement depends materially on the real entry point, orchestration, integrations, external effects, or authoritative readback working together.
 
-Define terms that are specific to the domain or repository, or that could reasonably be misunderstood.
+- Use narrower verification when it establishes the same material claim.
 
-## Decisions
+- Do not substitute evidence that proves a weaker or different claim.
 
-Record only the decisions, assumptions, and defaults needed to preserve and carry out the objective, intent, contracts, responsibilities, boundaries, and verification requirements already established above.
+- If full verification is infeasible, state what cannot be demonstrated, why, the closest available verification, and the remaining uncertainty.
 
-Do not introduce here a new externally observable guarantee, success condition, failure condition, behavioral boundary, or authoritative outcome that is necessary to judge whether the objective was achieved. If such a condition is material, it belongs in `Verification Requirements`.
+- When missing tooling, infrastructure, or observability prevents sufficient verification, include enabling that verification in the planned work when reasonably within scope.
 
-Under Decisions only, define protected scope and naming: identify existing behavior, responsibilities, or system areas that must remain unchanged, with any crossing change deferred to a separate plan; and require file, module, type, and major function names to expose their current responsibility and role without naming around abstractions that do not yet exist. Do not carry these decisions into Objective, Intent, or Verification Requirements.
+### Verification Tools
 
-Prefer stating what must remain true. Include implementation details only when the mechanism itself is a necessary part of the decision; otherwise leave it to implementation.
-
-Do not resolve implementation choices merely to make the plan more complete. Leave ordinary engineering decisions to execution unless different choices could materially change a contract, responsibility boundary, externally observable result, or verification claim.
-
-Do not partially prescribe incidental implementation details or leave incomplete internal rules that appear contractual.
-
-Include rationale, constraints, alternatives, or accepted tradeoffs only when they are needed to understand a recorded decision.
-
-Do not repeat background already captured in Intent.
-
-## Verification
-
-Describe how each material Verification Requirement will be demonstrated through observable evidence.
-
-This section defines only how the existing Verification Requirements will be demonstrated. It must not introduce, strengthen, narrow, or reinterpret the contract. If designing verification reveals a condition that materially changes what must be true for the objective to count as achieved, move that condition into `Verification Requirements`.
-
-For each material Verification Requirement, make clear what observable evidence establishes that it passed or failed.
-
-Prefer verification through the most representative practical path for the requirement being demonstrated.
-
-Use integration or end-to-end verification when the requirement depends materially on the real entry point, orchestration, integrations, required external effects, or authoritative readback working together.
-
-Use narrower verification when it can establish the same material claim without changing the meaning of what is being proven.
-
-Do not silently substitute lower-level evidence that proves a materially different claim.
-
-If a material Verification Requirement cannot be fully established, state exactly what cannot be demonstrated, why, what closest verification will be performed instead, and what material uncertainty remains.
-
-When missing infrastructure, tooling, or observability prevents a material Verification Requirement from being sufficiently demonstrated, treat enabling that verification as part of the planned work when it is reasonably within the objective's boundary.
-
-## Verification Tools
-
-List the tools or mechanisms that can produce or observe the required evidence, and state briefly what each one can verify.
-```
+List the tools or mechanisms that can produce or observe the required evidence, briefly stating what each can verify.
