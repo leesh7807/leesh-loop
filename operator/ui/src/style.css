@@ -107,7 +107,7 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .publication-result code, .detail-identifier, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .82em; }
 .publication-result.failure { background: #e4e4e4; }
 
-.detail-panel > h2 { max-width: 58rem; margin-bottom: .25rem; overflow-wrap: anywhere; font-size: clamp(1.65rem, 2.5vw, 2.3rem); }
+.detail-panel > h2 { max-width: 58rem; margin-bottom: .25rem; overflow-wrap: anywhere; font-size: clamp(1.6rem, 2.25vw, 2rem); text-wrap: balance; }
 .detail-topline { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: .55rem; }
 .detail-identifier { min-width: 0; color: #646464; overflow-wrap: anywhere; }
 .state-toolbar { position: sticky; top: .7rem; z-index: 5; display: grid; gap: .5rem; margin: 1rem 0 1.1rem; padding: .65rem 0 .75rem; border-bottom: 1px solid #d7d7d7; background: #f6f6f6; }
@@ -162,7 +162,7 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
   .page-header { align-items: flex-start; flex-direction: column; gap: .85rem; }
   .related-work { justify-content: flex-start; }
   .work-layout { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; padding-top: 1.1rem; }
-  .task-surface { position: static; max-height: 38vh; padding: 0 .25rem .9rem 0; overflow-y: auto; border-bottom: 1px solid #d7d7d7; }
+  .task-surface { position: static; max-height: none; padding: 0 .25rem .9rem 0; overflow: visible; overscroll-behavior: auto; border-bottom: 1px solid #d7d7d7; }
   .surface-header { align-items: flex-start; flex-wrap: wrap; }
   .task-surface-meta { margin-left: auto; white-space: nowrap; }
   .quiet-button { white-space: nowrap; }
