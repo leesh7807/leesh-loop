@@ -11,6 +11,7 @@ import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
 import { defaultOperatorUiDependencies, readRequestBody, startOperatorUiServer } from './operator-ui-server.mjs';
 import { registerLoopAfterStart } from './instance-registry.mjs';
 import { initializeLoopTaskStore, localTaskStorePath } from './local-task-store-runtime.mjs';
+import { prepareNpmDependencies } from './dependency-preparation.mjs';
 
 const appScript = fileURLToPath(import.meta.url);
 const root = resolve(dirname(appScript), '../..');
@@ -207,12 +208,10 @@ let operatorUiBuilt = false;
 function ensureOperatorUi() {
   if (operatorUiBuilt) return;
   const ui = join(root, 'operator/ui');
-  if (!existsSync(join(ui, 'node_modules/.bin/vite'))) {
-    const install = runOperatorUiCommand(ui, ['ci']);
-    if (install.status !== 0) throw new Error('Operator UI preparation failed: npm ci');
-  }
+  prepareNpmDependencies({ loopRoot: root, component: 'operator-ui' });
   const build = runOperatorUiCommand(ui, ['run', 'build']);
-  if (build.status !== 0) throw new Error('Operator UI preparation failed: npm run build');
+  if (build.error) throw new Error(`Operator UI build failed: ${build.error.message}`);
+  if (build.status !== 0) throw new Error(`Operator UI build failed${build.signal ? ` (${build.signal})` : ` (exit code ${build.status ?? 1})`}`);
   operatorUiBuilt = true;
 }
 function runOperatorUiCommand(directory, args) {
@@ -281,12 +280,8 @@ async function start(config) {
     const port = Number(config.symphony_port || PROJECT_DEFAULTS.symphony_port); const p = paths(config); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
     if (!existing) console.error('Operator: Checking your Loop setup and getting the task page ready.');
     let localStorePath;
-    try {
-      localStorePath = await initializeLoopTaskStore(p.dir);
-      ensureOperatorUi();
-    } catch (error) {
-      throw new Error(`Local Task Store or Operator UI preparation failed: ${String(error?.message || error)}`);
-    }
+    localStorePath = await initializeLoopTaskStore(p.dir);
+    ensureOperatorUi();
     if (existing) {
       let window_error;
       try { await ensureUi(config); } catch (error) { window_error = String(error.message || error); }

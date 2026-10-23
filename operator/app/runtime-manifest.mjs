@@ -19,6 +19,7 @@ export const RUNTIME_SNAPSHOT_PATHS = Object.freeze([
   'operator/app/github-repository-url.mjs',
   'operator/app/instance-registry.mjs',
   'operator/app/prepare-runtime.mjs',
+  'operator/app/dependency-preparation.mjs',
   'operator/app/local-task-store-runtime.mjs',
   'operator/app/publish-local-plan.mjs',
   'operator/external/chatgpt-shot/chatgpt-shot',
