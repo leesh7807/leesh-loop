@@ -44,11 +44,14 @@ h3 { margin-bottom: 0; font-size: 1rem; line-height: 1.35; font-weight: 650; }
 .task-group-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: .42rem; }
 .task-group-heading h3 { min-width: 0; color: #727272; overflow-wrap: anywhere; font-size: .68rem; letter-spacing: .11em; text-transform: uppercase; }
 .task-group-count { min-width: 1.5rem; text-align: right; }
-.task-row { padding: .68rem .75rem .7rem; border-radius: .45rem; transition: background-color 120ms ease; }
-.task-row:hover { background: #eeeeee; }
-.task-row.selected { background: #e4e4e4; }
+.task-row { padding: .68rem .75rem .7rem; }
+.task-row:hover, .task-row.selected { background: transparent; }
 .task-open { display: flex; width: 100%; align-items: flex-start; justify-content: space-between; gap: .7rem; padding: 0; border: 0; background: transparent; text-align: left; }
 .task-open-title { min-width: 0; font-size: .88rem; line-height: 1.42; font-weight: 600; overflow-wrap: anywhere; }
+.task-open:hover .task-open-title { text-decoration: underline; text-decoration-color: #888; text-decoration-thickness: 1px; text-underline-offset: .18em; }
+.task-row.selected .task-open-title { font-weight: 700; text-decoration: underline; text-decoration-color: #777; text-decoration-thickness: 1px; text-underline-offset: .18em; }
+.task-open:focus-visible { outline: none; }
+.task-open:focus-visible .task-open-title { text-decoration-color: #191919; text-decoration-thickness: 2px; }
 .task-open-state { flex: 0 0 auto; margin-top: .04rem; padding: .14rem .42rem; border-radius: 999px; background: #dcdcdc; color: #353535; font-size: .65rem; line-height: 1.35; text-align: right; white-space: nowrap; }
 .task-identifier { margin: .26rem 0 0; color: #757575; font-size: .65rem; letter-spacing: .035em; overflow-wrap: anywhere; }
 .task-blockers { display: grid; justify-items: start; gap: .2rem; margin: .48rem 0 0; color: #535353; font-size: .7rem; line-height: 1.45; overflow-wrap: anywhere; }
