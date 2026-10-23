@@ -132,14 +132,14 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .accepted-plan-section[open] .disclosure-hint::before { content: '−'; }
 .accepted-plan-section[open] > summary { margin-bottom: .7rem; }
 .long-text { max-width: 100%; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; font-family: inherit; font-size: .83rem; line-height: 1.65; }
-.detail-section > .long-text { padding: .85rem .95rem; border-radius: .4rem; background: #ededed; }
+.detail-section > .long-text { max-width: 82ch; padding: .85rem .95rem; border-radius: .4rem; background: #ededed; }
 .record-list { display: grid; min-width: 0; gap: 1.1rem; margin: 0; padding-left: 1.15rem; }
-.record-list li { min-width: 0; padding-left: .25rem; }
+.record-list li { min-width: 0; padding: 0 0 .7rem .25rem; border-bottom: 1px solid #dedede; }
 .record-list li::marker { color: #757575; font-size: .72rem; }
 .record-meta { min-width: 0; margin: 0 0 .35rem; color: #757575; font-size: .68rem; overflow-wrap: anywhere; }
 .comment-list .record-meta { display: grid; gap: .15rem; }
 .comment-list .record-meta code { overflow-wrap: anywhere; }
-.record-list .long-text { padding: .45rem 0 .7rem; border-bottom: 1px solid #dedede; }
+.record-list .long-text { max-width: 82ch; padding: .45rem 0 0; }
 .comment-form { display: grid; justify-items: start; gap: .5rem; margin-top: 1.15rem; }
 .comment-form textarea { min-height: 6rem; font-family: inherit; font-size: .83rem; }
 .comment-form .action-feedback { width: 100%; }
