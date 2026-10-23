@@ -238,6 +238,10 @@ test('detail and list refreshes reject snapshots that predate confirmed task mut
   assert.match(detail, /const requestVersion = \+\+refreshVersion\.current/);
   assert.match(detail, /if \(requestVersion !== refreshVersion\.current\) return/);
   assert.match(detail, /async function saveState\(event\)[\s\S]*?refreshVersion\.current \+= 1[\s\S]*?finally \{[\s\S]*?refreshVersion\.current \+= 1/);
+  assert.match(detail, /const mutationInFlight = useRef\(false\)/);
+  assert.equal((detail.match(/if \(mutationInFlight\.current\) return/g) || []).length, 3);
+  assert.match(detail, /disabled=\{Boolean\(saving\)\}/);
+  assert.match(detail, /disabled=\{Boolean\(saving\) \|\| !commentDraft\.trim\(\)\}/);
   assert.match(app, /const taskListVersion = useRef\(0\)/);
   assert.match(app, /if \(requestVersion !== taskListVersion\.current\)/);
   assert.match(app, /refreshQueued\.current = true/);

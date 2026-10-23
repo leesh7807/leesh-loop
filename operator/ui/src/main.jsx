@@ -255,6 +255,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
   const [commentFeedback, setCommentFeedback] = useState(null);
   const taskRef = useRef(null);
   const refreshVersion = useRef(0);
+  const mutationInFlight = useRef(false);
   const detailLoaded = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -309,6 +310,8 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
 
   async function saveState(event) {
     event.preventDefault();
+    if (mutationInFlight.current) return;
+    mutationInFlight.current = true;
     refreshVersion.current += 1;
     setSaving('state');
     setStateFeedback(null);
@@ -326,6 +329,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     } catch (error) {
       setStateFeedback({ kind: 'failure', text: error.message || 'State could not be saved.' });
     } finally {
+      mutationInFlight.current = false;
       refreshVersion.current += 1;
       setSaving('');
     }
@@ -333,6 +337,8 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
 
   async function saveBlockers(event) {
     event.preventDefault();
+    if (mutationInFlight.current) return;
+    mutationInFlight.current = true;
     refreshVersion.current += 1;
     setSaving('blockers');
     setBlockerFeedback(null);
@@ -350,6 +356,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     } catch (error) {
       setBlockerFeedback({ kind: 'failure', text: error.message || 'Blocked By could not be saved.' });
     } finally {
+      mutationInFlight.current = false;
       refreshVersion.current += 1;
       setSaving('');
     }
@@ -357,6 +364,8 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
 
   async function addComment(event) {
     event.preventDefault();
+    if (mutationInFlight.current) return;
+    mutationInFlight.current = true;
     refreshVersion.current += 1;
     setSaving('comment');
     setCommentFeedback(null);
@@ -372,6 +381,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     } catch (error) {
       setCommentFeedback({ kind: 'failure', text: error.message || 'Comment could not be saved.' });
     } finally {
+      mutationInFlight.current = false;
       refreshVersion.current += 1;
       setSaving('');
     }
@@ -396,10 +406,10 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
         <p className="current-state"><span>Saved State</span><strong>{task.state}</strong></p>
         <div className="state-controls">
           <label htmlFor="next-state">Choose next State</label>
-          <select id="next-state" value={stateDraft} onChange={event => { setStateDraft(event.target.value); setStateFeedback(null); }} disabled={saving === 'state'}>
+          <select id="next-state" value={stateDraft} onChange={event => { setStateDraft(event.target.value); setStateFeedback(null); }} disabled={Boolean(saving)}>
             {stateOptions.map(value => <option value={value} key={value}>{value}</option>)}
           </select>
-          <button type="submit" className="primary-action" disabled={saving === 'state' || !stateDraft || stateDraft === task.state} aria-busy={saving === 'state'}>{saving === 'state' ? 'Saving…' : 'Save State'}</button>
+          <button type="submit" className="primary-action" disabled={Boolean(saving) || !stateDraft || stateDraft === task.state} aria-busy={saving === 'state'}>{saving === 'state' ? 'Saving…' : 'Save State'}</button>
         </div>
         {stateFeedback && <p className={`action-feedback ${stateFeedback.kind}`} role={stateFeedback.kind === 'failure' ? 'alert' : 'status'}>{stateFeedback.text}</p>}
       </form>
@@ -446,8 +456,8 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
         ) : <p className="quiet">No comments yet.</p>}
         <form className="comment-form" onSubmit={addComment}>
           <label htmlFor="comment">Add a comment</label>
-          <textarea id="comment" value={commentDraft} onChange={event => setCommentDraft(event.target.value)} disabled={saving === 'comment'} required />
-          <button type="submit" disabled={saving === 'comment' || !commentDraft.trim()}>{saving === 'comment' ? 'Saving…' : 'Add comment'}</button>
+          <textarea id="comment" value={commentDraft} onChange={event => setCommentDraft(event.target.value)} disabled={Boolean(saving)} required />
+          <button type="submit" disabled={Boolean(saving) || !commentDraft.trim()}>{saving === 'comment' ? 'Saving…' : 'Add comment'}</button>
           {commentFeedback && <p className={`action-feedback ${commentFeedback.kind}`} role={commentFeedback.kind === 'failure' ? 'alert' : 'status'}>{commentFeedback.text}</p>}
         </form>
       </section>
@@ -461,10 +471,10 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
               tasks={availableBlockers}
               selectedItems={selectedBlockerItems}
               onToggle={value => setBlockerDraft(current => current.includes(value.id) ? current.filter(id => id !== value.id) : [...current, value.id])}
-              disabled={saving === 'blockers'}
+              disabled={Boolean(saving)}
             />
           ) : <p className="quiet">No other tasks are available as blockers.</p>}
-          <button type="submit" disabled={saving === 'blockers'}>{saving === 'blockers' ? 'Saving…' : 'Save Blocked By'}</button>
+          <button type="submit" disabled={Boolean(saving)}>{saving === 'blockers' ? 'Saving…' : 'Save Blocked By'}</button>
           {blockerFeedback && <p className={`action-feedback ${blockerFeedback.kind}`} role={blockerFeedback.kind === 'failure' ? 'alert' : 'status'}>{blockerFeedback.text}</p>}
         </form>
       </section>
