@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 const helperPath = fileURLToPath(import.meta.url);
 const stateDirectoryName = 'dependency-preparation';
+const LOCK_RETRY_MS = 50;
+const EMPTY_LOCK_STALE_MS = 10_000;
 
 const COMPONENTS = Object.freeze({
   'generated-loop': {
@@ -187,7 +189,162 @@ function ensureLockFile(lockPath) {
   }
 }
 
-function installDependencies(loopRoot, componentName) {
+function processStartTicks(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
+    return fields[19] || null;
+  } catch { return null; }
+}
+
+function lockOwner(pid = process.pid) {
+  return {
+    pid,
+    processStartTicks: processStartTicks(pid),
+    token: randomUUID(),
+    createdAt: Date.now()
+  };
+}
+
+function writeLockOwner(directory, owner) {
+  const path = join(directory, 'owner.json');
+  const descriptor = openSync(path, 'wx', 0o600);
+  try {
+    writeFileSync(descriptor, `${JSON.stringify(owner)}\n`);
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function lockSnapshot(path) {
+  let details;
+  try { details = lstatSync(path); }
+  catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
+  if (details.isSymbolicLink() || !details.isDirectory()) throw new Error(`dependency preparation lock is not a real directory: ${path}`);
+  let owner = null;
+  try {
+    const ownerDetails = lstatSync(join(path, 'owner.json'));
+    if (!ownerDetails.isSymbolicLink() && ownerDetails.isFile()) owner = JSON.parse(readFileSync(join(path, 'owner.json'), 'utf8'));
+  } catch (error) {
+    if (error?.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+  }
+  return { details, owner };
+}
+
+function lockOwnerAlive(owner) {
+  if (!Number.isInteger(owner?.pid) || owner.pid < 1) return false;
+  try { process.kill(owner.pid, 0); }
+  catch (error) {
+    if (error?.code === 'EPERM') return true;
+    if (error?.code === 'ESRCH') return false;
+    return true;
+  }
+  if (owner.processStartTicks) {
+    const currentStartTicks = processStartTicks(owner.pid);
+    if (currentStartTicks && currentStartTicks !== owner.processStartTicks) return false;
+  }
+  return true;
+}
+
+function waitForLockRetry() {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LOCK_RETRY_MS);
+}
+
+function waitForRecoveryLock(lockPath) {
+  const recoveryPath = `${lockPath}.recovery`;
+  const recovery = lockSnapshot(recoveryPath);
+  if (!recovery) return false;
+  if (lockOwnerAlive(recovery.owner)
+      || (!recovery.owner && Date.now() - recovery.details.mtimeMs < EMPTY_LOCK_STALE_MS)) {
+    waitForLockRetry();
+    return true;
+  }
+  rmSync(recoveryPath, { recursive: true, force: true });
+  return true;
+}
+
+function removeStaleLock(lockPath, observed) {
+  const recoveryPath = `${lockPath}.recovery`;
+  const recoveryOwner = lockOwner();
+  try {
+    mkdirSync(recoveryPath, { mode: 0o700 });
+    writeLockOwner(recoveryPath, recoveryOwner);
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+    const recovery = lockSnapshot(recoveryPath);
+    if (recovery && !lockOwnerAlive(recovery.owner)
+        && Date.now() - recovery.details.mtimeMs >= EMPTY_LOCK_STALE_MS) {
+      rmSync(recoveryPath, { recursive: true, force: true });
+    }
+    return false;
+  }
+
+  const quarantinePath = `${lockPath}.stale-${randomUUID()}`;
+  try {
+    const current = lockSnapshot(lockPath);
+    const expectedToken = observed.owner?.token;
+    if (!current
+        || (expectedToken ? current.owner?.token !== expectedToken : current.owner)
+        || lockOwnerAlive(current.owner)
+        || (!current.owner && Date.now() - current.details.mtimeMs < EMPTY_LOCK_STALE_MS)) {
+      return false;
+    }
+    renameSync(lockPath, quarantinePath);
+    const moved = lockSnapshot(quarantinePath);
+    const ownerChanged = expectedToken ? moved?.owner?.token !== expectedToken : Boolean(moved?.owner);
+    const movedOwnerAlive = lockOwnerAlive(moved?.owner);
+    const movedEmptyButFresh = Boolean(moved && !moved.owner && Date.now() - moved.details.mtimeMs < EMPTY_LOCK_STALE_MS);
+    if (!moved || ownerChanged || movedOwnerAlive || movedEmptyButFresh) {
+      try { renameSync(quarantinePath, lockPath); } catch { /* keep the moved directory for diagnosis */ }
+      return false;
+    }
+    rmSync(quarantinePath, { recursive: true, force: true });
+    return true;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  } finally {
+    rmSync(recoveryPath, { recursive: true, force: true });
+  }
+}
+
+function withPortableLock(lockPath, action) {
+  const owner = lockOwner();
+  while (true) {
+    if (waitForRecoveryLock(lockPath)) continue;
+    try {
+      mkdirSync(lockPath, { mode: 0o700 });
+      writeLockOwner(lockPath, owner);
+      break;
+    } catch (error) {
+      if (error?.code !== 'EEXIST') {
+        if (error?.code !== 'ENOENT') throw error;
+        mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 });
+        continue;
+      }
+      const current = lockSnapshot(lockPath);
+      if (!current) continue;
+      if (lockOwnerAlive(current.owner)) {
+        waitForLockRetry();
+        continue;
+      }
+      if (!current.owner && Date.now() - current.details.mtimeMs < EMPTY_LOCK_STALE_MS) {
+        waitForLockRetry();
+        continue;
+      }
+      removeStaleLock(lockPath, current);
+    }
+  }
+
+  try { return action(); }
+  finally {
+    const current = lockSnapshot(lockPath);
+    if (current?.owner?.token === owner.token) rmSync(lockPath, { recursive: true, force: true });
+  }
+}
+
+function installDependencies(loopRoot, componentName, runtimeEnvironment = process.env) {
   const component = componentFor(componentName);
   const packageDirectory = join(loopRoot, component.packageDirectory);
   const stateDirectory = ensureStateDirectory(loopRoot);
@@ -209,7 +366,7 @@ function installDependencies(loopRoot, componentName) {
   const install = spawnSync('npm', ['ci', '--include=dev'], {
     cwd: packageDirectory,
     stdio: ['ignore', process.stderr.fd, 'inherit'],
-    env: process.env
+    env: runtimeEnvironment
   });
   if (install.error) throw new Error(`npm ci could not start: ${install.error.message}`);
   if (install.status !== 0) {
@@ -235,6 +392,19 @@ function prepareWhileLocked(loopRoot, componentName, environment) {
       stdio: 'inherit',
       env: environment
     });
+    if (result.error?.code === 'ENOENT') {
+      const portableLockPath = join(stateDirectory, `${componentName}.portable-lock`);
+      const portable = spawnSync(process.execPath, [helperPath, '--prepare-portable-locked', root, componentName], {
+        cwd: root,
+        stdio: 'inherit',
+        env: environment
+      });
+      if (portable.error) throw new Error(`could not start portable dependency preparation: ${portable.error.message}`);
+      if (portable.status !== 0) {
+        throw new Error(`portable dependency preparation did not complete successfully${portable.signal ? ` (${portable.signal})` : ` (exit code ${portable.status ?? 1})`}`);
+      }
+      return { component: componentName, prepared: true, lockPath: portableLockPath };
+    }
     if (result.error) throw new Error(`could not start flock: ${result.error.message}`);
     if (result.status !== 0) {
       throw new Error(`flock did not complete successfully${result.signal ? ` (${result.signal})` : ` (exit code ${result.status ?? 1})`}`);
@@ -257,6 +427,18 @@ const [mode, workerRoot, workerComponent] = process.argv.slice(2);
 if (mode === '--prepare-locked' && process.argv[1] && resolve(process.argv[1]) === helperPath) {
   try {
     installDependencies(resolve(workerRoot), workerComponent);
+  } catch (error) {
+    const label = COMPONENTS[workerComponent]?.label || workerComponent;
+    console.error(`${label} dependency preparation failed: ${String(error?.message || error)}`);
+    process.exitCode = 1;
+  }
+}
+if (mode === '--prepare-portable-locked' && process.argv[1] && resolve(process.argv[1]) === helperPath) {
+  try {
+    const root = resolve(workerRoot);
+    const stateDirectory = ensureStateDirectory(root);
+    const portableLockPath = join(stateDirectory, `${workerComponent}.portable-lock`);
+    withPortableLock(portableLockPath, () => installDependencies(root, workerComponent));
   } catch (error) {
     const label = COMPONENTS[workerComponent]?.label || workerComponent;
     console.error(`${label} dependency preparation failed: ${String(error?.message || error)}`);

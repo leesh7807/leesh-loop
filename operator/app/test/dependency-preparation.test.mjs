@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
@@ -27,34 +27,26 @@ async function fixture(t) {
   const binDirectory = join(directory, 'bin');
   const installLog = join(directory, 'npm-ci.log');
   await mkdir(binDirectory);
+  await symlink(process.execPath, join(binDirectory, 'node'));
   const fakeNpm = join(binDirectory, 'npm');
   await writeFile(fakeNpm, [
-    '#!/bin/sh',
-    'set -eu',
-    '[ "$1" = "ci" ]',
-    '[ "$2" = "--include=dev" ]',
-    "printf '%s\\n' \"$PWD\" >> \"$TEST_NPM_INSTALL_LOG\"",
-    'if [ -n "${TEST_NPM_DELAY:-}" ]; then sleep "$TEST_NPM_DELAY"; fi',
-    'if [ "${TEST_NPM_FAIL:-0}" = "1" ]; then exit 17; fi',
-    'case "$PWD" in',
-    '  */operator/ui)',
-    '    mkdir -p node_modules/.bin node_modules/react node_modules/react-dom',
-    "    printf '{\"name\":\"vite\"}\\n' > node_modules/.bin/vite",
-    "    printf '{\"name\":\"react\"}\\n' > node_modules/react/package.json",
-    "    printf '{\"name\":\"react-dom\"}\\n' > node_modules/react-dom/package.json",
-    '    ;;',
-    '  */operator/local_task_store)',
-    '    mkdir -p node_modules/better-sqlite3/build/Release',
-    "    printf 'native binary fixture\\n' > node_modules/better-sqlite3/build/Release/better_sqlite3.node",
-    '    ;;',
-    '  */loop)',
-    '    if grep -q "tiny-dep" package.json; then',
-    '      mkdir -p node_modules/tiny-dep',
-    "      printf '{\"name\":\"tiny-dep\"}\\n' > node_modules/tiny-dep/package.json",
-    '    fi',
-    '    ;;',
-    '  *) exit 18 ;;',
-    'esac',
+    '#!/usr/bin/env node',
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "if (process.argv[2] !== 'ci' || process.argv[3] !== '--include=dev') process.exit(19);",
+    "fs.appendFileSync(process.env.TEST_NPM_INSTALL_LOG, `${process.cwd()}\\n`);",
+    "if (process.env.TEST_NPM_DELAY) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.TEST_NPM_DELAY));",
+    "if (process.env.TEST_NPM_FAIL === '1') process.exit(17);",
+    "const write = (file, contents) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, contents); };",
+    "if (process.cwd().endsWith('/operator/ui')) {",
+    "  write('node_modules/.bin/vite', '{\"name\":\"vite\"}\\n');",
+    "  write('node_modules/react/package.json', '{\"name\":\"react\"}\\n');",
+    "  write('node_modules/react-dom/package.json', '{\"name\":\"react-dom\"}\\n');",
+    "} else if (process.cwd().endsWith('/operator/local_task_store')) {",
+    "  write('node_modules/better-sqlite3/build/Release/better_sqlite3.node', 'native binary fixture\\n');",
+    "} else if (process.cwd().endsWith('/loop')) {",
+    "  if (fs.readFileSync('package.json', 'utf8').includes('tiny-dep')) write('node_modules/tiny-dep/package.json', '{\"name\":\"tiny-dep\"}\\n');",
+    "} else process.exit(18);",
     ''
   ].join('\n'));
   await chmod(fakeNpm, 0o755);
@@ -63,7 +55,7 @@ async function fixture(t) {
     PATH: `${binDirectory}:${process.env.PATH}`,
     TEST_NPM_INSTALL_LOG: installLog
   };
-  return { directory, loopRoot, uiDirectory, storeDirectory, installLog, environment };
+  return { directory, loopRoot, uiDirectory, storeDirectory, installLog, binDirectory, environment };
 }
 
 async function installCount(path) {
@@ -115,7 +107,8 @@ test('component dependency fingerprints reuse valid installs and invalidate only
 
 test('failed npm ci removes the old success record and a later retry recovers automatically', async t => {
   const target = await fixture(t);
-  prepareNpmDependencies({ loopRoot: target.loopRoot, component: 'local-task-store', environment: target.environment });
+  const environment = { ...target.environment, PATH: target.binDirectory };
+  prepareNpmDependencies({ loopRoot: target.loopRoot, component: 'local-task-store', environment });
   assert.equal(await installCount(target.installLog), 1);
 
   await writeFile(join(target.storeDirectory, 'package-lock.json'), JSON.stringify({ name: 'changed-store', lockfileVersion: 3, packages: {} }));
@@ -123,13 +116,13 @@ test('failed npm ci removes the old success record and a later retry recovers au
     Promise.resolve().then(() => prepareNpmDependencies({
       loopRoot: target.loopRoot,
       component: 'local-task-store',
-      environment: { ...target.environment, TEST_NPM_FAIL: '1' }
+      environment: { ...environment, TEST_NPM_FAIL: '1' }
     })),
     /Local Task Store dependency preparation failed/
   );
   await assert.rejects(readFile(recordPath(target.loopRoot, 'local-task-store')), { code: 'ENOENT' });
 
-  prepareNpmDependencies({ loopRoot: target.loopRoot, component: 'local-task-store', environment: target.environment });
+  prepareNpmDependencies({ loopRoot: target.loopRoot, component: 'local-task-store', environment });
   assert.equal(await installCount(target.installLog), 3);
   assert.equal(JSON.parse(await readFile(recordPath(target.loopRoot, 'local-task-store'), 'utf8')).schemaVersion, 1);
 });
@@ -161,7 +154,7 @@ test('generated Loop root uses its own package lock record', async t => {
 
 test('concurrent preparation of one component shares a lock and records only the completed install', async t => {
   const target = await fixture(t);
-  const environment = { ...target.environment, TEST_NPM_DELAY: '0.2' };
+  const environment = { ...target.environment, TEST_NPM_DELAY: '200' };
   await Promise.all([
     runConcurrentPreparation(target.loopRoot, environment),
     runConcurrentPreparation(target.loopRoot, environment)
@@ -169,4 +162,29 @@ test('concurrent preparation of one component shares a lock and records only the
 
   assert.equal(await installCount(target.installLog), 1);
   assert.equal(JSON.parse(await readFile(recordPath(target.loopRoot, 'local-task-store'), 'utf8')).component, 'local-task-store');
+});
+
+test('portable lock recovery serializes concurrent preparations without flock and reclaims an abandoned owner', async t => {
+  const target = await fixture(t);
+  const environment = { ...target.environment, PATH: target.binDirectory, TEST_NPM_DELAY: '200' };
+  const portableLockPath = join(target.loopRoot, '.leesh-loop/dependency-preparation/local-task-store.portable-lock');
+  await mkdir(portableLockPath, { recursive: true });
+  await writeFile(join(portableLockPath, 'owner.json'), JSON.stringify({ pid: 999999999, processStartTicks: null, token: 'abandoned' }));
+
+  await Promise.all([
+    runConcurrentPreparation(target.loopRoot, environment),
+    runConcurrentPreparation(target.loopRoot, environment)
+  ]);
+
+  assert.equal(await installCount(target.installLog), 1);
+  assert.equal(JSON.parse(await readFile(recordPath(target.loopRoot, 'local-task-store'), 'utf8')).component, 'local-task-store');
+
+  await rm(recordPath(target.loopRoot, 'local-task-store'));
+  await writeFile(join(target.storeDirectory, 'package-lock.json'), JSON.stringify({ name: 'changed-store', lockfileVersion: 3, packages: {} }));
+  await rm(portableLockPath, { recursive: true, force: true });
+  await mkdir(portableLockPath);
+  const oldTime = new Date(Date.now() - 60_000);
+  await utimes(portableLockPath, oldTime, oldTime);
+  await runConcurrentPreparation(target.loopRoot, environment);
+  assert.equal(await installCount(target.installLog), 2, 'an interrupted lock acquisition without owner metadata is reclaimed safely');
 });
