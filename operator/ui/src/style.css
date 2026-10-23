@@ -108,6 +108,7 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .publication-result.failure { background: #e4e4e4; }
 
 .detail-panel > h2 { max-width: 58rem; margin-bottom: .25rem; overflow-wrap: anywhere; font-size: clamp(1.6rem, 2.25vw, 2rem); text-wrap: balance; }
+.panel-navigation-heading:focus-visible { outline: none; box-shadow: inset 0 -2px 0 #292929; }
 .detail-topline { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: .55rem; }
 .detail-identifier { min-width: 0; color: #646464; overflow-wrap: anywhere; }
 .state-toolbar { position: sticky; top: .7rem; z-index: 5; display: grid; gap: .5rem; margin: 1rem 0 1.1rem; padding: .65rem 0 .75rem; border-bottom: 1px solid #d7d7d7; background: #f6f6f6; }
@@ -163,12 +164,12 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
   .related-work { justify-content: flex-start; }
   .work-layout { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; padding-top: 1.1rem; }
   .task-surface { position: static; max-height: none; padding: 0 .25rem .9rem 0; overflow: visible; overscroll-behavior: auto; border-bottom: 1px solid #d7d7d7; }
+  .work-panel { padding: 0; scroll-margin-top: 1rem; }
   .surface-header { align-items: flex-start; flex-wrap: wrap; }
   .task-surface-meta { margin-left: auto; white-space: nowrap; }
   .quiet-button { white-space: nowrap; }
   .task-groups { gap: .85rem; }
   .task-row { padding: .55rem .65rem; }
-  .work-panel { padding: 0; }
   .publish-controls { grid-template-columns: minmax(9rem, .7fr) minmax(13rem, 1fr); }
   .detail-section { margin-top: 1.35rem; }
   .detail-topline { align-items: flex-start; flex-wrap: wrap; }

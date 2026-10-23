@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createSerializedRefreshQueue } from './refresh-queue.js';
 import { clearPublicationDraft, readPublicationDraft, writePublicationDraft } from './publication-draft.js';
@@ -190,7 +190,7 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
   return (
     <section className="work-panel publication-panel" aria-labelledby="publish-heading">
       <p className="eyebrow">New task</p>
-      <h2 id="publish-heading">Publish a Plan</h2>
+      <h2 id="publish-heading" className="panel-navigation-heading" tabIndex={-1}>Publish a Plan</h2>
       <p className="panel-intro">Paste the Accepted Plan. The Local Publisher creates the task and keeps this copy unchanged.</p>
       <form onSubmit={submit}>
         <div className="plan-field">
@@ -400,8 +400,9 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     }
   }
 
-  if (loading && !task) return <section className="work-panel" aria-busy="true"><p className="empty-state">Loading task detail…</p></section>;
-  if (!task) return <section className="work-panel"><button type="button" className="text-button" onClick={onBackToPublish}>Back to Plan publication</button><p className="inline-message failure" role="alert">{refreshError || 'Task detail is unavailable.'}</p><button type="button" className="text-button" onClick={refresh}>Try again</button></section>;
+  const taskSummary = config.tasks.find(value => value.id === taskId);
+  if (loading && !task) return <section className="work-panel detail-panel" aria-labelledby="task-detail-heading" aria-busy="true"><h2 id="task-detail-heading" className="panel-navigation-heading" tabIndex={-1}>{taskSummary?.title || 'Task detail'}</h2><p className="empty-state">Loading task detail…</p></section>;
+  if (!task) return <section className="work-panel detail-panel" aria-labelledby="task-detail-heading"><h2 id="task-detail-heading" className="panel-navigation-heading" tabIndex={-1}>{taskSummary?.title || 'Task detail'}</h2><button type="button" className="text-button" onClick={onBackToPublish}>Back to Plan publication</button><p className="inline-message failure" role="alert">{refreshError || 'Task detail is unavailable.'}</p><button type="button" className="text-button" onClick={refresh}>Try again</button></section>;
 
   const availableBlockers = config.tasks.filter(value => value.id !== taskId);
   const selectedBlockerItems = blockerDraft.map(id => availableBlockers.find(value => value.id === id)
@@ -414,7 +415,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
         <button type="button" className="text-button" onClick={onBackToPublish}>Publish a Plan</button>
         <span className="detail-identifier">{task.identifier}</span>
       </div>
-      <h2 id="task-detail-heading">{task.title}</h2>
+      <h2 id="task-detail-heading" className="panel-navigation-heading" tabIndex={-1}>{task.title}</h2>
       <form className="state-toolbar" onSubmit={saveState} aria-label="Change task State">
         <p className="current-state"><span>Saved State</span><strong>{task.state}</strong></p>
         <div className="state-controls">
@@ -499,6 +500,7 @@ function App() {
   const [config, setConfig] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
+  const [navigationTarget, setNavigationTarget] = useState(null);
   const [publicationReceipt, setPublicationReceipt] = useState(null);
   const [draft, setDraft] = useState(() => readPublicationDraft());
   const [publishing, setPublishing] = useState(false);
@@ -558,6 +560,16 @@ function App() {
     if (config?.githubRepositoryName) document.title = `${config.githubRepositoryName} · Loop`;
   }, [config?.githubRepositoryName]);
 
+  useLayoutEffect(() => {
+    if (!navigationTarget) return;
+    if (window.matchMedia('(max-width: 960px)').matches) {
+      document.querySelector('.work-layout > .work-panel:last-child')?.scrollIntoView({ block: 'start' });
+      const headingId = navigationTarget === 'detail' ? 'task-detail-heading' : 'publish-heading';
+      document.getElementById(headingId)?.focus({ preventScroll: true });
+    }
+    setNavigationTarget(null);
+  }, [navigationTarget]);
+
   function updateDraft(values) {
     setDraft(current => {
       if (values.togglePublishBlocker) {
@@ -572,7 +584,8 @@ function App() {
   }
 
   function openTask(id) {
-    window.scrollTo(0, 0);
+    if (window.matchMedia('(max-width: 960px)').matches) setNavigationTarget('detail');
+    else window.scrollTo(0, 0);
     setSelectedTaskId(id);
   }
   function openPublishedTask(publication) {
@@ -583,7 +596,8 @@ function App() {
     void refresh();
   }
   function returnToPublication() {
-    window.scrollTo(0, 0);
+    if (window.matchMedia('(max-width: 960px)').matches) setNavigationTarget('publish');
+    else window.scrollTo(0, 0);
     setSelectedTaskId(null);
   }
   function resetDraft() {

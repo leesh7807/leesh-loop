@@ -12,7 +12,7 @@ The captures were taken from the checkout build against the read-only Local Task
 
 ## Narrow-screen queue follow-up
 
-The narrow-screen queue behavior changed after these captures: at widths up to 960px the task surface now follows normal page flow instead of using a 38vh nested scroll area. `publication-mobile.png` predates that follow-up and shows the old nested-scroll behavior; treat it as historical until a fresh narrow-screen capture is available. The connected Chrome control in this run did not expose viewport resizing, so the new narrow layout has not yet been visually captured at phone dimensions.
+The narrow-screen queue behavior changed after these captures: at widths up to 960px the task surface follows normal page flow instead of using a 38vh nested scroll area. Selecting a Task or returning to publication now scrolls the destination panel into view and moves focus to its heading; desktop navigation retains its existing page-top behavior. `publication-mobile.png` predates these follow-ups and shows the old nested-scroll behavior; treat it as historical until a fresh narrow-screen capture is available. The connected Chrome control in this run did not expose viewport resizing, so the new narrow layout and destination navigation have not yet been visually captured at phone dimensions.
 
 ## Historical captures
 
