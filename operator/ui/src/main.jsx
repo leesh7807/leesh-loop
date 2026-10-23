@@ -453,14 +453,14 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       </details>
 
       <section className="detail-section" aria-labelledby="workpad-heading">
-        <div className="section-title"><p className="eyebrow">Worker record</p><h3 id="workpad-heading">Workpad</h3></div>
+        <div className="section-title"><span className="section-title-copy"><p className="eyebrow">Worker record</p><h3 id="workpad-heading">Workpad</h3></span></div>
         {workpad.length ? (
           <ol className="record-list">{workpad.map(record => <li key={record.id}><p className="record-meta">{record.author} · {record.createdAt}</p><pre className="long-text">{record.content}</pre></li>)}</ol>
         ) : <p className="quiet">No Workpad entries yet.</p>}
       </section>
 
       <section className="detail-section" aria-labelledby="comments-heading">
-        <div className="section-title"><p className="eyebrow">Human input</p><h3 id="comments-heading">Comments</h3></div>
+        <div className="section-title"><span className="section-title-copy"><p className="eyebrow">Human input</p><h3 id="comments-heading">Comments</h3></span></div>
         {comments.length ? (
           <ol className="record-list comment-list">
             {comments.map(comment => (
@@ -483,7 +483,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       </section>
 
       <section className="detail-section management-section" aria-labelledby="manage-task-heading">
-        <div className="section-title"><p className="eyebrow">Next action</p><h3 id="manage-task-heading">Manage task</h3></div>
+        <div className="section-title"><span className="section-title-copy"><p className="eyebrow">Next action</p><h3 id="manage-task-heading">Manage task</h3></span></div>
         <form className="management-form" onSubmit={saveBlockers}>
           <span className="field-label">Blocked By</span>
           {availableBlockers.length || selectedBlockerItems.length ? (
