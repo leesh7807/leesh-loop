@@ -86,13 +86,13 @@ test('Operator publication, ordered records, State, and Blocked By use Local Pub
   }));
   assert.equal(publication.response.status, 201);
   assert.equal(publication.body.task.acceptedPlan, plan);
-  assert.equal(publication.body.task.title, '2026-10-13-smoke-review');
+  assert.equal(publication.body.task.title, '# 2026-10-13-smoke-review ## Objective A review task with Korean content: 확인합니다.');
   const taskId = publication.body.page_id;
 
   const list = await request(base, '/api/v1/tasks');
   const listed = list.body.tasks.find(task => task.id === taskId);
   assert.equal(listed.blockedBy[0].taskId, blockerId);
-  assert.equal(listed.blockedBy[0].title, '2026-10-13-smoke-blocker');
+  assert.equal(listed.blockedBy[0].title, '# 2026-10-13-smoke-blocker ## Objective A Local blocker.');
   assert.equal(listed.blockedBy[0].state, 'Backlog');
 
   const detail = await request(base, `/api/v1/tasks/${taskId}`);
@@ -122,11 +122,24 @@ test('Operator publication, ordered records, State, and Blocked By use Local Pub
   assert.equal((await request(base, `/api/v1/tasks/${taskId}`)).body.task.state, 'Human Review');
 });
 
-test('failed publication and missing detail remain explicit', async t => {
+test('H1-free repeated publication creates independent tasks and blank plans fail explicitly', async t => {
   const base = await testServer(t);
-  const badPlan = await request(base, '/api/v1/publish', json('POST', { plan: 'No H1', state: 'Ready' }));
+  const plan = '  A plain-language task plan\n\n  with details.  ';
+  const first = await request(base, '/api/v1/publish', json('POST', { plan, state: 'Ready' }));
+  const second = await request(base, '/api/v1/publish', json('POST', { plan, state: 'Ready' }));
+  assert.equal(first.response.status, 201);
+  assert.equal(second.response.status, 201);
+  assert.notEqual(first.body.page_id, second.body.page_id);
+  assert.notEqual(first.body.identifier, second.body.identifier);
+  assert.equal(first.body.task.title, 'A plain-language task plan with details.');
+  assert.equal(second.body.task.title, 'A plain-language task plan with details. (1)');
+  assert.equal(first.body.task.acceptedPlan, plan);
+  assert.equal(second.body.task.acceptedPlan, plan);
+  assert.equal((await request(base, '/api/v1/tasks')).body.tasks.length, 2);
+
+  const badPlan = await request(base, '/api/v1/publish', json('POST', { plan: ' \n\t ', state: 'Ready' }));
   assert.equal(badPlan.response.status, 400);
-  assert.match(badPlan.body.error, /H1/);
+  assert.match(badPlan.body.error, /Plan must be a non-empty string/);
   const missing = await request(base, '/api/v1/tasks/missing-task-id');
   assert.equal(missing.response.status, 404);
 });
@@ -197,6 +210,7 @@ test('rendered UI source keeps Local task navigation, human review actions, and 
   assert.match(source, /publicationReceipt\?\.page_id === taskId/);
   assert.match(source, /Task ID/);
   assert.match(source, /Workpad/);
+  assert.match(source, /className="state-toolbar"/);
   assert.match(source, /Save State/);
   assert.match(source, /Save Blocked By/);
   assert.match(source, /Add comment/);
@@ -205,7 +219,8 @@ test('rendered UI source keeps Local task navigation, human review actions, and 
   assert.match(source, /Review selected blockers/);
   assert.match(source, /Show \{remainingBlockers.length\} more/);
   assert.doesNotMatch(source, /Notion|Symphony Dashboard|notionTasksUrl/);
-  assert.match(styles, /@media \(max-width: 760px\)/);
+  assert.match(styles, /@media \(max-width: 960px\)/);
+  assert.match(styles, /\.state-toolbar \{ position: sticky/);
   const colors = [...styles.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(match => match[0]);
   assert.ok(colors.length > 0);
   assert.ok(colors.every(value => {

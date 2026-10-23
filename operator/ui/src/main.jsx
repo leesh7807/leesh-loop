@@ -147,6 +147,7 @@ function TaskSurface({ tasks, selectedTaskId, loading, error, refreshedAt, onRet
 
 function PublicationSurface({ config, plan, state, selectedBlockers, publishing, onDraftChange, onReset, onPublished }) {
   const [result, setResult] = useState(null);
+  const submitInFlight = useRef(false);
 
   useEffect(() => {
     const current = { plan, state, selectedBlockers };
@@ -156,6 +157,8 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
 
   async function submit(event) {
     event.preventDefault();
+    if (submitInFlight.current) return;
+    submitInFlight.current = true;
     setResult(null);
     const submittedBlockers = [...selectedBlockers];
     writePublicationDraft({ plan, state, selectedBlockers: submittedBlockers });
@@ -173,6 +176,7 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
     } catch (error) {
       setResult({ kind: 'failure', message: error.message || 'Publishing failed.' });
     } finally {
+      submitInFlight.current = false;
       onDraftChange({ publishing: false });
     }
   }
@@ -246,7 +250,10 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
   const [loading, setLoading] = useState(true);
   const [refreshError, setRefreshError] = useState('');
   const [saving, setSaving] = useState('');
-  const [message, setMessage] = useState(null);
+  const [stateFeedback, setStateFeedback] = useState(null);
+  const [blockerFeedback, setBlockerFeedback] = useState(null);
+  const [commentFeedback, setCommentFeedback] = useState(null);
+  const taskRef = useRef(null);
   const detailLoaded = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -254,6 +261,12 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       const response = await fetch(taskUrl(taskId), { headers: { accept: 'application/json' } });
       const body = await responseJson(response);
       const firstRead = !detailLoaded.current;
+      const previousTask = taskRef.current;
+      if (previousTask && previousTask.state !== body.task.state) {
+        setStateDraft(current => current === previousTask.state ? body.task.state : current);
+        setStateFeedback(current => current?.kind === 'success' && current.savedState !== body.task.state ? null : current);
+      }
+      taskRef.current = body.task;
       setTask(body.task);
       setWorkpad(body.workpad);
       setComments(body.comments);
@@ -280,7 +293,10 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     setStateDraft('');
     setBlockerDraft([]);
     setCommentDraft('');
-    setMessage(null);
+    setStateFeedback(null);
+    setBlockerFeedback(null);
+    setCommentFeedback(null);
+    taskRef.current = null;
     setLoading(true);
     void refresh();
     const timer = window.setInterval(() => { void refresh(); }, REFRESH_INTERVAL_MS);
@@ -290,45 +306,47 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
   async function saveState(event) {
     event.preventDefault();
     setSaving('state');
-    setMessage(null);
+    setStateFeedback(null);
     try {
       const response = await fetch(`${taskUrl(taskId)}/state`, {
         method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ state: stateDraft })
       });
       const body = await responseJson(response);
+      taskRef.current = body.task;
       setTask(body.task);
       setStateDraft(body.task.state);
-      setMessage({ kind: 'success', text: `State saved as ${body.task.state}.` });
+      setStateFeedback({ kind: 'success', savedState: body.task.state, text: `Saved as ${body.task.state}.` });
       onTaskChanged(body.task);
       onTaskListRefresh();
     } catch (error) {
-      setMessage({ kind: 'failure', text: error.message || 'State could not be saved.' });
+      setStateFeedback({ kind: 'failure', text: error.message || 'State could not be saved.' });
     } finally { setSaving(''); }
   }
 
   async function saveBlockers(event) {
     event.preventDefault();
     setSaving('blockers');
-    setMessage(null);
+    setBlockerFeedback(null);
     try {
       const response = await fetch(`${taskUrl(taskId)}/blocked-by`, {
         method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blockedBy: blockerDraft })
       });
       const body = await responseJson(response);
+      taskRef.current = body.task;
       setTask(body.task);
       setBlockerDraft(body.task.blockedBy);
-      setMessage({ kind: 'success', text: 'Blocked By saved.' });
+      setBlockerFeedback({ kind: 'success', text: 'Blocked By saved.' });
       onTaskChanged(body.task);
       onTaskListRefresh();
     } catch (error) {
-      setMessage({ kind: 'failure', text: error.message || 'Blocked By could not be saved.' });
+      setBlockerFeedback({ kind: 'failure', text: error.message || 'Blocked By could not be saved.' });
     } finally { setSaving(''); }
   }
 
   async function addComment(event) {
     event.preventDefault();
     setSaving('comment');
-    setMessage(null);
+    setCommentFeedback(null);
     try {
       const response = await fetch(`${taskUrl(taskId)}/comments`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: commentDraft })
@@ -336,10 +354,10 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       const body = await responseJson(response);
       setComments(current => [...current, body.comment]);
       setCommentDraft('');
-      setMessage({ kind: 'success', text: `Comment saved (${body.comment.id}).` });
+      setCommentFeedback({ kind: 'success', text: 'Comment saved.' });
       onTaskListRefresh();
     } catch (error) {
-      setMessage({ kind: 'failure', text: error.message || 'Comment could not be saved.' });
+      setCommentFeedback({ kind: 'failure', text: error.message || 'Comment could not be saved.' });
     } finally { setSaving(''); }
   }
 
@@ -358,17 +376,27 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
         <span className="detail-identifier">{task.identifier}</span>
       </div>
       <h2 id="task-detail-heading">{task.title}</h2>
-      <p className="current-state">Current State <strong>{task.state}</strong></p>
+      <form className="state-toolbar" onSubmit={saveState} aria-label="Change task State">
+        <p className="current-state"><span>Saved State</span><strong>{task.state}</strong></p>
+        <div className="state-controls">
+          <label htmlFor="next-state">Choose next State</label>
+          <select id="next-state" value={stateDraft} onChange={event => { setStateDraft(event.target.value); setStateFeedback(null); }} disabled={saving === 'state'}>
+            {stateOptions.map(value => <option value={value} key={value}>{value}</option>)}
+          </select>
+          <button type="submit" className="primary-action" disabled={saving === 'state' || !stateDraft || stateDraft === task.state} aria-busy={saving === 'state'}>{saving === 'state' ? 'Saving…' : 'Save State'}</button>
+        </div>
+        {stateFeedback && <p className={`action-feedback ${stateFeedback.kind}`} role={stateFeedback.kind === 'failure' ? 'alert' : 'status'}>{stateFeedback.text}</p>}
+      </form>
       {publicationReceipt?.page_id === taskId && (
-        <div className="publication-result success" role="status">
-          <p className="eyebrow">Publication result</p>
-          <h3>Plan published</h3>
-          <p><code>{publicationReceipt.identifier}</code> · <strong>{publicationReceipt.state}</strong></p>
-          <p>Task ID <code>{publicationReceipt.page_id}</code> was saved. The detail below is the published Task.</p>
+        <div className="publication-receipt" role="status">
+          <span>Published</span>
+          <code>{publicationReceipt.identifier}</code>
+          <span>· Created in {publicationReceipt.state}</span>
+          <span>· Task ID <code>{publicationReceipt.page_id}</code></span>
+          <p>The task below reflects its latest saved State. Its Accepted Plan is preserved below.</p>
         </div>
       )}
       {refreshError && <p className="inline-message failure" role="status">Refresh failed. Showing the last successful detail. {refreshError}</p>}
-      {message && <p className={`inline-message ${message.kind}`} role={message.kind === 'failure' ? 'alert' : 'status'}>{message.text}</p>}
 
       <details className="detail-section accepted-plan-section" aria-labelledby="accepted-plan-heading">
         <summary className="section-title">
@@ -404,20 +432,12 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
           <label htmlFor="comment">Add a comment</label>
           <textarea id="comment" value={commentDraft} onChange={event => setCommentDraft(event.target.value)} disabled={saving === 'comment'} required />
           <button type="submit" disabled={saving === 'comment' || !commentDraft.trim()}>{saving === 'comment' ? 'Saving…' : 'Add comment'}</button>
+          {commentFeedback && <p className={`action-feedback ${commentFeedback.kind}`} role={commentFeedback.kind === 'failure' ? 'alert' : 'status'}>{commentFeedback.text}</p>}
         </form>
       </section>
 
       <section className="detail-section management-section" aria-labelledby="manage-task-heading">
         <div className="section-title"><p className="eyebrow">Next action</p><h3 id="manage-task-heading">Manage task</h3></div>
-        <form className="management-form" onSubmit={saveState}>
-          <label htmlFor="next-state">Choose next State</label>
-          <div className="inline-controls">
-            <select id="next-state" value={stateDraft} onChange={event => setStateDraft(event.target.value)} disabled={saving === 'state'}>
-              {stateOptions.map(value => <option value={value} key={value}>{value}</option>)}
-            </select>
-            <button type="submit" disabled={saving === 'state' || !stateDraft}>{saving === 'state' ? 'Saving…' : 'Save State'}</button>
-          </div>
-        </form>
         <form className="management-form" onSubmit={saveBlockers}>
           <span className="field-label">Blocked By</span>
           {availableBlockers.length || selectedBlockerItems.length ? (
@@ -429,6 +449,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
             />
           ) : <p className="quiet">No other tasks are available as blockers.</p>}
           <button type="submit" disabled={saving === 'blockers'}>{saving === 'blockers' ? 'Saving…' : 'Save Blocked By'}</button>
+          {blockerFeedback && <p className={`action-feedback ${blockerFeedback.kind}`} role={blockerFeedback.kind === 'failure' ? 'alert' : 'status'}>{blockerFeedback.text}</p>}
         </form>
       </section>
     </section>
@@ -501,11 +522,19 @@ function App() {
     });
   }
 
-  function openTask(id) { setSelectedTaskId(id); }
+  function openTask(id) {
+    window.scrollTo(0, 0);
+    setSelectedTaskId(id);
+  }
   function openPublishedTask(publication) {
+    resetDraft();
     setPublicationReceipt(publication);
-    setSelectedTaskId(publication.page_id);
+    openTask(publication.page_id);
     void refresh();
+  }
+  function returnToPublication() {
+    window.scrollTo(0, 0);
+    setSelectedTaskId(null);
   }
   function resetDraft() {
     const emptyDraft = { plan: '', state: config?.defaultState || 'Ready', selectedBlockers: [] };
@@ -538,7 +567,7 @@ function App() {
             config={{ ...config, tasks }}
             taskId={selectedTaskId}
             publicationReceipt={publicationReceipt}
-            onBackToPublish={() => setSelectedTaskId(null)}
+            onBackToPublish={returnToPublication}
             onTaskChanged={handleTaskChanged}
             onTaskListRefresh={refresh}
           />

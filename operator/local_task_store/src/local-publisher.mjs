@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 const DEFAULT_STATE = 'Ready';
-const PLAN_TITLE_LIMIT = 1900;
+const PLAN_TITLE_LIMIT = 80;
 
 export function publishAcceptedPlan(store, plan, { state = DEFAULT_STATE, blockedBy = [] } = {}) {
   if (typeof plan !== 'string' || !plan.trim()) throw new TypeError('Plan content must be non-empty');
@@ -10,14 +10,13 @@ export function publishAcceptedPlan(store, plan, { state = DEFAULT_STATE, blocke
     throw new TypeError('Blocked By must be a list of task identities');
   }
 
-  const heading = plan.split(/\r?\n/).find(line => line.startsWith('# '));
-  const title = heading?.slice(2).trim();
-  if (!title) throw new TypeError('Plan title requires a Markdown H1');
-  if (title.length > PLAN_TITLE_LIMIT) throw new TypeError(`Plan title exceeds the ${PLAN_TITLE_LIMIT}-character limit`);
+  const normalizedStart = plan.trim().replace(/\s+/gu, ' ');
+  const title = Array.from(normalizedStart).slice(0, PLAN_TITLE_LIMIT).join('');
 
-  const identifier = `PLAN-${createHash('sha256').update(plan, 'utf8').digest('hex').slice(0, 12).toUpperCase()}`;
-  const task = store.publishTask({
-    publicationKey: identifier,
+  const publicationKey = randomUUID();
+  const identifier = `PLAN-${publicationKey.toUpperCase()}`;
+  const task = store.publishTaskWithUniqueTitle({
+    publicationKey,
     identifier,
     title,
     state: state.trim(),
