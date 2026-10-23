@@ -255,10 +255,18 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
   const [commentFeedback, setCommentFeedback] = useState(null);
   const taskRef = useRef(null);
   const refreshVersion = useRef(0);
+  const detailRefreshInFlight = useRef(false);
+  const detailRefreshQueued = useRef(false);
+  const currentRefresh = useRef(null);
   const mutationInFlight = useRef(false);
   const detailLoaded = useRef(false);
 
   const refresh = useCallback(async () => {
+    if (detailRefreshInFlight.current) {
+      detailRefreshQueued.current = true;
+      return;
+    }
+    detailRefreshInFlight.current = true;
     const requestVersion = ++refreshVersion.current;
     try {
       const response = await fetch(taskUrl(taskId), { headers: { accept: 'application/json' } });
@@ -286,11 +294,19 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       setRefreshError(error.message || 'Task detail could not be refreshed.');
       if (!detailLoaded.current) setTask(null);
     } finally {
-      setLoading(false);
+      if (requestVersion === refreshVersion.current) setLoading(false);
+      detailRefreshInFlight.current = false;
+      if (detailRefreshQueued.current) {
+        detailRefreshQueued.current = false;
+        void currentRefresh.current?.();
+      }
     }
   }, [taskId]);
+  currentRefresh.current = refresh;
 
   useEffect(() => {
+    refreshVersion.current += 1;
+    detailRefreshQueued.current = false;
     detailLoaded.current = false;
     setTask(null);
     setWorkpad([]);
@@ -305,7 +321,11 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     setLoading(true);
     void refresh();
     const timer = window.setInterval(() => { void refresh(); }, REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+      refreshVersion.current += 1;
+      detailRefreshQueued.current = false;
+    };
   }, [refresh]);
 
   async function saveState(event) {

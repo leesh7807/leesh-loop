@@ -230,13 +230,17 @@ test('rendered UI source keeps Local task navigation, human review actions, and 
   }), `expected grayscale-only CSS colors, received: ${colors.join(', ')}`);
 });
 
-test('detail and list refreshes reject snapshots that predate confirmed task mutations', async () => {
+test('detail and list refreshes serialize polls and reject snapshots that predate task mutations', async () => {
   const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
   const detail = source.slice(source.indexOf('function TaskDetail'), source.indexOf('function App'));
   const app = source.slice(source.indexOf('function App'));
 
   assert.match(detail, /const requestVersion = \+\+refreshVersion\.current/);
   assert.match(detail, /if \(requestVersion !== refreshVersion\.current\) return/);
+  assert.match(detail, /const detailRefreshInFlight = useRef\(false\)/);
+  assert.match(detail, /if \(detailRefreshInFlight\.current\) \{\s*detailRefreshQueued\.current = true;\s*return;\s*\}/);
+  assert.match(detail, /if \(requestVersion === refreshVersion\.current\) setLoading\(false\)/);
+  assert.match(detail, /void currentRefresh\.current\?\.\(\)/);
   assert.match(detail, /async function saveState\(event\)[\s\S]*?refreshVersion\.current \+= 1[\s\S]*?finally \{[\s\S]*?refreshVersion\.current \+= 1/);
   assert.match(detail, /const mutationInFlight = useRef\(false\)/);
   assert.equal((detail.match(/if \(mutationInFlight\.current\) return/g) || []).length, 3);
