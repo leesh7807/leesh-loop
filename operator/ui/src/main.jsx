@@ -6,6 +6,7 @@ import { groupTasksForOperatorDisplay } from './operator-task-display-order.js';
 import { readTaskDetailDraft } from './task-detail-draft.js';
 import { bootstrapManagerToken } from './manager-auth.js';
 import { createManagerApiFetch } from './manager-api.js';
+import { managerLifecycleAction } from './manager-lifecycle-action.js';
 import { createWorkflowDiff } from './workflow-diff.js';
 import './style.css';
 
@@ -796,7 +797,7 @@ function ManagerApp() {
       setNotice(result.instance
         ? `${result.instance.repository_name || result.instance.id}: ${result.instance.status}.`
         : restartRequired
-          ? 'Runtime updated. Run leesh-loop update to reload the Manager; running Loops keep their selected Runtime.'
+          ? 'Runtime updated. Run leesh-loop in a terminal to reopen Manager with fresh access. This tab loses access after restart; running Loops keep their selected Runtime.'
           : (label === 'Updating Runtime' ? 'Runtime update completed.' : 'Change saved.'));
       await refreshInstances();
       await refreshRuntime();
@@ -847,6 +848,8 @@ function ManagerApp() {
     }
   }
 
+  const lifecycleAction = managerLifecycleAction(selected?.status, selected?.can_stop);
+
   return (
     <div className="manager-shell">
       <header className="manager-header">
@@ -855,8 +858,12 @@ function ManagerApp() {
           <div className="manager-lifecycle">
             <span className={`manager-status status-${selected.status.toLowerCase()}`}>{selected.status}</span>
             <span className="manager-lifecycle-target">{selected.repository_name}</span>
-            {selected.status === 'Running' || selected.status === 'Starting' || selected.status === 'Stopping' || (selected.status === 'Failed' && selected.can_stop === true) ? (
-              <button type="button" className="manager-action secondary" disabled={Boolean(busy) || selected.status === 'Stopping'} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop' })}>{busy === 'Stopping Loop' ? 'Stopping…' : 'Stop Loop'}</button>
+            {lifecycleAction === 'pending' ? (
+              <span className="manager-lifecycle-pending" role="status">Stop available when ready</span>
+            ) : lifecycleAction === 'stopping' ? (
+              <span className="manager-lifecycle-pending" role="status">Stopping…</span>
+            ) : lifecycleAction === 'stop' ? (
+              <button type="button" className="manager-action secondary" disabled={Boolean(busy)} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop' })}>{busy === 'Stopping Loop' ? 'Stopping…' : 'Stop Loop'}</button>
             ) : (
               <button type="button" className="manager-action" disabled={Boolean(busy) || selected.status === 'Unconfirmed'} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop' })}>{busy === 'Starting Loop' ? 'Starting…' : 'Start Loop'}</button>
             )}
