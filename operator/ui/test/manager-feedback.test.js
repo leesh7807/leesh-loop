@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, managerFeedbackReducer, managerOperationAnnouncement } from '../src/manager-feedback.js';
+import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, lifecycleCompletionMessage, managerFeedbackReducer, managerOperationAnnouncement } from '../src/manager-feedback.js';
 
 test('a successful instance poll clears read errors without dismissing an operation failure', () => {
   let feedback = managerFeedbackReducer(initialManagerFeedback, {
@@ -75,6 +75,18 @@ test('a Manager-wide busy notice names its target and says what remains availabl
     'Updating Workflow for payments-api is in progress. Other Manager actions are temporarily unavailable; instance switching and Task management remain available.'
   );
   assert.equal(managerOperationAnnouncement(null), '');
+});
+
+test('lifecycle feedback states the action result separately from the current status badge', () => {
+  assert.equal(
+    lifecycleCompletionMessage('Start', { repository_name: 'payments-api', status: 'Running' }),
+    'Start request completed for payments-api. Manager reported Running at completion.'
+  );
+  assert.equal(
+    lifecycleCompletionMessage('Stop', { id: 'loop-a', status: 'Stopped' }),
+    'Stop request completed for loop-a. Manager reported Stopped at completion.'
+  );
+  assert.equal(lifecycleCompletionMessage('Start'), 'Start request completed for Loop.');
 });
 
 test('a successful Runtime or Workflow read clears only its own read error', () => {
