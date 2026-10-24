@@ -17,3 +17,9 @@ export function sharedRuntimeViewState(readState, runtime) {
   if (readState === 'error') return 'error';
   return runtime?.active ? 'ready' : 'missing';
 }
+
+export function workflowComparisonViewState(readState, hasComparison, isOpen) {
+  if (!isOpen) return 'closed';
+  if (hasComparison) return 'ready';
+  return readState === 'error' ? 'error' : 'loading';
+}

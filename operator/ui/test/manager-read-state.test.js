@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState } from '../src/manager-read-state.js';
+import { managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from '../src/manager-read-state.js';
 
 test('the Manager distinguishes an unread or failed inventory from a confirmed empty inventory', () => {
   assert.equal(managerInventoryViewState('loading', 0), 'loading');
@@ -26,4 +26,11 @@ test('the Shared Runtime distinguishes pending, failed, installed, and missing r
   assert.equal(sharedRuntimeViewState('error', null), 'error');
   assert.equal(sharedRuntimeViewState('loaded', { active: { version: '2026.10.24' } }), 'ready');
   assert.equal(sharedRuntimeViewState('loaded', { active: null }), 'missing');
+});
+
+test('an open Workflow comparison exposes pending and failed reads for recovery', () => {
+  assert.equal(workflowComparisonViewState('idle', false, false), 'closed');
+  assert.equal(workflowComparisonViewState('idle', false, true), 'loading');
+  assert.equal(workflowComparisonViewState('error', false, true), 'error');
+  assert.equal(workflowComparisonViewState('loaded', true, true), 'ready');
 });
