@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFile as execute } from 'node:child_process';
+import { execFile as execute, spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer, request as httpRequest } from 'node:http';
@@ -99,6 +99,42 @@ async function installTestRuntime(paths, directoryName = 'fixture-runtime') {
   const codePath = join(runtimePath, filename);
   await writeFile(codePath, contents, { mode });
   await chmod(codePath, mode);
+  await writeFile(join(runtimePath, '.distribution.json'), `${JSON.stringify({ schema_version: 1, id, version, path: runtimePath, files: [filename] })}\n`, { mode: 0o600 });
+  await writeFile(managedPaths.activeRuntime, `${JSON.stringify({ schema_version: 1, id })}\n`, { mode: 0o600 });
+  return { id, path: runtimePath };
+}
+
+async function installStopTestRuntime(paths) {
+  const managedPaths = managerPaths(paths);
+  const version = '0.1.1';
+  const filename = 'operator/app/leesh-loop.mjs';
+  const contents = Buffer.from(`import { readFileSync } from 'node:fs';
+import { unlink } from 'node:fs/promises';
+import { join } from 'node:path';
+const directory = process.env.LEESH_LOOP_EXECUTION_STATE_DIRECTORY;
+const state = JSON.parse(readFileSync(join(directory, 'runtime.json'), 'utf8'));
+const processStat = readFileSync('/proc/' + state.pid + '/stat', 'utf8');
+const currentTicks = processStat.slice(processStat.lastIndexOf(')') + 1).trim().split(/\\s+/)[19];
+if (currentTicks !== state.process_start_ticks) throw new Error('test Runtime process identity mismatch');
+process.kill(state.pid, 'SIGTERM');
+for (let attempt = 0; attempt < 120; attempt += 1) {
+  try { process.kill(state.pid, 0); } catch (error) { if (error.code === 'ESRCH') break; throw error; }
+  await new Promise(resolve => setTimeout(resolve, 25));
+}
+try { process.kill(state.pid, 0); throw new Error('test Runtime process did not stop'); }
+catch (error) { if (error.code !== 'ESRCH') throw error; }
+for (const name of ['runtime.json', 'ownership.json', 'dispatch-authorization.json', 'dispatch-acknowledgement.json', 'startup-status']) {
+  await unlink(join(directory, name)).catch(error => { if (error.code !== 'ENOENT') throw error; });
+}
+console.log(JSON.stringify({ stopped: true }));
+`);
+  const id = hashDistribution(version, [[filename, contents, 0o644]]);
+  const runtimePath = join(managedPaths.runtimeRoot, id);
+  const scriptPath = join(runtimePath, filename);
+  await mkdir(managedPaths.configRoot, { recursive: true });
+  await mkdir(join(runtimePath, 'operator/app'), { recursive: true });
+  await writeFile(scriptPath, contents, { mode: 0o644 });
+  await chmod(scriptPath, 0o644);
   await writeFile(join(runtimePath, '.distribution.json'), `${JSON.stringify({ schema_version: 1, id, version, path: runtimePath, files: [filename] })}\n`, { mode: 0o600 });
   await writeFile(managedPaths.activeRuntime, `${JSON.stringify({ schema_version: 1, id })}\n`, { mode: 0o600 });
   return { id, path: runtimePath };
@@ -492,24 +528,33 @@ test('a stopped execution record stays Stopped when its former PID has been reus
   assert.match(stillAlive.detail, /Stopped record still matches live Loop process/);
 });
 
-test('an orphaned unready runtime after its startup launcher exits is Failed and recoverable', async t => {
+test('an orphaned unready runtime after its startup launcher exits can be stopped safely', async t => {
   const paths = await fixture(t);
   const repository = await makeRepository(join(paths.directory, 'repositories'), 'orphan-project');
   const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
-  const runtime = await installTestRuntime(paths, 'orphan-fixture-runtime');
+  const runtime = await installStopTestRuntime(paths);
   const executionDirectory = join(managerPaths(paths).loopExecutionRoot, instance.id);
   await mkdir(executionDirectory, { recursive: true });
-  const processStat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+  const ownedProcess = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  await new Promise((resolveSpawn, rejectSpawn) => {
+    ownedProcess.once('spawn', resolveSpawn);
+    ownedProcess.once('error', rejectSpawn);
+  });
+  const exited = new Promise(resolveExit => ownedProcess.once('exit', resolveExit));
+  t.after(() => {
+    if (ownedProcess.exitCode === null && ownedProcess.signalCode === null) ownedProcess.kill('SIGKILL');
+  });
+  const processStat = readFileSync(`/proc/${ownedProcess.pid}/stat`, 'utf8');
   const processStartTicks = processStat.slice(processStat.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
   const ownershipPath = join(executionDirectory, 'ownership.json');
   const acknowledgementPath = join(executionDirectory, 'dispatch-acknowledgement.json');
   const runtimeId = 'orphan-runtime-1';
-  await writeFile(ownershipPath, `${JSON.stringify({ project_root: runtime.path, runtime_id: runtimeId, pid: process.pid, process_start_ticks: processStartTicks })}\n`);
-  await writeFile(acknowledgementPath, `${JSON.stringify({ runtime_id: 'not-ready', pid: process.pid, dispatch_capable: false })}\n`);
+  await writeFile(ownershipPath, `${JSON.stringify({ project_root: runtime.path, runtime_id: runtimeId, pid: ownedProcess.pid, process_start_ticks: processStartTicks })}\n`);
+  await writeFile(acknowledgementPath, `${JSON.stringify({ runtime_id: 'not-ready', pid: ownedProcess.pid, dispatch_capable: false })}\n`);
   await writeFile(join(executionDirectory, 'runtime.json'), `${JSON.stringify({
     status: 'provisional',
     runtime_id: runtimeId,
-    pid: process.pid,
+    pid: ownedProcess.pid,
     process_start_ticks: processStartTicks,
     effective: { dashboard: 'http://127.0.0.1:4198' },
     ownership_path: ownershipPath,
@@ -523,7 +568,7 @@ test('an orphaned unready runtime after its startup launcher exits is Failed and
     runtime_path: runtime.path,
     runtime_version: runtime.id,
     runtime_id: runtimeId,
-    pid: process.pid,
+    pid: ownedProcess.pid,
     process_start_ticks: processStartTicks,
     launcher_pid: 2147483647,
     launcher_start_ticks: 'exited-launcher',
@@ -532,9 +577,16 @@ test('an orphaned unready runtime after its startup launcher exits is Failed and
   })}\n`);
 
   const observed = await loopInstanceStatus(instance.id, paths);
-  assert.equal(observed.status, 'Failed');
+  assert.equal(observed.status, 'Failed', observed.detail);
+  assert.equal(observed.can_stop, true);
   assert.match(observed.detail, /startup launcher exited/);
   assert.equal(JSON.parse(await readFile(executionPath, 'utf8')).status, 'Failed');
+
+  const stopped = await stopLoopInstance(instance.id, paths);
+  await exited;
+  assert.equal(stopped.status, 'Stopped');
+  assert.equal(stopped.stopped, true);
+  assert.equal(JSON.parse(await readFile(executionPath, 'utf8')).status, 'Stopped');
 });
 
 test('unexpected Loop exits report Failed while a confirmed stop reports Stopped', async t => {
