@@ -105,7 +105,7 @@ function requireLocalSameOriginMutation(request) {
   }
 }
 
-export async function createOperatorUiServer({ root, config, stateDirectory, taskStore, managerController, managerToken, managerPort }) {
+export async function createOperatorUiServer({ root, config, stateDirectory, taskStore, managerController }) {
   const uiDirectory = resolve(root, 'operator/ui/dist');
   const store = taskStore || (!managerController ? await openLoopTaskStore(stateDirectory) : null);
 
@@ -218,10 +218,7 @@ export async function createOperatorUiServer({ root, config, stateDirectory, tas
       const relativePath = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname).replace(/^\/+/, '');
       const filePath = resolve(uiDirectory, relativePath);
       if (filePath !== uiDirectory && !filePath.startsWith(`${uiDirectory}${sep}`)) { response.statusCode = 404; response.end(); return; }
-      let body = await readFile(filePath);
-      if (managerController && basename(filePath) === 'index.html' && managerToken) {
-        body = Buffer.from(body.toString('utf8').replace('content="__LEESH_LOOP_MANAGER_TOKEN__"', `content="${managerToken}"`).replace('content="__LEESH_LOOP_MANAGER_PORT__"', `content="${managerPort}"`));
-      }
+      const body = await readFile(filePath);
       response.statusCode = 200;
       response.setHeader('content-type', MIME_TYPES.get(extname(filePath)) || 'application/octet-stream');
       response.setHeader('cache-control', basename(filePath) === 'index.html' ? 'no-store' : 'public, max-age=31536000, immutable');
