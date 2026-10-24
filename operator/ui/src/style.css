@@ -219,6 +219,7 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .manager-folders details[open] summary::before { content: '−'; }
 .manager-folders summary span:last-child { margin-left: auto; color: #717171; font-size: .68rem; font-weight: 450; text-align: right; }
 .manager-workflow-content { display: grid; gap: .7rem; padding: .55rem 0 .2rem; }
+.workflow-read-state, .workflow-retry { margin: .65rem 0 0; }
 .workflow-eligibility { margin: 0; }
 .manager-workflow-content > .workflow-update-actions { justify-self: start; }
 .workflow-update-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .75rem; }

@@ -10,7 +10,7 @@ import { managerLifecycleAction } from './manager-lifecycle-action.js';
 import { createManagerInstanceListGate } from './manager-instance-list-gate.js';
 import { createManagerSelectionGate } from './manager-selection-gate.js';
 import { initialManagerFeedback, managerFeedbackReducer } from './manager-feedback.js';
-import { managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState } from './manager-read-state.js';
+import { managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from './manager-read-state.js';
 import { workflowUpdateEligibility } from './workflow-update-eligibility.js';
 import { createWorkflowDiff } from './workflow-diff.js';
 import './style.css';
@@ -745,6 +745,7 @@ function ManagerApp() {
   const [runtime, setRuntime] = useState(null);
   const [runtimeReadState, setRuntimeReadState] = useState('loading');
   const [workflow, setWorkflow] = useState(null);
+  const [workflowReadState, setWorkflowReadState] = useState('idle');
   const [logs, setLogs] = useState('');
   const [workflowOpen, setWorkflowOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -755,6 +756,7 @@ function ManagerApp() {
   const selected = instances.find(instance => instance.id === selectedId) || null;
   const inventoryViewState = managerInventoryViewState(instanceReadState, instances.length);
   const runtimeViewState = sharedRuntimeViewState(runtimeReadState, runtime);
+  const workflowPanelState = workflowComparisonViewState(workflowReadState, Boolean(workflow), workflowOpen);
   const workflowEligibility = selected ? workflowUpdateEligibility(selected) : null;
   const selectedRuntimeVersion = runtime?.distributions?.find(distribution => distribution.id === selected?.runtime_version)?.version
     || selected?.runtime_version?.slice(0, 12)
@@ -812,6 +814,7 @@ function ManagerApp() {
   useEffect(() => {
     document.title = selected ? `${selected.repository_name} · Leesh Loop` : 'Leesh Loop Manager';
     setWorkflow(null);
+    setWorkflowReadState('idle');
     setLogs('');
     setWorkflowOpen(false);
     setLogsOpen(false);
@@ -821,14 +824,21 @@ function ManagerApp() {
   useEffect(() => {
     if (!selectedId || !workflowOpen) return;
     let active = true;
+    setWorkflowReadState('loading');
+    dispatchFeedback({ type: 'read-cleared', target: 'workflow' });
     apiFetch(`/api/v1/instances/${encodeURIComponent(selectedId)}/workflow`)
       .then(readManagerJson)
       .then(body => {
         if (!active) return;
         setWorkflow(body);
+        setWorkflowReadState('loaded');
         dispatchFeedback({ type: 'read-cleared', target: 'workflow' });
       })
-      .catch(requestError => { if (active) dispatchFeedback({ type: 'read-error', target: 'workflow', message: requestError.message || 'Could not compare the Workflow.' }); });
+      .catch(requestError => {
+        if (!active) return;
+        setWorkflowReadState('error');
+        dispatchFeedback({ type: 'read-error', target: 'workflow', message: requestError.message || 'Could not compare the Workflow.' });
+      });
     return () => { active = false; };
   }, [selectedId, workflowOpen]);
 
@@ -915,14 +925,17 @@ function ManagerApp() {
     const controller = new AbortController();
     workflowRefreshControllerRef.current = controller;
     setBusy('Refreshing Workflow');
+    setWorkflowReadState('loading');
     dispatchFeedback({ type: 'operation-started', target: 'workflow' });
     try {
       const comparison = await readManagerJson(await apiFetch(`/api/v1/instances/${encodeURIComponent(comparisonInstanceId)}/workflow`, { signal: controller.signal }));
       if (!selectionGate.isCurrent(requestSelection)) return;
       setWorkflow(comparison);
+      setWorkflowReadState('loaded');
       dispatchFeedback({ type: 'operation-success', target: 'workflow', message: 'Workflow comparison refreshed. Review the candidate before applying.' });
     } catch (requestError) {
       if (controller.signal.aborted || !selectionGate.isCurrent(requestSelection)) return;
+      setWorkflowReadState('error');
       dispatchFeedback({ type: 'operation-error', target: 'workflow', message: requestError.message || 'Could not refresh the Workflow comparison.' });
     } finally {
       if (workflowRefreshControllerRef.current === controller) {
@@ -1026,6 +1039,8 @@ function ManagerApp() {
             <details open={workflowOpen} onToggle={event => setWorkflowOpen(event.currentTarget.open)}>
               <summary><span>Workflow</span><span>{workflow ? (workflow.changed ? 'Update available' : 'Current') : 'Compare with template'}</span></summary>
               <ManagerFeedback feedback={feedback} target="workflow" />
+              {!workflow && workflowPanelState === 'loading' && <p className="manager-help workflow-read-state" role="status">Loading Workflow comparison…</p>}
+              {!workflow && workflowPanelState === 'error' && <button type="button" className="manager-action secondary workflow-retry" disabled={Boolean(busy)} onClick={() => void refreshWorkflowComparison()}>{busy === 'Refreshing Workflow' ? 'Retrying…' : 'Retry comparison'}</button>}
               {workflow && (
                 <div className="manager-workflow-content">
                   <p className="manager-help">Review the proposed Workflow changes below. A backup is saved when you apply an update.</p>
