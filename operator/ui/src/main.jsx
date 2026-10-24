@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createSerializedRefreshQueue } from './refresh-queue.js';
 import { clearPublicationDraft, readPublicationDraft, writePublicationDraft } from './publication-draft.js';
@@ -7,6 +7,7 @@ import { readTaskDetailDraft } from './task-detail-draft.js';
 import { bootstrapManagerToken } from './manager-auth.js';
 import { createManagerApiFetch } from './manager-api.js';
 import { managerLifecycleAction } from './manager-lifecycle-action.js';
+import { initialManagerFeedback, managerFeedbackReducer } from './manager-feedback.js';
 import { createWorkflowDiff } from './workflow-diff.js';
 import './style.css';
 
@@ -718,10 +719,11 @@ function ManagerApp() {
   const [workflowOpen, setWorkflowOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [busy, setBusy] = useState('');
-  const [error, setError] = useState('');
+  const [feedback, dispatchFeedback] = useReducer(managerFeedbackReducer, initialManagerFeedback);
   const [notice, setNotice] = useState('');
 
   const selected = instances.find(instance => instance.id === selectedId) || null;
+  const { readError: error, operationError } = feedback;
   const selectedRuntimeVersion = runtime?.distributions?.find(distribution => distribution.id === selected?.runtime_version)?.version
     || selected?.runtime_version?.slice(0, 12)
     || '—';
@@ -738,15 +740,15 @@ function ManagerApp() {
         } catch { /* Selection remains available for this page session. */ }
         return next;
       });
-      setError('');
+      dispatchFeedback({ type: 'read-cleared' });
     } catch (requestError) {
-      setError(requestError.message || 'Could not load managed Loop instances.');
+      dispatchFeedback({ type: 'read-error', message: requestError.message || 'Could not load managed Loop instances.' });
     }
   }, []);
 
   const refreshRuntime = useCallback(async () => {
     try { setRuntime(await readManagerJson(await apiFetch('/api/v1/runtime'))); }
-    catch (requestError) { setError(requestError.message || 'Could not load the Runtime version.'); }
+    catch (requestError) { dispatchFeedback({ type: 'read-error', message: requestError.message || 'Could not load the Runtime version.' }); }
   }, []);
 
   useEffect(() => {
@@ -762,6 +764,7 @@ function ManagerApp() {
     setLogs('');
     setWorkflowOpen(false);
     setLogsOpen(false);
+    dispatchFeedback({ type: 'instance-changed' });
   }, [selectedId]);
 
   useEffect(() => {
@@ -770,7 +773,7 @@ function ManagerApp() {
     apiFetch(`/api/v1/instances/${encodeURIComponent(selectedId)}/workflow`)
       .then(readManagerJson)
       .then(body => { if (active) setWorkflow(body); })
-      .catch(requestError => { if (active) setError(requestError.message || 'Could not compare the Workflow.'); });
+      .catch(requestError => { if (active) dispatchFeedback({ type: 'read-error', message: requestError.message || 'Could not compare the Workflow.' }); });
     return () => { active = false; };
   }, [selectedId, workflowOpen]);
 
@@ -786,7 +789,7 @@ function ManagerApp() {
 
   async function perform(path, { method = 'POST', body, label } = {}) {
     setBusy(label || 'Working…');
-    setError('');
+    dispatchFeedback({ type: 'operation-started' });
     setNotice('');
     try {
       const result = await readManagerJson(await apiFetch(path, {
@@ -803,7 +806,7 @@ function ManagerApp() {
       await refreshRuntime();
       return result;
     } catch (requestError) {
-      setError(requestError.message || 'The Manager could not complete this action.');
+      dispatchFeedback({ type: 'operation-error', message: requestError.message || 'The Manager could not complete this action.' });
       return null;
     } finally {
       setBusy('');
@@ -814,7 +817,7 @@ function ManagerApp() {
     event.preventDefault();
     if (!repositoryPath.trim()) return;
     setBusy('Creating Loop');
-    setError('');
+    dispatchFeedback({ type: 'operation-started' });
     setNotice('');
     try {
       const result = await readManagerJson(await apiFetch('/api/v1/instances', {
@@ -827,7 +830,7 @@ function ManagerApp() {
       setNotice(`Created ${result.instance.repository_name}.`);
       await refreshInstances();
     } catch (requestError) {
-      setError(requestError.message || 'Could not create the Loop instance.');
+      dispatchFeedback({ type: 'operation-error', message: requestError.message || 'Could not create the Loop instance.' });
     } finally {
       setBusy('');
     }
@@ -909,7 +912,7 @@ function ManagerApp() {
         </details>
 
         <section className="manager-runtime" aria-label="Central Runtime">
-          <div><p className="eyebrow">Shared Runtime</p><h2>{runtime?.active ? `Version ${runtime.active.version}` : 'Runtime unavailable'}</h2><p className="manager-help">New Loop starts use this immutable Runtime distribution. Running Loops keep their selected version.</p>{runtime?.active && runtime.manager_runtime_version !== runtime.active.id && <p className="inline-message" role="status">The Manager uses an older Runtime. Run <code>leesh-loop update</code> to reload it.</p>}</div>
+          <div><p className="eyebrow">Shared Runtime</p><h2>{runtime?.active ? `Version ${runtime.active.version}` : 'Runtime unavailable'}</h2><p className="manager-help">New Loop starts use this immutable Runtime distribution. Running Loops keep their selected version.</p>{runtime?.active && runtime.manager_runtime_version !== runtime.active.id && <p className="inline-message" role="status">The Manager uses an older Runtime. Run <code>leesh-loop</code> to reopen Manager with fresh access.</p>}</div>
           <button className="manager-action secondary" type="button" disabled={Boolean(busy)} onClick={() => void perform('/api/v1/runtime/update', { label: 'Updating Runtime' })}>{busy === 'Updating Runtime' ? 'Updating…' : 'Update Runtime'}</button>
         </section>
 
@@ -943,6 +946,7 @@ function ManagerApp() {
         )}
         {selected?.detail && <p className="inline-message failure" role="status">{selected.detail}</p>}
         {error && <p className="inline-message failure" role="alert">{error}</p>}
+        {operationError && <p className="inline-message failure" role="alert">{operationError}</p>}
         {notice && <p className="inline-message" role="status">{notice}</p>}
         {!selected && instances.length === 0 && <p className="manager-empty">Create an instance from a Git repository to see its tasks and lifecycle here.</p>}
       </section>
