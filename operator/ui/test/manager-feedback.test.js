@@ -34,6 +34,15 @@ test('feedback for Runtime operations survives a selected Loop change and stays 
   assert.equal(changed.operationErrors.workflow, undefined);
 });
 
+test('changing the selected Loop clears a prior log-read error', () => {
+  const failed = managerFeedbackReducer(initialManagerFeedback, {
+    type: 'read-error', target: 'logs', message: 'Could not read Loop logs.'
+  });
+  const changed = managerFeedbackReducer(failed, { type: 'instance-changed' });
+
+  assert.equal(changed.readErrors.logs, undefined);
+});
+
 test('a successful Runtime or Workflow read clears only its own read error', () => {
   let feedback = managerFeedbackReducer(initialManagerFeedback, {
     type: 'read-error', target: 'runtime', message: 'Could not load the Runtime version.'

@@ -15,6 +15,7 @@ function clearSelectionMessages(messages) {
   const next = { ...messages };
   delete next.lifecycle;
   delete next.workflow;
+  delete next.logs;
   return next;
 }
 
@@ -46,7 +47,7 @@ export function managerFeedbackReducer(state, action) {
     case 'instance-changed':
       return {
         ...state,
-        readErrors: updateMessage(state.readErrors, 'workflow', ''),
+        readErrors: clearSelectionMessages(state.readErrors),
         operationErrors: clearSelectionMessages(state.operationErrors),
         notices: clearSelectionMessages(state.notices)
       };

@@ -242,6 +242,7 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .workflow-full-files > summary { width: fit-content; color: #555; cursor: pointer; font-size: .7rem; text-decoration: underline; text-underline-offset: .2em; }
 .workflow-full-files .workflow-comparison { margin-top: .45rem; }
 .manager-logs { max-height: 14rem; margin-top: .45rem; }
+.manager-logs-actions { display: flex; align-items: center; gap: .55rem; margin-top: .55rem; }
 .manager-empty { grid-column: 1 / -1; margin: .9rem 0 0; color: #666; font-size: .82rem; }
 .manager-console > .inline-message { grid-column: 1 / -1; margin-bottom: 0; }
 .manager-shell > .page-shell { padding-top: .8rem; }

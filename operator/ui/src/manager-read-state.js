@@ -23,3 +23,16 @@ export function workflowComparisonViewState(readState, hasComparison, isOpen) {
   if (hasComparison) return 'ready';
   return readState === 'error' ? 'error' : 'loading';
 }
+
+export function logsReadStartState(currentState) {
+  return currentState === 'loaded' || currentState === 'stale-error' ? 'refreshing' : 'loading';
+}
+
+export function logsReadFailureState(currentState) {
+  return currentState === 'refreshing' ? 'stale-error' : 'error';
+}
+
+export function logsPanelViewState(readState, isOpen) {
+  if (!isOpen) return 'closed';
+  return readState === 'idle' ? 'loading' : readState;
+}
