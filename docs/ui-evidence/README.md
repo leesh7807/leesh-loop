@@ -2,7 +2,7 @@
 
 ## Central Manager design evidence
 
-These captures show the production Operator UI bundle rendered from PR #120's UI source at commit `5678a8c78697006469e57d931bfa3878abe6737d`. The local fixture in `capture-manager-demo.mjs` supplies synthetic, read-only instance, Runtime, Workflow, and Task responses; no Manager Service, real repository, or Task Store was used. Treat the displayed names, paths, statuses, port, Runtime version, and tasks as illustrative data. These images support visual review only; they do not verify lifecycle behavior or live service integration.
+These captures show the production Operator UI bundle rendered from PR #120's UI source at commit `eb26c1321b7c2eca5fdff853901d02757c03e19b`. The local fixture in `capture-manager-demo.mjs` supplies synthetic, read-only instance, Runtime, Workflow, and Task responses; no Manager Service, real repository, or Task Store was used. Treat the displayed names, paths, statuses, port, Runtime version, and tasks as illustrative data. These images support visual review only; they do not verify lifecycle behavior or live service integration.
 
 - Desktop overview at 1440×1200: two instance statuses, shared Runtime version 2026.10.24, selected Loop Runtime version 2026.10.18, selected repository beside its lifecycle action, and the task queue.
 
@@ -16,7 +16,11 @@ These captures show the production Operator UI bundle rendered from PR #120's UI
 
   ![Manager narrow layout with the full instance list and selected Loop details](manager-overview-mobile.png)
 
-The desktop and narrow layouts were also opened in Chrome through the browser control during review. In both layouts, “View tasks” navigates to and focuses the Tasks heading. The narrow viewport was set explicitly to 390×900 and reset after inspection.
+- Desktop startup state at 1440×900: the selected Loop is `Starting`; no Stop button is offered until it is ready.
+
+  ![Manager startup state with an explicit note that Stop becomes available once ready](manager-starting-desktop.png)
+
+The desktop and narrow layouts were also opened in Chrome through the browser control during review. In both layouts, “View tasks” navigates to and focuses the Tasks heading. The narrow viewport was set explicitly to 390×900 and reset after inspection. The fixture accepts `?status=starting` to display the synthetic startup state without starting a process.
 
 ## Current selected-task treatment
 
