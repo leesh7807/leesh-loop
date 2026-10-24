@@ -232,7 +232,10 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
         const operation = serializeLifecycle(id, async () => (lifecycle.updateWorkflow || applyInstanceWorkflow)(id, {
             expectedCurrent: submitted?.expectedCurrent,
             sourceRoot: await latestSourceRoot(),
-            isRunning: lifecycle.isRunning || (async instanceId => (await loopInstanceStatus(instanceId, { environment, homeDirectory })).status !== 'Stopped'),
+            isRunning: lifecycle.isRunning || (async instanceId => {
+              const status = await loopInstanceStatus(instanceId, { environment, homeDirectory });
+              return status.status !== 'Stopped' && status.can_update_workflow !== true;
+            }),
             environment,
             homeDirectory
           }));

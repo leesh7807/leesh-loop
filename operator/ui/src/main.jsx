@@ -798,7 +798,7 @@ function ManagerApp() {
   }
 
   async function updateWorkflow() {
-    if (!workflow?.changed || selected?.status !== 'Stopped') return;
+    if (!workflow?.changed || (selected?.status !== 'Stopped' && selected?.can_update_workflow !== true)) return;
     const accepted = window.confirm(`Replace the Workflow for ${selected.repository_name}? A backup will be kept in this instance's data.`);
     if (!accepted) return;
     const result = await perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/workflow`, {
@@ -871,10 +871,12 @@ function ManagerApp() {
               <summary><span>Workflow</span><span>{workflow ? (workflow.changed ? 'Update available' : 'Current') : 'Compare with template'}</span></summary>
               {workflow && (
                 <div className="manager-workflow-content">
-                  <p className="manager-help">Review the instance's current Workflow and the active Runtime template. Updates apply only to this stopped Loop; a backup is saved.</p>
+                  <p className="manager-help">Review the current Workflow and Runtime template. Apply updates only when the Loop is stopped or its failed state has no active processes. A backup is saved.</p>
                   {workflow.changed ? <div className="workflow-comparison"><section><h3>Current Workflow</h3><pre>{workflow.current}</pre></section><section><h3>Template</h3><pre>{workflow.candidate}</pre></section></div> : <p className="manager-help">This Workflow matches the current template.</p>}
-                  <button type="button" className="manager-action secondary" disabled={Boolean(busy) || !workflow.changed || selected.status !== 'Stopped'} onClick={() => void updateWorkflow()}>{busy === 'Updating Workflow' ? 'Updating…' : 'Apply Workflow Update'}</button>
-                  {workflow.changed && selected.status !== 'Stopped' && <p className="manager-help">Stop this Loop to update its Workflow.</p>}
+                  <button type="button" className="manager-action secondary" disabled={Boolean(busy) || !workflow.changed || (selected.status !== 'Stopped' && selected.can_update_workflow !== true)} onClick={() => void updateWorkflow()}>{busy === 'Updating Workflow' ? 'Updating…' : 'Apply Workflow Update'}</button>
+                  {workflow.changed && selected.status !== 'Stopped' && (selected.can_update_workflow === true
+                    ? <p className="manager-help">This Loop is not running and its recorded processes have exited. You can repair its Workflow before starting it again.</p>
+                    : <p className="manager-help">Stop this Loop to update its Workflow.</p>)}
                 </div>
               )}
             </details>

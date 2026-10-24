@@ -30,6 +30,23 @@ function processExists(pid) {
   catch (error) { return error?.code === 'EPERM'; }
 }
 
+function recordedProcessesAreAbsent(execution, { requireLauncher = false, requireRuntime = false } = {}) {
+  if (requireLauncher && (!Number.isSafeInteger(execution.launcher_pid) || execution.launcher_pid <= 0)) return false;
+  if (requireRuntime && (!Number.isSafeInteger(execution.pid) || execution.pid <= 0)) return false;
+  let hasRecordedProcess = false;
+  for (const [pidKey, ticksKey] of [['pid', 'process_start_ticks'], ['launcher_pid', 'launcher_start_ticks']]) {
+    const pid = execution[pidKey];
+    const ticks = execution[ticksKey];
+    if (pid === undefined || pid === null) {
+      if (ticks !== undefined && ticks !== null) return false;
+      continue;
+    }
+    hasRecordedProcess = true;
+    if (!Number.isSafeInteger(pid) || pid <= 0 || processExists(pid)) return false;
+  }
+  return hasRecordedProcess;
+}
+
 async function readExecution(paths, id) {
   return readJsonFile(executionRecordPath(paths, id), 'Loop execution record');
 }
@@ -101,6 +118,7 @@ async function recordRuntimeExit(paths, instance, execution, state) {
     repository_url: instance.repository_url,
     status,
     ...(detail ? { detail } : {}),
+    ...(status === 'Failed' && recordedProcessesAreAbsent(execution, { requireLauncher: true, requireRuntime: true }) ? { can_update_workflow: true } : {}),
     ...(Number.isInteger(execution.port) ? { port: execution.port } : {})
   };
 }
@@ -161,9 +179,34 @@ export async function loopInstanceStatus(id, options = {}) {
     if (['Starting', 'Running', 'Stopping'].includes(execution.status)) {
       await saveObservedStatus(paths, execution, 'Failed', { detail: 'Loop process exited before reporting a confirmed runtime state' });
       const detail = (await readFile(launcherLogPath(paths, id), 'utf8').catch(() => '')).trim().slice(-4000);
-      return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail: detail || 'Loop process exited before it became ready', port: execution.port };
+      return {
+        id,
+        name: instance.repository_name,
+        repository_root: instance.repository_root,
+        repository_url: instance.repository_url,
+        status: 'Failed',
+        detail: detail || 'Loop process exited before it became ready',
+        ...(recordedProcessesAreAbsent(execution, {
+          requireLauncher: true,
+          requireRuntime: ['Running', 'Stopping'].includes(execution.status)
+        }) ? { can_update_workflow: true } : {}),
+        port: execution.port
+      };
     }
-    return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: execution.status, ...(execution.detail ? { detail: execution.detail } : {}), ...(execution.port ? { port: execution.port } : {}) };
+    return {
+      id,
+      name: instance.repository_name,
+      repository_root: instance.repository_root,
+      repository_url: instance.repository_url,
+      status: execution.status,
+      ...(execution.detail ? { detail: execution.detail } : {}),
+      ...(execution.status === 'Failed' && (
+        execution.launcher_pid !== undefined && execution.launcher_pid !== null
+          ? recordedProcessesAreAbsent(execution, { requireLauncher: true })
+          : execution.pid == null && execution.process_start_ticks == null && execution.launcher_start_ticks == null
+      ) ? { can_update_workflow: true } : {}),
+      ...(execution.port ? { port: execution.port } : {})
+    };
   }
   if (state.readError) return unconfirmed(instance, state.readError, execution);
   if (state.status === 'failed') {
@@ -173,7 +216,16 @@ export async function loopInstanceStatus(id, options = {}) {
       return unconfirmed(instance, 'Loop reported startup failure but its recorded process is still alive', execution);
     }
     await saveObservedStatus(paths, execution, 'Failed', { detail: state.cleanup_error || state.detail || 'Loop startup failed' });
-    return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail: state.cleanup_error || 'Loop startup failed', port: execution.port };
+    return {
+      id,
+      name: instance.repository_name,
+      repository_root: instance.repository_root,
+      repository_url: instance.repository_url,
+      status: 'Failed',
+      detail: state.cleanup_error || 'Loop startup failed',
+      ...(Number.isSafeInteger(state.pid) && state.pid > 0 && recordedProcessesAreAbsent(execution, { requireLauncher: true }) ? { can_update_workflow: true } : {}),
+      port: execution.port
+    };
   }
   if (!Number.isSafeInteger(state.pid) || state.pid <= 0 || typeof state.process_start_ticks !== 'string' || !state.process_start_ticks) {
     if (state.status === 'starting' && processExists(execution.launcher_pid)) {
