@@ -6,11 +6,11 @@
     "leesh-loop": "bin/leesh-loop.mjs"
   },
   "scripts": {
-    "start": "node operator/app/leesh-loop.mjs start project.toml",
-    "start:fast": "node operator/app/leesh-loop.mjs start project.toml --skip-external-readiness",
-    "stop": "node operator/app/leesh-loop.mjs stop project.toml",
+    "start": "node bin/leesh-loop.mjs open",
+    "init": "node bin/leesh-loop.mjs init",
+    "update": "node bin/leesh-loop.mjs update",
+    "list": "node bin/leesh-loop.mjs list",
     "e2e": "node local-e2e/cli.mjs run",
-    "publish-local-plan": "node operator/app/publish-local-plan.mjs project.toml",
     "test": "node --test operator/app/test/*.test.mjs operator/local_task_store/test/*.test.mjs operator/ui/test/*.test.js"
   }
 }

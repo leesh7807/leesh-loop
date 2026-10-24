@@ -1,5 +1,27 @@
 # Operator UI evidence
 
+## Central Manager design evidence
+
+These captures show the production Operator UI bundle rendered from PR #120's UI source at commit `0be36e34b130e901be617c5007bdc49c904ecb81`. The local fixture in `capture-manager-demo.mjs` supplies synthetic, read-only instance, Runtime, Workflow, and Task responses; no Manager Service, real repository, or Task Store was used. Treat the displayed names, paths, statuses, port, Runtime version, and tasks as illustrative data. These images support visual review only; they do not verify lifecycle behavior or live service integration.
+
+- Desktop overview at 1440×1200: two instance statuses, shared Runtime version 2026.10.24, selected Loop Runtime version 2026.10.18, selected repository beside its lifecycle action, and the task queue.
+
+  ![Manager desktop overview with two synthetic instances and the task queue](manager-overview-desktop.png)
+
+- Desktop Workflow review at 1440×1500: full-width Workflow diff with readable added and removed lines, and the disabled update control while the synthetic Loop status is Running.
+
+  ![Manager desktop Workflow comparison with the update control disabled for a running Loop](manager-workflow-desktop.png)
+
+- Narrow layout at 390×900: lifecycle action beside the selected repository, a visible “View tasks” jump link, instance list, Runtime, selected Loop details, and stacked Operator entry point.
+
+  ![Manager narrow layout with the full instance list and selected Loop details](manager-overview-mobile.png)
+
+- Desktop startup state at 1440×900: the selected Loop is `Starting`; no Stop button is offered until it is ready.
+
+  ![Manager startup state with an explicit note that Stop becomes available once ready](manager-starting-desktop.png)
+
+The desktop and narrow layouts were also opened in Chrome through the browser control during review. In both layouts, “View tasks” navigates to and focuses the Tasks heading. The narrow viewport was set explicitly to 390×900 and reset after inspection. The fixture accepts `?status=starting` to display the synthetic startup state without starting a process.
+
 ## Current selected-task treatment
 
 The selected-task styling at PR head `5306304bc7821fe0f3fd1fe194c7eafbd3ccf105` is shown in these desktop captures:

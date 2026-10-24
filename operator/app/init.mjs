@@ -1,64 +1,15 @@
-import { execFileSync } from 'node:child_process';
-import { chmod, lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { HOST_PREREQUISITES, listRuntimeSnapshotFiles, materializeRuntimeSnapshot } from './runtime-manifest.mjs';
-import { githubRepositoryTransport } from './github-repository-url.mjs';
+import { resolveTargetRepository } from './git-target.mjs';
 import { stringifyProjectConfiguration } from '../project-config.mjs';
 import { createInstallationMetadata, hashDistribution, readDistributionFiles, writeInstallationMetadata } from './installation-metadata.mjs';
 import { stringifyPackageLock } from './package-lock.mjs';
+import { generatedWorkflow } from './workflow-template.mjs';
 
-const runGit = (cwd, args) => execFileSync('git', args, {
-  cwd,
-  encoding: 'utf8',
-  stdio: ['ignore', 'pipe', 'pipe']
-}).trim();
-
-function gitValue(cwd, args) {
-  try { return runGit(cwd, args); }
-  catch { return null; }
-}
-
-function validateTargetUrl(remoteUrl) {
-  githubRepositoryTransport(remoteUrl);
-  return remoteUrl;
-}
-
-export async function resolveTargetRepository(cwd) {
-  let workingDirectory;
-  try { workingDirectory = await realpath(cwd); }
-  catch { throw new Error(`cannot access target repository directory: ${cwd}`); }
-  const rootValue = gitValue(workingDirectory, ['rev-parse', '--show-toplevel']);
-  if (!rootValue) throw new Error('run leesh-loop init from inside a Git repository');
-  const repositoryRoot = await realpath(rootValue);
-  if (repositoryRoot !== workingDirectory) {
-    throw new Error(`run leesh-loop init from the target repository root: ${repositoryRoot}`);
-  }
-
-  const branch = gitValue(repositoryRoot, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
-  if (!branch) throw new Error('the current Git checkout is detached; check out a branch with a configured remote branch, then run init again');
-  const remote = gitValue(repositoryRoot, ['config', '--get', `branch.${branch}.remote`]);
-  const mergeRef = gitValue(repositoryRoot, ['config', '--get', `branch.${branch}.merge`]);
-  if (!remote || !mergeRef || remote === '.') {
-    throw new Error(`current branch '${branch}' has no configured remote branch; configure its Git upstream, then run init again`);
-  }
-  if (!mergeRef.startsWith('refs/heads/') || mergeRef.length === 'refs/heads/'.length) {
-    throw new Error(`current branch '${branch}' does not track a normal remote branch (${mergeRef}); update its Git upstream, then run init again`);
-  }
-  if (!gitValue(repositoryRoot, ['rev-parse', '--verify', '--quiet', '@{upstream}'])) {
-    throw new Error(`the remote branch tracked by '${branch}' cannot be read; fetch it or repair the Git upstream, then run init again`);
-  }
-  const remoteUrl = gitValue(repositoryRoot, ['remote', 'get-url', remote]);
-  if (!remoteUrl) throw new Error(`the Git remote '${remote}' tracked by '${branch}' has no repository URL; configure it, then run init again`);
-  return {
-    repositoryRoot,
-    repositoryName: basename(repositoryRoot),
-    branch,
-    remoteName: remote,
-    remoteUrl: validateTargetUrl(remoteUrl),
-    upstreamBranch: mergeRef.slice('refs/heads/'.length)
-  };
-}
+export { generatedWorkflow };
+export { resolveTargetRepository };
 
 function generatedProject(target) {
   return {
@@ -158,48 +109,6 @@ export function generatedPackage(repositoryName, version = '0.1.0') {
 
 function shellQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-export function generatedWorkflow(template) {
-  const configuration = [
-    '---',
-    'tracker:',
-    '  kind: local',
-    '  active_states:',
-    '    - Ready',
-    '    - In Progress',
-    '    - Rework',
-    '    - Merging',
-    '  terminal_states:',
-    '    - Done',
-    '    - Cancelled',
-    'polling:',
-    '  interval_ms: 30000',
-    'workspace:',
-    '  root: $SYMPHONY_WORKSPACE_ROOT',
-    'hooks:',
-    '  after_create: |',
-    '    : "${SYMPHONY_GITHUB_REPOSITORY_URL:?SYMPHONY_GITHUB_REPOSITORY_URL is required}"',
-    '    : "${SYMPHONY_GITHUB_BASE_BRANCH:?SYMPHONY_GITHUB_BASE_BRANCH is required}"',
-    '    git clone --branch "$SYMPHONY_GITHUB_BASE_BRANCH" "$SYMPHONY_GITHUB_REPOSITORY_URL" .',
-    '    node "$LEESH_LOOP_RUNTIME_ROOT/operator/app/workspace-files.mjs" "$PWD"',
-    'agent:',
-    '  max_turns: 20',
-    'codex:',
-    '  command: |',
-    '    env PATH="$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:$PATH" bash -c \'',
-    '      codex_args=()',
-    '      if [ -n "${SYMPHONY_CODEX_MODEL:-}" ]; then',
-    '        codex_args+=(--config "model=${SYMPHONY_CODEX_MODEL}")',
-    '      fi',
-    '      if [ -n "${SYMPHONY_CODEX_REASONING_EFFORT:-}" ]; then',
-    '        codex_args+=(--config "model_reasoning_effort=${SYMPHONY_CODEX_REASONING_EFFORT}")',
-    '      fi',
-    '      exec codex "${codex_args[@]}" app-server',
-    '    \'',
-    '---'
-  ].join('\n');
-  return `${configuration}\n\n${template.trim()}\n`;
 }
 
 const envExample = `# Task data uses this Loop's Local Task Store. No Task database credentials are required.

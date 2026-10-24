@@ -380,6 +380,11 @@ function installDependencies(loopRoot, componentName, runtimeEnvironment = proce
   const component = componentFor(componentName);
   const packageDirectory = join(loopRoot, component.packageDirectory);
   const stateDirectory = ensureStateDirectory(loopRoot);
+  const installEnvironment = {
+    ...runtimeEnvironment,
+    npm_config_cache: runtimeEnvironment.npm_config_cache || join(stateDirectory, 'npm-cache'),
+    npm_package_config_node_gyp_devdir: runtimeEnvironment.npm_package_config_node_gyp_devdir || join(stateDirectory, 'node-gyp')
+  };
   const recordPath = join(stateDirectory, `${componentName}.json`);
   const { digest, environment, manifest } = dependencyFingerprint(packageDirectory);
   const requiredFiles = requiredDependencyFiles(manifest, component);
@@ -398,7 +403,7 @@ function installDependencies(loopRoot, componentName, runtimeEnvironment = proce
   const install = spawnSync('npm', ['ci', '--include=dev'], {
     cwd: packageDirectory,
     stdio: ['ignore', process.stderr.fd, 'inherit'],
-    env: runtimeEnvironment
+    env: installEnvironment
   });
   if (install.error) throw new Error(`npm ci could not start: ${install.error.message}`);
   if (install.status !== 0) {

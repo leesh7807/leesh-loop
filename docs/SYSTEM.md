@@ -1,69 +1,52 @@
 # System responsibilities and configuration
 
-This document is for operators and maintainers who need the system boundaries behind the user steps in the [README](../README.md). Use the README for normal setup and task work.
+## Process and data boundaries
 
-## Runtime responsibilities
+The Manager Service, Manager UI, and each Loop Process have independent lifecycles. The UI is served by one loopback Manager address. The Manager starts and stops Loop Processes but does not relay Worker activity. A Loop uses its own Symphony, Local Task Store, workspace root, settings, and `WORKFLOW.md`; it continues task processing if the Manager or browser closes.
 
-A Loop instance operates one target Git repository. Its Project configuration is the root `project.toml`; it also has a root `WORKFLOW.md`, a Local Operator page, and isolated worker workspaces. `operator/` contains the runtime that reads the Project. The target repository remains separate from the Loop instance.
+The Manager's process records are advisory until verified against the operating system and the Loop's own readiness data. A Loop is `Running` only when its PID start identity, runtime ownership record, dispatch acknowledgement, assigned dashboard address, and runtime status endpoint agree. PID reuse, missing records, incomplete startup, and ownership mismatches are surfaced as `Unconfirmed` or `Failed`; the Manager does not signal an unverified process.
 
-- **Operator** reads Project settings, checks startup requirements, starts Symphony, and serves the Local Task UI.
-- **Local Publisher** writes a Plan and task to the Loop's Local Task Store using the requested publication State.
-- **Local Task Store** is the authoritative SQLite store for task properties, Accepted Plans, Blocked By relations, Workpad records, and comments.
-- **Symphony** reads that same store to dispatch eligible tasks and creates isolated workspaces from the configured Git base branch.
-- **Worker** reads the generated Loop's root `WORKFLOW.md`, performs the task, and records progress through the bound Local task tools.
+The Manager binds to `127.0.0.1`. It checks the exact Host, a private random token, Origin, and Fetch Metadata on API requests. It exposes named instance, process, Runtime, Workflow, and Task operations, never a shell command endpoint. Task Store operations open the selected instance's SQLite database and retain the existing Local Publisher and Store contracts.
 
-Local Task State is lifecycle authority. The Workpad is mutable execution context, comments are human review input, and the Accepted Plan is immutable input. The Repository Plan in the worker's workspace is the durable execution contract. A worker does not rewrite the Accepted Plan.
+## User directories
 
-## Init and workflow source
+XDG directories separate shared Runtime, durable instance data, process state, and user configuration:
 
-Run `leesh-loop init` at the root of a target Git repository. Init reads the current branch's configured upstream URL and branch, creates a sibling Loop directory, and materializes a runtime snapshot that runs independently of the source checkout.
+| Data | Default path | Contents |
+| --- | --- | --- |
+| Data | `~/.local/share/leesh-loop` | Instance registry, instance data, immutable versioned Runtime distributions, and shared Mix home |
+| State | `~/.local/state/leesh-loop` | Manager service record, logs, Loop execution identity, process logs, and assigned ports |
+| Config | `~/.config/leesh-loop` | Active Runtime pointer, Runtime source, and Manager port ranges |
+| Cache | `~/.cache/leesh-loop` | Hex package cache used while preparing Runtime distributions |
 
-The linked `leesh-loop` CLI maintains a per-user discovery registry for independent Loops. `leesh-loop list` reads the current state from each Loop's own runtime files and ownership checks; `leesh-loop start <instance>` and `leesh-loop stop <instance>` invoke that Loop's existing `npm start` and `npm stop` commands. The registry does not own or terminate processes. New Loops register at init, and successful runtime or workflow updates enroll existing Loops.
+`XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, and `XDG_CACHE_HOME` override those roots. Managed directories are private to the local user. Each instance receives a stable UUID and an independent directory under `instances/<id>` containing `project.toml`, `WORKFLOW.md`, `state/local-task-store/local-task-store.sqlite`, and `workspaces/`. Runtime source is not copied into that directory. Normal creation does not add `.env.example` and does not change the target repository.
 
-Init builds the generated root `WORKFLOW.md` from:
+The registry is a new source of truth. Existing per-project registries are not imported or modified. Existing instance files and processes are left untouched; users reinitialize the repositories they want to manage.
 
-1. Local Task Store, workspace, and Git clone settings.
-2. The complete body of this repository's `docs/WORKFLOW_TEMPLATE.md`.
+## Instance creation and worker configuration
 
-The generated root `project.toml` sets `workflow_path` to `WORKFLOW.md`. Project-relative paths are resolved from the directory containing that TOML file, so Symphony reads the generated root workflow at task execution time. The template is a source for that agent contract, not a separate file the generated worker reads.
+`leesh-loop init` and the Manager UI call the same Manager Service operation. The CLI resolves the current Git branch's configured upstream URL and branch; the UI validates the submitted local Git repository and resolves the same project identity. Duplicate repository roots are rejected. Neither path can specify arbitrary shell text.
 
-The source repository's root `WORKFLOW.md` is its own concrete agent contract. It is not copied to target repositories.
+An instance's `project.toml` records its repository URL/base branch, workflow path, workspace root, Store state directory, and optional Codex/workspace-file settings. Internal Symphony ports are assigned from the user-configured Manager range, default `4100`–`4199`; the Manager UI defaults to port `4320`. The Manager probes the OS socket table for an available port and tracks active assignments. The per-project `ui_port`/`symphony_port` settings are not part of new instance configuration.
 
-## Updating a generated Loop
+On start, the Manager selects the active immutable Runtime distribution, opens the instance configuration, validates its workspace files, assigns a port, and launches the existing `operator/app/leesh-loop.mjs start` path with manager-owned execution state. Symphony startup, Worker dispatch, Workspace behavior, task transitions, Codex app-server, approvals, and sandbox execution remain in the existing Loop runtime. The Manager uses only its process start/stop, ownership, readiness, and local runtime status contracts.
 
-Run `leesh-loop update` from the generated Loop root to replace its Leesh Loop runtime and npm package lock from the distribution that provides the CLI. `leesh-loop update --workflow` independently replaces only the generated root `WORKFLOW.md`. Runtime updates preserve the generated workflow; workflow updates leave runtime and npm files alone. Both preserve `project.toml`, environment files, workspace, and state. Updates do not operate on the target repository and should be run while the Loop is stopped.
+The Local Publisher remains the authority for Accepted Plan publication. The Manager routes task reads and allowed mutations by selected Instance ID to that instance's Local Task Store. A stopped Loop still has an available Store. Per-instance Store connections are independent and closed when the Manager exits.
 
-## Project settings and credentials
+## Runtime distributions and updates
 
-Project paths are resolved relative to the directory containing root `project.toml`; absolute paths and `~/...` are also supported. The checked-in TOML and each generated Loop TOML document defaults and show optional settings as comments. UI and Symphony ports default to 4310 and 4100; set `ui_port` or `symphony_port` in `project.toml` when another local process uses a default. The core settings are:
+The Runtime manifest selects shared execution code and its locked dependencies. Installation materializes a content-identified version in the Runtime directory, installs UI and Store npm dependencies, fetches and compiles the locked Symphony Mix dependencies, builds the UI, verifies the identity, and only then activates it. Failed staging leaves the previous active pointer in place. Installed versions are retained so a running process can continue using the Runtime directory it started from.
 
-| Setting | Responsibility |
-| --- | --- |
-| `github_repository_url` | Target GitHub repository. |
-| `github_base_branch` | Target repository's base branch. Set it with the URL; Operator does not guess a branch. |
-| `workflow_path` | Agent execution contract passed to Symphony. Init points this to the generated root `WORKFLOW.md`. |
-| `symphony_workspace_root` | Parent directory for task workspaces. |
-| `state_directory` | Optional Operator runtime state and Local Task Store directory. |
-| `workspace_files` | Optional regular files copied to the new worker workspace root under their basename. Paths may be absolute, relative to `project.toml`, or start with `~/`. Git tracking status does not matter. Directories and globs are unsupported; duplicate basenames are rejected. Existing destinations are left untouched, and continuations do not recopy files. |
-| `codex_model`, `codex_reasoning_effort` | Optional independent Codex overrides. Omitted values use Codex settings. |
-| `open_project_surfaces` | Whether starting the Loop asks the desktop to open the Operator page. |
-| `skip_external_readiness` | Optional setting that skips external review readiness; it does not skip core startup checks. |
-| `startup_timeout_ms`, `browser_acknowledgement_timeout_ms` | Optional startup and browser acknowledgement timeouts. |
+`leesh-loop update` explicitly installs and activates the current source's Runtime and reloads an already-running Manager when its own Runtime version is behind. A Runtime update started in the Manager UI activates the version for new Loops and reports when the Manager needs that CLI reload. New Loop starts use the active distribution; running Loop processes keep their existing code and dependencies. Runtime updates are independent of Workflow updates. An instance Workflow can be compared with the latest template and explicitly replaced only while that instance is stopped. The previous file is saved under `workflow-backups/` before replacement.
 
-Task operations do not require a Task database URL, Task integration token, or Notion configuration. The Local Task Store is created under `state_directory/local-task-store/local-task-store.sqlite` and is preserved across normal shutdown, restart, and supported runtime updates. chatgpt-shot remains an external review service and owns its own configuration and internal service data; the Loop does not read or manage those details as Task storage.
+Runtime or Manager upgrades do not migrate Task Store schemas or mutate active Workers. If a future Runtime requires an incompatible data change, compatibility must be established before that operation is enabled.
 
-The Local Publisher accepts the complete Accepted Plan, derives the Task title from its H1, and atomically stores the Task and immutable Plan. The Operator calls that Publisher boundary for user publication and uses Local Task Store operations for task reads, State, Blocked By, and comments. It does not write directly to the SQLite schema or impose a State-transition policy.
+## Operator and Task contract
 
-Use `workspace_files` only for regular files workers need. It is not a general credential transfer mechanism. A Git-ignored local file in the sibling target repository can be listed explicitly. The Operator validates the sources before starting and copies each file without recreating its source directories.
+The Manager UI includes the existing Operator features. Each Task API request carries the selected Instance ID, and the server resolves it through its registry before opening a Store. The API preserves Accepted Plan publishing, Task list/detail, State, Blocked By, comments, Workpad, and Human Review meanings. UI drafts are keyed by instance so selection changes do not mix publication data.
 
-### Changing settings while the Loop is running
+The Local Task Store remains authoritative for State, immutable Accepted Plans, Blocked By relations, Workpad records, and comments. The Worker remains bound to its Local Task Store tooling. Manager availability is not a prerequisite for Task processing or Workpad writes.
 
-An acknowledged task runtime records the effective settings that define its identity: `github_repository_url`, `github_base_branch`, `workflow_path`, `symphony_workspace_root`, `allow_workspace_root_inside_repository`, `workspace_files`, `codex_model`, `codex_reasoning_effort`, `skip_external_readiness`, `worker_interface_identity`, `symphony_command`, and `symphony_port`. Changing one while that runtime is running does not replace it. `npm start` reports that the Loop is running with different settings; run `npm stop`, then `npm start` to use the updated configuration. This also applies when changing either Codex override.
+## Verification and development
 
-## Startup and workspaces
-
-On start, Operator initializes or opens the Local Task Store, checks the workspace and GitHub access, prepares the UI, and starts Symphony with the same Store path. In the default setup it also checks the review command and its external readiness. A failed core check prevents task dispatch and reports the item that needs attention.
-
-The worker workspace is cloned from the configured base. Task branches, Rework, pull requests, and merge verification use that configured base; the remote default branch is not a substitute. Workspace files and review credentials stay within their separate ownership boundaries.
-
-The isolated Local Smoke Run under [`local-e2e/README.md`](../local-e2e/README.md) provides automatic verification and an interactive Operator session with a controlled Worker. It is separate from the normal `npm start` user flow.
+The Local Smoke Run under [`local-e2e/README.md`](../local-e2e/README.md) verifies the existing Symphony and controlled Worker behavior. Manager verification adds isolated XDG roots, two local Git repositories, real API/UI requests, OS process/socket observation, and direct Store readback. It does not infer actual Codex/external-service behavior from a controlled Worker.

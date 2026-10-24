@@ -20,9 +20,9 @@ test('a page reload restores the Plan, publication State, and selected blocker s
     ]
   };
 
-  writePublicationDraft(draft, storage);
+  writePublicationDraft(draft, 'instance-a', storage);
 
-  assert.deepEqual(readPublicationDraft(storage), draft);
+  assert.deepEqual(readPublicationDraft('instance-a', storage), draft);
 });
 
 test('malformed session data is ignored and duplicate or incomplete blockers are discarded', () => {
@@ -35,23 +35,38 @@ test('malformed session data is ignored and duplicate or incomplete blockers are
       { taskId: 'task-a', title: 'Duplicate', state: 'Done' },
       { title: 'No identity', state: 'Backlog' }
     ]
-  }, storage);
+  }, 'instance-a', storage);
 
-  assert.deepEqual(readPublicationDraft(storage), {
+  assert.deepEqual(readPublicationDraft('instance-a', storage), {
     plan: '# Safe read',
     state: '',
     selectedBlockers: [{ taskId: 'task-a', title: 'First', state: 'Done', identifier: '' }]
   });
 
-  storage.setItem('leesh-loop.operator.publication-draft.v1', '{invalid');
-  assert.deepEqual(readPublicationDraft(storage), { plan: '', state: '', selectedBlockers: [] });
+  storage.setItem('leesh-loop.operator.publication-draft.v1:instance-a', '{invalid');
+  assert.deepEqual(readPublicationDraft('instance-a', storage), { plan: '', state: '', selectedBlockers: [] });
 });
 
 test('a successful publication can clear its recovery draft', () => {
   const storage = new MemoryStorage();
-  writePublicationDraft({ plan: '# Published', state: 'Backlog', selectedBlockers: [] }, storage);
+  writePublicationDraft({ plan: '# Published', state: 'Backlog', selectedBlockers: [] }, 'instance-a', storage);
 
-  clearPublicationDraft(storage);
+  clearPublicationDraft('instance-a', storage);
 
-  assert.deepEqual(readPublicationDraft(storage), { plan: '', state: '', selectedBlockers: [] });
+  assert.deepEqual(readPublicationDraft('instance-a', storage), { plan: '', state: '', selectedBlockers: [] });
+});
+
+test('publication recovery stays scoped to its mounted instance across tab selection changes', () => {
+  const storage = new MemoryStorage();
+  const firstDraft = { plan: '# First', state: 'Ready', selectedBlockers: [] };
+  const secondDraft = { plan: '# Second', state: 'Backlog', selectedBlockers: [] };
+
+  writePublicationDraft(firstDraft, 'instance-a', storage);
+  writePublicationDraft(secondDraft, 'instance-b', storage);
+
+  assert.deepEqual(readPublicationDraft('instance-a', storage), firstDraft);
+  assert.deepEqual(readPublicationDraft('instance-b', storage), secondDraft);
+  clearPublicationDraft('instance-a', storage);
+  assert.deepEqual(readPublicationDraft('instance-a', storage), { plan: '', state: '', selectedBlockers: [] });
+  assert.deepEqual(readPublicationDraft('instance-b', storage), secondDraft);
 });

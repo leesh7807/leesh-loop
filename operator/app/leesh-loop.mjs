@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
-import { chmod, mkdir, open, readFile, readlink, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, readFile, readlink, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { validateWorkspaceFiles } from './workspace-files.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
 import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
 import { defaultOperatorUiDependencies, readRequestBody, startOperatorUiServer } from './operator-ui-server.mjs';
-import { registerLoopAfterStart } from './instance-registry.mjs';
 import { initializeLoopTaskStore, localTaskStorePath } from './local-task-store-runtime.mjs';
 import { prepareNpmDependencies } from './dependency-preparation.mjs';
 
@@ -20,7 +20,8 @@ const defaultConfig = join(root, 'project.toml');
 const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 const canonical = value => resolve(value);
 const stateRoot = config => canonical(config.state_directory || join(appRoot, '.runtime'));
-const paths = config => { const dir = stateRoot(config); return { dir, state: join(dir, 'runtime.json'), ui: join(dir, 'publish-ui.json'), lock: join(dir, 'lifecycle.lock'), ownership: join(dir, 'ownership.json'), authorization: join(dir, 'dispatch-authorization.json'), acknowledgement: join(dir, 'dispatch-acknowledgement.json'), startup_status: join(dir, 'startup-status'), startup_log: join(dir, 'symphony-startup.log') }; };
+const executionStateRoot = (config, environment = process.env) => canonical(environment.LEESH_LOOP_EXECUTION_STATE_DIRECTORY || stateRoot(config));
+const paths = config => { const dir = executionStateRoot(config); return { dir, state: join(dir, 'runtime.json'), ui: join(dir, 'publish-ui.json'), lock: join(dir, 'lifecycle.lock'), ownership: join(dir, 'ownership.json'), authorization: join(dir, 'dispatch-authorization.json'), acknowledgement: join(dir, 'dispatch-acknowledgement.json'), startup_status: join(dir, 'startup-status'), startup_log: join(dir, 'symphony-startup.log') }; };
 
 async function atomicJson(path, value) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -56,6 +57,9 @@ async function withLock(config, action) {
 function effective(config, runtimeId, port) {
   return { workflow_path: config.workflow_path, local_task_store_path: localTaskStorePath(stateRoot(config)), symphony_workspace_root: config.symphony_workspace_root, allow_workspace_root_inside_repository: config.allow_workspace_root_inside_repository === true, workspace_files: config.workspace_files, codex_model: config.codex_model ?? null, codex_reasoning_effort: config.codex_reasoning_effort ?? null, worker_interface_identity: config.worker_interface_identity || 'operator/external/chatgpt-shot/chatgpt-shot', skip_external_readiness: config.skip_external_readiness === true, github_repository_url: config.github_repository_url, github_base_branch: config.github_base_branch, symphony_command: canonical(config.symphony_command || join(root, 'operator/app/run-symphony')), dashboard: `http://127.0.0.1:${port}`, runtime_id: runtimeId };
 }
+export async function initializeInstanceTaskStore(config) {
+  return initializeLoopTaskStore(stateRoot(config));
+}
 function configureLocalTaskStoreEnvironment(environment, databasePath, runtimeRoot) {
   delete environment.LEESH_LOOP_TRACKER_KIND;
   delete environment.LEESH_LOOP_NOTION_DATABASE_URL;
@@ -69,20 +73,35 @@ function compatible(oldValue, current) { return JSON.stringify(compatibilityIden
 function parseStartArguments(values) {
   let configurationPath;
   let skipExternalReadiness = false;
-  for (const value of values) {
+  let managerManaged = false;
+  let symphonyPort;
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
     if (value === '--skip-external-readiness') {
       if (skipExternalReadiness) throw new Error('start accepts --skip-external-readiness only once');
       skipExternalReadiness = true;
+      continue;
+    }
+    if (value === '--managed-instance') {
+      if (managerManaged) throw new Error('start accepts --managed-instance only once');
+      managerManaged = true;
+      continue;
+    }
+    if (value === '--symphony-port') {
+      if (symphonyPort !== undefined) throw new Error('start accepts --symphony-port only once');
+      const portValue = values[++index];
+      if (!/^\d+$/.test(portValue || '') || Number(portValue) < 1 || Number(portValue) > 65535) throw new Error('--symphony-port must be an integer between 1 and 65535');
+      symphonyPort = Number(portValue);
       continue;
     }
     if (value.startsWith('-')) throw new Error(`unknown start option: ${value}`);
     if (configurationPath !== undefined) throw new Error('start accepts at most one project configuration path');
     configurationPath = value;
   }
-  return { configurationPath: configurationPath || defaultConfig, skipExternalReadiness };
+  return { configurationPath: configurationPath || defaultConfig, skipExternalReadiness, managerManaged, symphonyPort };
 }
-function startConfiguration(config, { skipExternalReadiness = false } = {}) {
-  return skipExternalReadiness ? { ...config, skip_external_readiness: true } : config;
+function startConfiguration(config, { skipExternalReadiness = false, symphonyPort } = {}) {
+  return { ...config, ...(skipExternalReadiness ? { skip_external_readiness: true } : {}), ...(symphonyPort === undefined ? {} : { symphony_port: symphonyPort }) };
 }
 function operatorBootstrapArgs(config, symphony, port) { return [join(root, 'operator/app/operator-bootstrap'), ...(config.skip_external_readiness ? ['--skip-external-readiness'] : []), '--', symphony, '--port', String(port), '--i-understand-that-this-will-be-running-without-the-usual-guardrails', config.workflow_path]; }
 async function request(url) { const response = await fetch(url, { signal: AbortSignal.timeout(1_000) }); if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }
@@ -118,7 +137,10 @@ async function confirmRuntimeAbsent(state) {
     if (observed.runtime_id === runtimeId) {
       return { status: 'present', runtime_id: runtimeId, observed_runtime_id: observed.runtime_id };
     }
-    return { status: 'absent', runtime_id: runtimeId, observed_runtime_id: observed.runtime_id };
+    if (Number.isSafeInteger(observed.pid) && observed.pid > 0) {
+      return { status: 'absent', runtime_id: runtimeId, observed_runtime_id: observed.runtime_id };
+    }
+    return { status: 'unconfirmed', runtime_id: runtimeId, error: 'another response on the assigned port has no Loop process identity' };
   } catch (error) {
     if (error?.cause?.code === 'ECONNREFUSED') return { status: 'absent', runtime_id: runtimeId, reason: 'runtime dashboard refused the connection' };
     return { status: 'unconfirmed', runtime_id: runtimeId, error: String(error?.message || error) };
@@ -126,7 +148,16 @@ async function confirmRuntimeAbsent(state) {
 }
 async function stopRuntimeAndClear(config, state) {
   if (!await terminate(state)) {
-    return { status: 'unconfirmed', stopped: false, process_identity_mismatch: true, pid: state?.pid || null };
+    const observedTicks = state?.pid ? processStartTicks(state.pid) : null;
+    const reusedPid = state?.pid && alive(state.pid)
+      && typeof state.process_start_ticks === 'string' && state.process_start_ticks
+      && observedTicks && observedTicks !== state.process_start_ticks;
+    if (!reusedPid) return { status: 'unconfirmed', stopped: false, process_identity_mismatch: true, pid: state?.pid || null };
+    const readback = await confirmRuntimeAbsent(state);
+    if (readback.status !== 'absent') return { ...readback, stopped: false, process_identity_mismatch: true, pid: state.pid };
+    await stopUi(config);
+    await clear(config);
+    return { ...readback, stopped: true, process_identity_mismatch: true, pid: state.pid };
   }
   const readback = await confirmRuntimeAbsent(state);
   if (readback.status !== 'absent') return { ...readback, stopped: false };
@@ -275,14 +306,15 @@ async function ensureUi(config) {
   await waitFor(async () => { try { await reachable(uiUrl(config)); return true; } catch { return false; } }, 'Operator UI');
 }
 
-async function start(config) {
+async function start(config, { managerManaged = false } = {}) {
   return withLock(config, async () => {
     const port = Number(config.symphony_port || PROJECT_DEFAULTS.symphony_port); const p = paths(config); const desired = effective(config, 'pending', port); const existing = await reconcile(config, desired);
     if (!existing) console.error('Operator: Checking your Loop setup and getting the task page ready.');
     let localStorePath;
-    localStorePath = await initializeLoopTaskStore(p.dir);
-    ensureOperatorUi();
+    localStorePath = await initializeInstanceTaskStore(config);
+    if (!managerManaged) ensureOperatorUi();
     if (existing) {
+      if (managerManaged) return { reused: true, pid: existing.pid, dashboard: existing.effective.dashboard };
       let window_error;
       try { await ensureUi(config); } catch (error) { window_error = String(error.message || error); }
       if (config.open_project_surfaces && projectWindowNeedsOpening(existing)) {
@@ -334,6 +366,10 @@ async function start(config) {
       await atomicJson(p.authorization, { state: 'running', runtime_id: runtimeId, published_at: new Date().toISOString() });
       await atomicText(p.startup_status, 'waiting for task processing');
       await waitFor(() => runtimeObserved(running, true), 'task processing', 15_000, reportProgress, () => childFailure('task processing'));
+      if (managerManaged) {
+        await remove(p.startup_status);
+        return { reused: false, pid, dashboard: identity.dashboard };
+      }
       try {
         await ensureUi(config);
         if (config.open_project_surfaces) {
@@ -376,6 +412,43 @@ async function serve(config, { prepared = false } = {}) {
   server.once('error', error => { console.error(`Operator UI server failed: ${error.message}`); process.exitCode = 1; });
 }
 
+async function stopManagerOwnedRuntime(values, locked) {
+  const [instanceId, runtimeId] = values;
+  const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (values.length !== 2 || !idPattern.test(instanceId || '') || !idPattern.test(runtimeId || '')) {
+    throw new Error('stop-owned-managed requires a managed instance ID and runtime ID');
+  }
+  if (process.env.LEESH_LOOP_MANAGER_MANAGED !== 'true') {
+    throw new Error('stop-owned-managed is available only to the central Manager');
+  }
+  const executionDirectory = process.env.LEESH_LOOP_EXECUTION_STATE_DIRECTORY;
+  if (typeof executionDirectory !== 'string' || !isAbsolute(executionDirectory)) {
+    throw new Error('Manager Loop execution state directory is invalid');
+  }
+  const stateHome = process.env.XDG_STATE_HOME || join(homedir(), '.local/state');
+  if (!isAbsolute(stateHome)) throw new Error('XDG_STATE_HOME must be an absolute path');
+  const expectedDirectory = resolve(join(stateHome, 'leesh-loop', 'loops', instanceId));
+  if (resolve(executionDirectory) !== expectedDirectory
+    || basename(expectedDirectory) !== instanceId
+    || basename(dirname(expectedDirectory)) !== 'loops'
+    || basename(dirname(dirname(expectedDirectory))) !== 'leesh-loop') {
+    throw new Error('Manager Loop execution state directory does not match its managed instance ID');
+  }
+  const details = await lstat(expectedDirectory);
+  if (details.isSymbolicLink() || !details.isDirectory()) {
+    throw new Error('Manager Loop execution state directory must be a real directory');
+  }
+  if (!locked) {
+    const lockedArgs = ['-x', join(expectedDirectory, 'lifecycle.flock'), process.execPath, appScript, '__locked', 'stop-owned-managed', instanceId, runtimeId];
+    const result = spawnSync('flock', lockedArgs, { cwd: root, stdio: 'inherit' });
+    if (result.error) throw result.error;
+    process.exitCode = result.status ?? 1;
+    return;
+  }
+  const result = await stopOwnedRuntime({}, runtimeId);
+  console.log(JSON.stringify(result));
+}
+
 const args = process.argv.slice(2);
 const locked = args[0] === '__locked';
 const [command, ...commandArgs] = locked ? args.slice(1) : args;
@@ -388,10 +461,15 @@ if (command === 'start') {
 const configFile = startOptions?.configurationPath || commandArgs[0] || defaultConfig;
 let directExecution = false;
 try { directExecution = Boolean(process.argv[1] && realpathSync(process.argv[1]) === appScript); } catch { /* Node may be importing this module from another entry point. */ }
-if (directExecution && startArgumentError) {
+if (directExecution && command === 'stop-owned-managed') {
+  stopManagerOwnedRuntime(commandArgs, locked).catch(error => {
+    console.error('Leesh Loop could not stop the Manager-owned runtime: ' + error.message);
+    process.exitCode = 1;
+  });
+} else if (directExecution && startArgumentError) {
   console.error(`Leesh Loop could not start: ${startArgumentError.message}`);
   process.exitCode = 2;
-} else if (directExecution && !['start', 'stop', 'stop-owned', 'serve', 'serve-prepared'].includes(command)) {
+} else if (directExecution && !['start', 'stop', 'stop-owned', 'stop-owned-managed', 'serve', 'serve-prepared'].includes(command)) {
   const usage = 'Usage: node operator/app/leesh-loop.mjs <start|stop|stop-owned|serve> [project.toml] [runtime-id] [--skip-external-readiness for start]';
   if (command === '--help' || command === '-h') console.log(usage);
   else { console.error(usage); process.exitCode = 2; }
@@ -401,24 +479,25 @@ if (directExecution && startArgumentError) {
     if (command === 'start') config = startConfiguration(config, startOptions);
     loadedConfig = config;
     if (!locked && ['start', 'stop', 'stop-owned'].includes(command)) {
-      await mkdir(stateRoot(config), { recursive: true, mode: 0o700 });
-      const lockPath = join(stateRoot(config), 'lifecycle.flock');
+      await mkdir(executionStateRoot(config), { recursive: true, mode: 0o700 });
+      const lockPath = join(executionStateRoot(config), 'lifecycle.flock');
       const lockedArgs = ['-x', lockPath, process.execPath, process.argv[1], '__locked', command, config.configuration_path];
       if (command === 'start' && startOptions.skipExternalReadiness) lockedArgs.push('--skip-external-readiness');
+      if (command === 'start' && startOptions.managerManaged) lockedArgs.push('--managed-instance');
+      if (command === 'start' && startOptions.symphonyPort !== undefined) lockedArgs.push('--symphony-port', String(startOptions.symphonyPort));
       if (command === 'stop-owned') lockedArgs.push(commandArgs[1] || '');
       const result = spawnSync('flock', lockedArgs, { cwd: root, stdio: 'inherit' });
       if (result.error) throw result.error;
       process.exitCode = result.status ?? 1;
       return undefined;
     }
-    return command === 'start' ? start(config) : command === 'stop' ? stop(config) : command === 'stop-owned' ? stopOwnedRuntime(config, commandArgs[1]) : serve(config, { prepared: command === 'serve-prepared' });
+    return command === 'start' ? start(config, { managerManaged: startOptions.managerManaged }) : command === 'stop' ? stop(config) : command === 'stop-owned' ? stopOwnedRuntime(config, commandArgs[1]) : serve(config, { prepared: command === 'serve-prepared' });
   }).then(async value => {
     if (!value) return;
     if (command === 'start') {
-      try { await registerLoopAfterStart({ cwd: root }); }
-      catch (error) {
-        console.error(`Leesh Loop started successfully, but global registration failed: ${error.message}`);
-        process.exitCode = 1;
+      if (startOptions.managerManaged) {
+        console.log(JSON.stringify(value));
+        return;
       }
       const message = value.reused ? 'This Loop is already running.' : 'This Loop is ready.';
       const page = uiUrl(loadedConfig);
@@ -437,4 +516,4 @@ if (directExecution && startArgumentError) {
   });
 }
 
-export { acknowledgeBrowser, compatible, configureLocalTaskStoreEnvironment, dispatchBrowser, effective, ensureOperatorUi, loadConfig, openProjectSurfaces, operatorBootstrapArgs, parseStartArguments, projectSurfaces, projectWindowNeedsOpening, readRequestBody, startConfiguration, uiIdentity, uiRuntimeSourceFiles };
+export { acknowledgeBrowser, compatible, configureLocalTaskStoreEnvironment, dispatchBrowser, effective, ensureOperatorUi, executionStateRoot, loadConfig, openProjectSurfaces, operatorBootstrapArgs, parseStartArguments, projectSurfaces, projectWindowNeedsOpening, readRequestBody, startConfiguration, uiIdentity, uiRuntimeSourceFiles };

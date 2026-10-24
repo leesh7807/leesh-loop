@@ -1,15 +1,29 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createSerializedRefreshQueue } from './refresh-queue.js';
 import { clearPublicationDraft, readPublicationDraft, writePublicationDraft } from './publication-draft.js';
 import { groupTasksForOperatorDisplay } from './operator-task-display-order.js';
 import { readTaskDetailDraft } from './task-detail-draft.js';
+import { bootstrapManagerToken } from './manager-auth.js';
+import { createManagerApiFetch } from './manager-api.js';
+import { managerLifecycleAction } from './manager-lifecycle-action.js';
+import { createManagerInstanceListGate } from './manager-instance-list-gate.js';
+import { createManagerSelectionGate } from './manager-selection-gate.js';
+import { InstanceOperationFeedback, WorkflowOperationFeedback } from './manager-operation-feedback.js';
+import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, managerFeedbackReducer, managerOperationAnnouncement, managerOperationCompletionMessage, workflowOperationFeedbackPlacement } from './manager-feedback.js';
+import { logsPanelViewState, logsReadFailureState, logsReadStartState, managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from './manager-read-state.js';
+import { workflowUpdateEligibility } from './workflow-update-eligibility.js';
+import { workflowComparisonAfterApply } from './workflow-apply-result.js';
+import { createWorkflowDiff } from './workflow-diff.js';
 import './style.css';
 
 const REFRESH_INTERVAL_MS = 7500;
+const MANAGER_SELECTION_KEY = 'leesh-loop.manager.selected-instance.v1';
 const formatTime = value => new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' }).format(value);
 const taskUrl = id => `/api/v1/tasks/${encodeURIComponent(id)}`;
 const taskDraftKey = id => `leesh-loop.operator.task-draft.v1:${id}`;
+const managerToken = bootstrapManagerToken();
+const apiFetch = createManagerApiFetch({ token: managerToken });
 
 async function responseJson(response) {
   const body = await response.json();
@@ -49,6 +63,53 @@ function BlockerSummary({ blockers }) {
           <ul>{remainingBlockers.map(blocker => <li key={blocker.taskId || blocker.id}>{blocker.title} · {blocker.state}</li>)}</ul>
         </details>
       )}
+    </div>
+  );
+}
+
+function WorkflowComparison({ current, candidate }) {
+  const lines = useMemo(() => createWorkflowDiff(current, candidate), [current, candidate]);
+  const added = lines.reduce((count, line) => count + (line.type === 'added' ? 1 : line.type === 'replacement' ? line.added : 0), 0);
+  const removed = lines.reduce((count, line) => count + (line.type === 'removed' ? 1 : line.type === 'replacement' ? line.removed : 0), 0);
+
+  return (
+    <div className="workflow-review">
+      <p className="manager-help">Template changes · {added} added · {removed} removed</p>
+      <div className="workflow-diff" aria-label="Workflow changes">
+        {lines.map((line, index) => line.type === 'gap' ? (
+          <div className="workflow-diff-gap" key={`gap-${index}`}>… {line.count} unchanged {line.count === 1 ? 'line' : 'lines'} hidden …</div>
+        ) : line.type === 'replacement' ? (
+          <div className="workflow-diff-replacement" key={`replacement-${index}`}>{line.removed} lines removed and {line.added} lines added in this large section. Open full Workflow files to review its contents.</div>
+        ) : (
+          <div className={`workflow-diff-line ${line.type}`} key={`${line.type}-${line.oldNumber || ''}-${line.newNumber || ''}-${index}`}>
+            <span className="workflow-diff-number">{line.oldNumber ?? ''}</span>
+            <span className="workflow-diff-number">{line.newNumber ?? ''}</span>
+            <span className="workflow-diff-marker" aria-hidden="true">{line.type === 'added' ? '+' : line.type === 'removed' ? '−' : ' '}</span>
+            <span>{line.text || ' '}</span>
+          </div>
+        ))}
+      </div>
+      <details className="workflow-full-files">
+        <summary>View full Workflow files</summary>
+        <div className="workflow-comparison">
+          <section><h3>Current Workflow</h3><pre>{current}</pre></section>
+          <section><h3>Template</h3><pre>{candidate}</pre></section>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function ManagerFeedback({ feedback, target }) {
+  const readError = feedback.readErrors[target];
+  const operationError = feedback.operationErrors[target];
+  const notice = feedback.notices[target];
+  if (!readError && !operationError && !notice) return null;
+  return (
+    <div className={`manager-feedback manager-feedback-${target}`}>
+      {readError && <p className="inline-message failure" role="alert">{readError}</p>}
+      {operationError && <p className="inline-message failure" role="alert">{operationError}</p>}
+      {notice && <p className="inline-message" role="status">{notice}</p>}
     </div>
   );
 }
@@ -113,7 +174,7 @@ function TaskSurface({ tasks, selectedTaskId, loading, error, refreshedAt, onRet
   return (
     <aside className="task-surface" aria-labelledby="tasks-heading" aria-busy={loading && !refreshedAt}>
       <div className="surface-header">
-        <div><p className="eyebrow">Work queue</p><h2 id="tasks-heading">Tasks</h2></div>
+        <div><p className="eyebrow">Work queue</p><h2 id="tasks-heading" tabIndex={-1}>Tasks</h2></div>
         <div className="task-surface-meta">
           <span className="task-total">{tasks.length}</span>
           <button type="button" className="quiet-button" onClick={onRetry} disabled={loading}>Refresh</button>
@@ -133,7 +194,7 @@ function TaskSurface({ tasks, selectedTaskId, loading, error, refreshedAt, onRet
       {tasks.length > 0 && (
         <div className="task-groups">
           {groups.humanReview.length > 0 && taskGroup('Human Review', groups.humanReview, 'review-work')}
-          {groups.activeWork.length > 0 && taskGroup('In progress', groups.activeWork, 'active-work')}
+          {groups.activeWork.length > 0 && taskGroup('Active work', groups.activeWork, 'active-work')}
           <details className="remaining-tasks">
             <summary><span>Other tasks</span><span className="task-group-count">{otherCount}</span></summary>
             {groups.remainingTasks.length
@@ -146,15 +207,15 @@ function TaskSurface({ tasks, selectedTaskId, loading, error, refreshedAt, onRet
   );
 }
 
-function PublicationSurface({ config, plan, state, selectedBlockers, publishing, onDraftChange, onReset, onPublished }) {
+function PublicationSurface({ config, instanceId, plan, state, selectedBlockers, publishing, onDraftChange, onReset, onPublished, apiFetch }) {
   const [result, setResult] = useState(null);
   const submitInFlight = useRef(false);
 
   useEffect(() => {
     const current = { plan, state, selectedBlockers };
-    if (result?.kind === 'success') clearPublicationDraft();
-    else writePublicationDraft(current);
-  }, [plan, state, selectedBlockers, result]);
+    if (result?.kind === 'success') clearPublicationDraft(instanceId);
+    else writePublicationDraft(current, instanceId);
+  }, [instanceId, plan, state, selectedBlockers, result]);
 
   async function submit(event) {
     event.preventDefault();
@@ -162,17 +223,17 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
     submitInFlight.current = true;
     setResult(null);
     const submittedBlockers = [...selectedBlockers];
-    writePublicationDraft({ plan, state, selectedBlockers: submittedBlockers });
+    writePublicationDraft({ plan, state, selectedBlockers: submittedBlockers }, instanceId);
     onDraftChange({ publishing: true });
     try {
-      const response = await fetch('/api/v1/publish', {
+      const response = await apiFetch('/api/v1/publish', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ plan, state, blockedBy: submittedBlockers.map(task => task.taskId) })
       });
       const body = await responseJson(response);
       setResult({ kind: 'success', ...body, blockers: submittedBlockers });
-      clearPublicationDraft();
+      clearPublicationDraft(instanceId);
       onPublished(body);
     } catch (error) {
       setResult({ kind: 'failure', message: error.message || 'Publishing failed.' });
@@ -241,7 +302,7 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
   );
 }
 
-function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTaskChanged, onTaskListRefresh }) {
+function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTaskChanged, onTaskListRefresh, apiFetch }) {
   const [task, setTask] = useState(null);
   const [workpad, setWorkpad] = useState([]);
   const [comments, setComments] = useState([]);
@@ -265,7 +326,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     const requestVersion = detailRefreshQueue.current.begin();
     if (requestVersion === null) return;
     try {
-      const response = await fetch(taskUrl(taskId), { headers: { accept: 'application/json' } });
+      const response = await apiFetch(taskUrl(taskId), { headers: { accept: 'application/json' } });
       const body = await responseJson(response);
       if (!detailRefreshQueue.current.isCurrent(requestVersion)) return;
       const firstRead = !detailLoaded.current;
@@ -329,7 +390,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     setSaving('state');
     setStateFeedback(null);
     try {
-      const response = await fetch(`${taskUrl(taskId)}/state`, {
+      const response = await apiFetch(`${taskUrl(taskId)}/state`, {
         method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ state: stateDraft })
       });
       const body = await responseJson(response);
@@ -356,7 +417,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     setSaving('blockers');
     setBlockerFeedback(null);
     try {
-      const response = await fetch(`${taskUrl(taskId)}/blocked-by`, {
+      const response = await apiFetch(`${taskUrl(taskId)}/blocked-by`, {
         method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blockedBy: blockerDraft })
       });
       const body = await responseJson(response);
@@ -383,7 +444,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     setSaving('comment');
     setCommentFeedback(null);
     try {
-      const response = await fetch(`${taskUrl(taskId)}/comments`, {
+      const response = await apiFetch(`${taskUrl(taskId)}/comments`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: commentDraft })
       });
       const body = await responseJson(response);
@@ -496,13 +557,15 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
   );
 }
 
-function App() {
+function OperatorApp({ instanceId }) {
+  const instanceApiFetch = useMemo(() => createManagerApiFetch({ token: managerToken, instanceId }), [instanceId]);
   const [config, setConfig] = useState(null);
+  const [configReadState, setConfigReadState] = useState('loading');
   const [tasks, setTasks] = useState([]);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [navigationTarget, setNavigationTarget] = useState(null);
   const [publicationReceipt, setPublicationReceipt] = useState(null);
-  const [draft, setDraft] = useState(() => readPublicationDraft());
+  const [draft, setDraft] = useState(() => readPublicationDraft(instanceId));
   const [publishing, setPublishing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -517,7 +580,7 @@ function App() {
     if (requestVersion === null) return;
     if (!hasReadTasks.current) setLoading(true);
     try {
-      const response = await fetch('/api/v1/tasks', { headers: { accept: 'application/json' } });
+      const response = await instanceApiFetch('/api/v1/tasks', { headers: { accept: 'application/json' } });
       const body = await responseJson(response);
       if (!taskListRefreshQueue.current.isCurrent(requestVersion)) {
         taskListRefreshQueue.current.markQueued();
@@ -546,15 +609,18 @@ function App() {
       setLoading(false);
       if (shouldRefresh) void refresh();
     }
-  }, []);
+  }, [instanceApiFetch]);
 
   useEffect(() => {
     let active = true;
-    fetch('/api/v1/config').then(responseJson).then(value => { if (active) setConfig(value); }).catch(() => { if (active) setConfig(null); });
+    instanceApiFetch('/api/v1/config')
+      .then(responseJson)
+      .then(value => { if (active) { setConfig(value); setConfigReadState('loaded'); } })
+      .catch(() => { if (active) { setConfig(null); setConfigReadState('error'); } });
     void refresh();
     const timer = window.setInterval(() => { void refresh(); }, REFRESH_INTERVAL_MS);
     return () => { active = false; window.clearInterval(timer); };
-  }, [refresh]);
+  }, [instanceApiFetch, refresh]);
 
   useEffect(() => {
     if (config?.githubRepositoryName) document.title = `${config.githubRepositoryName} · Loop`;
@@ -585,7 +651,6 @@ function App() {
 
   function openTask(id) {
     if (window.matchMedia('(max-width: 960px)').matches) setNavigationTarget('detail');
-    else window.scrollTo(0, 0);
     setSelectedTaskId(id);
   }
   function openPublishedTask(publication) {
@@ -597,12 +662,11 @@ function App() {
   }
   function returnToPublication() {
     if (window.matchMedia('(max-width: 960px)').matches) setNavigationTarget('publish');
-    else window.scrollTo(0, 0);
     setSelectedTaskId(null);
   }
   function resetDraft() {
     const emptyDraft = { plan: '', state: config?.defaultState || 'Ready', selectedBlockers: [] };
-    clearPublicationDraft();
+    clearPublicationDraft(instanceId);
     setDraft(emptyDraft);
   }
   function handleTaskChanged(task) {
@@ -613,7 +677,9 @@ function App() {
     }) } : value));
   }
 
-  if (!config) return <main className="page-shell"><p className="inline-message failure" role="alert">The Operator configuration could not be loaded. Refresh the page to retry.</p></main>;
+  const configViewState = operatorConfigViewState(configReadState, config);
+  if (configViewState === 'loading') return <main className="page-shell"><p className="manager-empty" role="status">Loading Operator configuration…</p></main>;
+  if (configViewState === 'error') return <main className="page-shell"><p className="inline-message failure" role="alert">The Operator configuration could not be loaded. Refresh the page to retry.</p></main>;
   const publishDraft = { plan, state: state || config.defaultState, selectedBlockers };
 
   return (
@@ -635,10 +701,12 @@ function App() {
             onBackToPublish={returnToPublication}
             onTaskChanged={handleTaskChanged}
             onTaskListRefresh={refresh}
+            apiFetch={instanceApiFetch}
           />
         ) : (
           <PublicationSurface
             config={{ ...config, tasks }}
+            instanceId={instanceId}
             plan={publishDraft.plan}
             state={publishDraft.state}
             selectedBlockers={publishDraft.selectedBlockers}
@@ -650,6 +718,7 @@ function App() {
             }}
             onReset={resetDraft}
             onPublished={openPublishedTask}
+            apiFetch={instanceApiFetch}
           />
         )}
       </main>
@@ -657,4 +726,432 @@ function App() {
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+async function readManagerJson(response) {
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || `Manager request failed (${response.status}).`);
+  return body;
+}
+
+function ManagerApp() {
+  const [instances, setInstances] = useState([]);
+  const [selectedId, setSelectedId] = useState(() => {
+    try { return window.localStorage.getItem(MANAGER_SELECTION_KEY) || ''; }
+    catch { return ''; }
+  });
+  const selectionGateRef = useRef(null);
+  if (!selectionGateRef.current) selectionGateRef.current = createManagerSelectionGate(selectedId);
+  const instanceListGateRef = useRef(null);
+  if (!instanceListGateRef.current) instanceListGateRef.current = createManagerInstanceListGate();
+  const workflowRefreshControllerRef = useRef(null);
+  const logsReadRequestRef = useRef(0);
+  const [repositoryPath, setRepositoryPath] = useState('');
+  const [runtime, setRuntime] = useState(null);
+  const [runtimeReadState, setRuntimeReadState] = useState('loading');
+  const [workflow, setWorkflow] = useState(null);
+  const [workflowReadState, setWorkflowReadState] = useState('idle');
+  const [logs, setLogs] = useState('');
+  const [logsReadState, setLogsReadState] = useState('idle');
+  const [workflowOpen, setWorkflowOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [busy, setBusy] = useState('');
+  const [busyOperation, setBusyOperation] = useState(null);
+  const [feedback, dispatchFeedback] = useReducer(managerFeedbackReducer, initialManagerFeedback);
+  const [instanceOperationFeedback, dispatchInstanceOperationFeedback] = useReducer(instanceOperationFeedbackReducer, initialInstanceOperationFeedback);
+  const [instanceReadState, setInstanceReadState] = useState('loading');
+
+  const selected = instances.find(instance => instance.id === selectedId) || null;
+  const inventoryViewState = managerInventoryViewState(instanceReadState, instances.length);
+  const runtimeViewState = sharedRuntimeViewState(runtimeReadState, runtime);
+  const workflowPanelState = workflowComparisonViewState(workflowReadState, Boolean(workflow), workflowOpen);
+  const logsPanelState = logsPanelViewState(logsReadState, logsOpen);
+  const workflowEligibility = selected ? workflowUpdateEligibility(selected) : null;
+  const selectedScopedLifecycleFeedback = instanceOperationFeedbackFor(instanceOperationFeedback, selectedId, 'lifecycle');
+  const selectedScopedWorkflowFeedback = instanceOperationFeedbackFor(instanceOperationFeedback, selectedId, 'workflow');
+  const scopedWorkflowFeedbackPlacement = workflowOperationFeedbackPlacement(workflowOpen, Boolean(workflow));
+  const busyOperationInstance = busyOperation?.instanceId
+    ? instances.find(instance => instance.id === busyOperation.instanceId)
+    : null;
+  const busyOperationMessage = managerOperationAnnouncement(busyOperation && {
+    ...busyOperation,
+    repositoryName: busyOperationInstance?.repository_name || busyOperation.instanceId
+  });
+  const selectedRuntimeVersion = runtime?.distributions?.find(distribution => distribution.id === selected?.runtime_version)?.version
+    || selected?.runtime_version?.slice(0, 12)
+    || '—';
+
+  const selectInstance = useCallback(instanceId => {
+    const selectionGate = selectionGateRef.current;
+    const changed = selectionGate.instanceId !== instanceId;
+    selectionGate.select(instanceId);
+    if (changed) workflowRefreshControllerRef.current?.abort();
+    setSelectedId(instanceId);
+  }, []);
+
+  const refreshInstances = useCallback(async () => {
+    const listRevision = instanceListGateRef.current.begin();
+    try {
+      const body = await readManagerJson(await apiFetch('/api/v1/instances'));
+      if (!instanceListGateRef.current.accept(listRevision)) return;
+      setInstances(body.instances);
+      setInstanceReadState('loaded');
+      const current = selectionGateRef.current.instanceId;
+      const next = body.instances.some(instance => instance.id === current) ? current : (body.instances[0]?.id || '');
+      selectInstance(next);
+      try {
+        if (next) window.localStorage.setItem(MANAGER_SELECTION_KEY, next);
+        else window.localStorage.removeItem(MANAGER_SELECTION_KEY);
+      } catch { /* Selection remains available for this page session. */ }
+      dispatchFeedback({ type: 'read-cleared', target: 'instances' });
+    } catch (requestError) {
+      if (!instanceListGateRef.current.accept(listRevision)) return;
+      setInstanceReadState(readFailureState);
+      dispatchFeedback({ type: 'read-error', target: 'instances', message: requestError.message || 'Could not load managed Loop instances.' });
+    }
+  }, [selectInstance]);
+
+  const refreshRuntime = useCallback(async () => {
+    try {
+      setRuntime(await readManagerJson(await apiFetch('/api/v1/runtime')));
+      setRuntimeReadState('loaded');
+      dispatchFeedback({ type: 'read-cleared', target: 'runtime' });
+    }
+    catch (requestError) {
+      setRuntimeReadState(readFailureState);
+      dispatchFeedback({ type: 'read-error', target: 'runtime', message: requestError.message || 'Could not load the Runtime version.' });
+    }
+  }, []);
+
+  const refreshLogs = useCallback(async () => {
+    const selectionGate = selectionGateRef.current;
+    const requestSelection = selectionGate.capture();
+    const instanceId = requestSelection.instanceId;
+    if (!instanceId) return;
+    const requestId = ++logsReadRequestRef.current;
+    const isCurrentRequest = () => requestId === logsReadRequestRef.current && selectionGate.isCurrent(requestSelection);
+    setLogsReadState(current => logsReadStartState(current));
+    dispatchFeedback({ type: 'read-cleared', target: 'logs' });
+    try {
+      const body = await readManagerJson(await apiFetch(`/api/v1/instances/${encodeURIComponent(instanceId)}/logs`));
+      if (!isCurrentRequest()) return;
+      setLogs(body.logs);
+      setLogsReadState('loaded');
+      dispatchFeedback({ type: 'read-cleared', target: 'logs' });
+    } catch (requestError) {
+      if (!isCurrentRequest()) return;
+      setLogsReadState(current => logsReadFailureState(current));
+      dispatchFeedback({ type: 'read-error', target: 'logs', message: requestError.message || 'Could not read Loop logs.' });
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshInstances();
+    void refreshRuntime();
+    const timer = window.setInterval(() => { void refreshInstances(); }, 4000);
+    return () => window.clearInterval(timer);
+  }, [refreshInstances, refreshRuntime]);
+
+  useEffect(() => {
+    document.title = selected ? `${selected.repository_name} · Leesh Loop` : 'Leesh Loop Manager';
+    setWorkflow(null);
+    setWorkflowReadState('idle');
+    setLogs('');
+    setLogsReadState('idle');
+    logsReadRequestRef.current += 1;
+    setWorkflowOpen(false);
+    setLogsOpen(false);
+    dispatchFeedback({ type: 'instance-changed' });
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId || !workflowOpen) return;
+    let active = true;
+    setWorkflowReadState('loading');
+    dispatchFeedback({ type: 'read-cleared', target: 'workflow' });
+    apiFetch(`/api/v1/instances/${encodeURIComponent(selectedId)}/workflow`)
+      .then(readManagerJson)
+      .then(body => {
+        if (!active) return;
+        setWorkflow(body);
+        setWorkflowReadState('loaded');
+        dispatchFeedback({ type: 'read-cleared', target: 'workflow' });
+      })
+      .catch(requestError => {
+        if (!active) return;
+        setWorkflowReadState('error');
+        dispatchFeedback({ type: 'read-error', target: 'workflow', message: requestError.message || 'Could not compare the Workflow.' });
+      });
+    return () => { active = false; };
+  }, [selectedId, workflowOpen]);
+
+  useEffect(() => {
+    if (!selectedId || !logsOpen) return;
+    void refreshLogs();
+    return () => { logsReadRequestRef.current += 1; };
+  }, [selectedId, logsOpen, refreshLogs]);
+
+  async function perform(path, { method = 'POST', body, label, operation = 'manager-action', target = 'manager', selectionSnapshot, instanceId } = {}) {
+    const selectionGate = selectionGateRef.current;
+    const operationSelection = selectionSnapshot || (target === 'workflow' || target === 'lifecycle' ? selectionGate.capture() : null);
+    if (operationSelection && instanceId && operationSelection.instanceId !== instanceId) return null;
+    const scopedInstanceId = target === 'workflow' || target === 'lifecycle'
+      ? (instanceId || operationSelection?.instanceId)
+      : '';
+    const selectionIsCurrent = () => !operationSelection || selectionGate.isCurrent(operationSelection);
+    setBusy(label || 'Working…');
+    setBusyOperation({ label: label || 'Working', instanceId: scopedInstanceId });
+    if (scopedInstanceId) {
+      dispatchInstanceOperationFeedback({ type: 'started', instanceId: scopedInstanceId, target });
+      if (selectionIsCurrent()) dispatchFeedback({ type: 'operation-started', target });
+    } else dispatchFeedback({ type: 'operation-started', target });
+    try {
+      const result = await readManagerJson(await apiFetch(path, {
+        method,
+        ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      }));
+      const restartRequired = path === '/api/v1/runtime/update' && result.manager_restart_required;
+      const message = result.instance
+        ? `${result.instance.repository_name || result.instance.id}: ${result.instance.status}.`
+        : restartRequired
+          ? 'Runtime updated. Run leesh-loop in a terminal to reopen Manager with fresh access. This tab loses access after restart; running Loops keep their selected Runtime.'
+          : managerOperationCompletionMessage(operation);
+      if (scopedInstanceId) {
+        const scopedMessage = managerOperationCompletionMessage(operation, result.instance);
+        dispatchInstanceOperationFeedback({ type: 'success', instanceId: scopedInstanceId, target, message: scopedMessage });
+      } else if (selectionIsCurrent()) dispatchFeedback({ type: 'operation-success', target, message });
+      await refreshInstances();
+      await refreshRuntime();
+      return result;
+    } catch (requestError) {
+      if (scopedInstanceId) dispatchInstanceOperationFeedback({
+        type: 'error', instanceId: scopedInstanceId, target,
+        message: requestError.message || 'The Manager could not complete this action.'
+      });
+      else if (selectionIsCurrent()) dispatchFeedback({ type: 'operation-error', target, message: requestError.message || 'The Manager could not complete this action.' });
+      return null;
+    } finally {
+      setBusy('');
+      setBusyOperation(null);
+    }
+  }
+
+  async function createInstance(event) {
+    event.preventDefault();
+    if (!repositoryPath.trim()) return;
+    setBusy('Creating Loop');
+    setBusyOperation({ label: 'Creating Loop', instanceId: '' });
+    dispatchFeedback({ type: 'operation-started', target: 'create' });
+    try {
+      const result = await readManagerJson(await apiFetch('/api/v1/instances', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ repositoryPath: repositoryPath.trim() })
+      }));
+      const id = result.instance.id;
+      instanceListGateRef.current.invalidate();
+      setRepositoryPath('');
+      selectInstance(id);
+      try { window.localStorage.setItem(MANAGER_SELECTION_KEY, id); } catch { /* Selection remains in React state. */ }
+      dispatchFeedback({ type: 'operation-success', target: 'create', message: `Created ${result.instance.repository_name}.` });
+      await refreshInstances();
+    } catch (requestError) {
+      dispatchFeedback({ type: 'operation-error', target: 'create', message: requestError.message || 'Could not create the Loop instance.' });
+    } finally {
+      setBusy('');
+      setBusyOperation(null);
+    }
+  }
+
+  async function updateWorkflow() {
+    if (!workflow?.changed || !workflowEligibility?.canApply) return;
+    const selectionGate = selectionGateRef.current;
+    const selectionSnapshot = selectionGate.capture();
+    const instanceId = selectionSnapshot.instanceId;
+    const comparisonAtApply = workflow;
+    if (!instanceId || instanceId !== selectedId) return;
+    const accepted = window.confirm(`Replace the Workflow for ${selected.repository_name}? A backup will be kept in this instance's data.`);
+    if (!accepted) return;
+    const result = await perform(`/api/v1/instances/${encodeURIComponent(instanceId)}/workflow`, {
+      method: 'PUT',
+      body: { confirm: true, expectedCurrent: comparisonAtApply.current, expectedCandidateDigest: comparisonAtApply.candidate_digest },
+      label: 'Updating Workflow',
+      operation: 'update-workflow',
+      target: 'workflow',
+      selectionSnapshot,
+      instanceId
+    });
+    if (result) {
+      setWorkflow(current => workflowComparisonAfterApply(current, {
+        selectionGate,
+        selectionSnapshot,
+        candidateDigest: comparisonAtApply.candidate_digest
+      }));
+    }
+  }
+
+  async function refreshWorkflowComparison() {
+    const selectionGate = selectionGateRef.current;
+    const requestSelection = selectionGate.capture();
+    const comparisonInstanceId = requestSelection.instanceId;
+    if (!comparisonInstanceId) return;
+    workflowRefreshControllerRef.current?.abort();
+    const controller = new AbortController();
+    workflowRefreshControllerRef.current = controller;
+    setBusy('Refreshing Workflow');
+    setBusyOperation({ label: 'Refreshing Workflow', instanceId: comparisonInstanceId });
+    setWorkflowReadState('loading');
+    dispatchFeedback({ type: 'operation-started', target: 'workflow' });
+    try {
+      const comparison = await readManagerJson(await apiFetch(`/api/v1/instances/${encodeURIComponent(comparisonInstanceId)}/workflow`, { signal: controller.signal }));
+      if (!selectionGate.isCurrent(requestSelection)) return;
+      setWorkflow(comparison);
+      setWorkflowReadState('loaded');
+      dispatchFeedback({ type: 'operation-success', target: 'workflow', message: 'Workflow comparison refreshed. Review the candidate before applying.' });
+    } catch (requestError) {
+      if (controller.signal.aborted || !selectionGate.isCurrent(requestSelection)) return;
+      setWorkflowReadState('error');
+      dispatchFeedback({ type: 'operation-error', target: 'workflow', message: requestError.message || 'Could not refresh the Workflow comparison.' });
+    } finally {
+      if (workflowRefreshControllerRef.current === controller) {
+        workflowRefreshControllerRef.current = null;
+        setBusy(current => current === 'Refreshing Workflow' ? '' : current);
+        setBusyOperation(current => current?.label === 'Refreshing Workflow' && current.instanceId === comparisonInstanceId ? null : current);
+      }
+    }
+  }
+
+  const lifecycleAction = managerLifecycleAction(selected?.status, selected?.can_stop);
+
+  return (
+    <div className="manager-shell">
+      <header className="manager-header">
+        <div className="manager-brand"><p className="eyebrow">Leesh Loop</p><h1>Manager</h1></div>
+        {selected && (
+          <div className="manager-lifecycle">
+            <span className={`manager-status status-${selected.status.toLowerCase()}`}>{selected.status}</span>
+            <span className="manager-lifecycle-target">{selected.repository_name}</span>
+            {lifecycleAction === 'pending' ? (
+              <span className="manager-lifecycle-pending" role="status">Stop available when ready</span>
+            ) : lifecycleAction === 'stopping' ? (
+              <span className="manager-lifecycle-pending" role="status">Stopping…</span>
+            ) : lifecycleAction === 'stop' ? (
+              <button type="button" className="manager-action secondary" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop', operation: 'stop-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Stopping Loop' && busyOperation.instanceId === selectedId ? 'Stopping…' : 'Stop Loop'}</button>
+            ) : (
+              <button type="button" className="manager-action" disabled={Boolean(busy) || selected.status === 'Unconfirmed'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop', operation: 'start-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Starting Loop' && busyOperation.instanceId === selectedId ? 'Starting…' : 'Start Loop'}</button>
+            )}
+            <a className="manager-task-jump" href="#tasks-heading">View tasks</a>
+            {selected.detail && <p className="inline-message failure manager-lifecycle-detail" role="status">{selected.detail}</p>}
+            <ManagerFeedback feedback={feedback} target="lifecycle" />
+            <InstanceOperationFeedback feedback={selectedScopedLifecycleFeedback} target="lifecycle" />
+            <WorkflowOperationFeedback feedback={selectedScopedWorkflowFeedback} placement={scopedWorkflowFeedbackPlacement === 'header' ? 'header' : null} />
+          </div>
+        )}
+        {busyOperationMessage && <p className="inline-message manager-operation-pending" id="manager-operation-pending" role="status">{busyOperationMessage}</p>}
+      </header>
+
+      <section className="manager-instances" aria-labelledby="managed-instances-heading">
+        <div className="manager-instances-heading">
+          <h2 id="managed-instances-heading">Loop instances</h2>
+          <span>{inventoryViewState === 'list' || inventoryViewState === 'empty'
+            ? `${instances.length} ${instances.length === 1 ? 'instance' : 'instances'}`
+            : inventoryViewState === 'loading' ? 'Loading…' : 'Unavailable'}</span>
+        </div>
+        {inventoryViewState === 'list' ? (
+          <div className="manager-instance-list">
+            {instances.map(instance => (
+              <button type="button" className={`manager-instance-choice${selectedId === instance.id ? ' selected' : ''}`} key={instance.id}
+                aria-pressed={selectedId === instance.id}
+                onClick={() => {
+                  selectInstance(instance.id);
+                  try { window.localStorage.setItem(MANAGER_SELECTION_KEY, instance.id); } catch { /* Selection remains in React state. */ }
+                }}>
+                <span className="manager-instance-choice-title">{instance.repository_name}</span>
+                <span className={`manager-status status-${instance.status.toLowerCase()}`}>{instance.status}</span>
+                <span className="manager-instance-choice-path">{instance.repository_root}</span>
+              </button>
+            ))}
+          </div>
+        ) : inventoryViewState === 'loading'
+          ? <p className="manager-empty" role="status">Loading managed Loops…</p>
+          : inventoryViewState === 'empty'
+            ? <p className="manager-empty">No managed Loops yet. Add a Git repository below to create one.</p>
+            : null}
+        <ManagerFeedback feedback={feedback} target="instances" />
+      </section>
+
+      <section className="manager-console" aria-label="Loop Manager controls">
+        <details className="manager-create-details">
+          <summary>Add a Git repository</summary>
+          <form className="manager-create" onSubmit={createInstance}>
+            <p className="manager-help">Use a local repository root. Init checks the Git upstream and keeps settings, Workflow, Task Store, and workspaces in this user's Leesh Loop data.</p>
+            <label htmlFor="repository-path">Repository path</label>
+            <div className="manager-input-row">
+              <input id="repository-path" type="text" value={repositoryPath} onChange={event => setRepositoryPath(event.target.value)} placeholder="/home/you/projects/repository" autoComplete="off" spellCheck="false" aria-describedby={busy ? 'manager-operation-pending' : undefined} disabled={Boolean(busy)} required />
+              <button className="manager-action" type="submit" disabled={Boolean(busy) || !repositoryPath.trim()} aria-describedby={busy ? 'manager-operation-pending' : undefined}>{busy === 'Creating Loop' ? 'Creating…' : 'Create Loop'}</button>
+            </div>
+            <ManagerFeedback feedback={feedback} target="create" />
+          </form>
+        </details>
+
+        <section className="manager-runtime" aria-label="Central Runtime">
+          <div><p className="eyebrow">Shared Runtime</p><h2>{runtimeViewState === 'loading'
+            ? 'Loading Runtime…'
+            : runtimeViewState === 'ready'
+              ? `Version ${runtime.active.version}`
+              : runtimeViewState === 'missing' ? 'Runtime not installed' : 'Runtime unavailable'}</h2><p className="manager-help">New Loop starts use this immutable Runtime distribution. Running Loops keep their selected version.</p>{runtime?.active && runtime.manager_runtime_version !== runtime.active.id && <p className="inline-message" role="status">The Manager uses an older Runtime. Run <code>leesh-loop</code> to reopen Manager with fresh access.</p>}</div>
+          <div className="manager-runtime-action">
+            <button className="manager-action secondary" type="button" disabled={Boolean(busy) || runtimeReadState === 'loading'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform('/api/v1/runtime/update', { label: 'Updating Runtime', operation: 'update-runtime', target: 'runtime' })}>{busy === 'Updating Runtime' ? 'Updating…' : 'Update Runtime'}</button>
+            <ManagerFeedback feedback={feedback} target="runtime" />
+          </div>
+        </section>
+
+        {selected && (
+          <section className="manager-instance-info" aria-label="Selected Loop details">
+            <div><p className="eyebrow">Selected Loop</p><h2>{selected.repository_name}</h2><p className="manager-repository-path">{selected.repository_root}</p></div>
+            <div className="manager-instance-meta"><span>Base branch <strong>{selected.base_branch}</strong></span><span>Internal port <strong>{selected.port || '—'}</strong></span><span>Runtime <strong title={selected.runtime_version || undefined}>{selectedRuntimeVersion}</strong></span></div>
+          </section>
+        )}
+
+        {selected && (
+          <div className={`manager-folders${workflowOpen ? ' manager-folders-workflow-open' : ''}`}>
+            <details open={workflowOpen} onToggle={event => setWorkflowOpen(event.currentTarget.open)}>
+              <summary><span>Workflow</span><span>{workflow ? (workflow.changed ? 'Update available' : 'Current') : 'Compare with template'}</span></summary>
+              <ManagerFeedback feedback={feedback} target="workflow" />
+              <WorkflowOperationFeedback feedback={selectedScopedWorkflowFeedback} placement={scopedWorkflowFeedbackPlacement === 'panel' ? 'panel' : null} />
+              {!workflow && workflowPanelState === 'loading' && <p className="manager-help workflow-read-state" role="status">Loading Workflow comparison…</p>}
+              {!workflow && workflowPanelState === 'error' && <button type="button" className="manager-action secondary workflow-retry" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void refreshWorkflowComparison()}>{busyOperation?.label === 'Refreshing Workflow' && busyOperation.instanceId === selectedId ? 'Retrying…' : 'Retry comparison'}</button>}
+              {workflow && (
+                <div className="manager-workflow-content">
+                  <p className="manager-help">Review the proposed Workflow changes below. A backup is saved when you apply an update.</p>
+                  {workflow.changed && workflowEligibility && <p className="inline-message workflow-eligibility" id="workflow-update-eligibility" role="status">{workflowEligibility.summary}</p>}
+                  {workflow.changed ? <WorkflowComparison current={workflow.current} candidate={workflow.candidate} /> : <p className="manager-help">This Workflow matches the current template.</p>}
+                  <div className="workflow-update-actions">
+                    <button type="button" className="manager-action secondary" disabled={Boolean(busy) || !workflow.changed || !workflowEligibility?.canApply} aria-describedby={[workflow.changed && !workflowEligibility?.canApply ? 'workflow-update-disabled-reason' : '', busy ? 'manager-operation-pending' : ''].filter(Boolean).join(' ') || undefined} onClick={() => void updateWorkflow()}>{busyOperation?.label === 'Updating Workflow' && busyOperation.instanceId === selectedId ? 'Updating…' : 'Apply Workflow Update'}</button>
+                    {workflow.changed && !workflowEligibility?.canApply && <p className="manager-help" id="workflow-update-disabled-reason">{workflowEligibility?.controlHint || 'This Loop must be stopped before applying the update.'}</p>}
+                    <button type="button" className="manager-action secondary" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void refreshWorkflowComparison()}>{busyOperation?.label === 'Refreshing Workflow' && busyOperation.instanceId === selectedId ? 'Refreshing…' : 'Refresh comparison'}</button>
+                    <WorkflowOperationFeedback feedback={selectedScopedWorkflowFeedback} placement={scopedWorkflowFeedbackPlacement === 'actions' ? 'actions' : null} />
+                  </div>
+                </div>
+              )}
+            </details>
+            <details open={logsOpen} onToggle={event => setLogsOpen(event.currentTarget.open)}>
+              <summary><span>Loop logs</span><span>View startup and Symphony output</span></summary>
+              {logsOpen && <ManagerFeedback feedback={feedback} target="logs" />}
+              {logsOpen && logsPanelState === 'loading' && <p className="manager-help workflow-read-state" role="status">Loading Loop logs…</p>}
+              {logsOpen && logsPanelState === 'refreshing' && <p className="manager-help workflow-read-state" role="status">Refreshing logs; showing the last successful response until it completes.</p>}
+              {logsOpen && logsPanelState === 'stale-error' && <p className="manager-help workflow-read-state" role="status">Showing the last successful log response.</p>}
+              {logsOpen && (logsPanelState === 'loaded' || logsPanelState === 'error' || logsPanelState === 'stale-error') && (
+                <div className="manager-logs-actions">
+                  <button type="button" className="manager-action secondary" onClick={() => void refreshLogs()}>{logsPanelState === 'loaded' ? 'Refresh logs' : 'Retry logs'}</button>
+                </div>
+              )}
+              {logsOpen && ['loaded', 'refreshing', 'stale-error'].includes(logsPanelState) && <pre className="manager-logs">{logs || 'No Loop logs are available yet.'}</pre>}
+            </details>
+          </div>
+        )}
+        {!selected && inventoryViewState === 'empty' && <p className="manager-empty">Create an instance from a Git repository to see its tasks and lifecycle here.</p>}
+      </section>
+
+      {selected ? <OperatorApp key={selectedId} instanceId={selectedId} /> : null}
+    </div>
+  );
+}
+
+createRoot(document.getElementById('root')).render(<ManagerApp />);
