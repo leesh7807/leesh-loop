@@ -2,13 +2,13 @@
 
 ## Central Manager design evidence
 
-These captures show the production Operator UI bundle rendered from PR #120's UI source at commit `785554a4a86e6262d2f1368430aa7bc69a25b771`. The local fixture in `capture-manager-demo.mjs` supplies synthetic, read-only instance, Runtime, Workflow, and Task responses; no Manager Service, real repository, or Task Store was used. Treat the displayed names, paths, statuses, port, Runtime version, and tasks as illustrative data. These images support visual review only; they do not verify lifecycle behavior or live service integration.
+These captures show the production Operator UI bundle rendered from PR #120's UI source at commit `5678a8c78697006469e57d931bfa3878abe6737d`. The local fixture in `capture-manager-demo.mjs` supplies synthetic, read-only instance, Runtime, Workflow, and Task responses; no Manager Service, real repository, or Task Store was used. Treat the displayed names, paths, statuses, port, Runtime version, and tasks as illustrative data. These images support visual review only; they do not verify lifecycle behavior or live service integration.
 
 - Desktop overview at 1440×1200: two instance statuses, shared Runtime version 2026.10.24, selected Loop Runtime version 2026.10.18, selected repository beside its lifecycle action, and the task queue.
 
   ![Manager desktop overview with two synthetic instances and the task queue](manager-overview-desktop.png)
 
-- Desktop Workflow review at 1440×1500: selected instance Workflow diff, visible added and removed lines, and the disabled update control while the synthetic Loop status is Running.
+- Desktop Workflow review at 1440×1500: full-width Workflow diff with readable added and removed lines, and the disabled update control while the synthetic Loop status is Running.
 
   ![Manager desktop Workflow comparison with the update control disabled for a running Loop](manager-workflow-desktop.png)
 
