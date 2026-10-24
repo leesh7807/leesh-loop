@@ -82,6 +82,25 @@ async function saveObservedStatus(paths, execution, status, details = {}) {
   return updated;
 }
 
+async function recordRuntimeExit(paths, instance, execution, state) {
+  const status = ['Stopping', 'Stopped'].includes(execution.status) ? 'Stopped' : 'Failed';
+  const detail = status === 'Failed' ? 'Loop process exited without a confirmed stop request' : undefined;
+  await saveObservedStatus(paths, execution, status, {
+    pid: state.pid,
+    process_start_ticks: state.process_start_ticks,
+    ...(detail ? { detail } : {})
+  });
+  return {
+    id: instance.id,
+    name: instance.repository_name,
+    repository_root: instance.repository_root,
+    repository_url: instance.repository_url,
+    status,
+    ...(detail ? { detail } : {}),
+    ...(Number.isInteger(execution.port) ? { port: execution.port } : {})
+  };
+}
+
 export async function loopInstanceStatus(id, options = {}) {
   const paths = managerPaths(options);
   const instance = await getLoopInstance(id, options);
@@ -104,12 +123,23 @@ export async function loopInstanceStatus(id, options = {}) {
   try { state = await readRuntimeState(paths, id); }
   catch (error) { return unconfirmed(instance, error.message, execution); }
   if (!state) {
+    if (execution.status === 'Stopped') {
+      if (Number.isSafeInteger(execution.pid) && execution.pid > 0) {
+        const ticks = processStartTicks(execution.pid);
+        if (ticks && ticks === execution.process_start_ticks) {
+          return unconfirmed(instance, `Stopped record still matches live Loop process ${execution.pid}`, execution);
+        }
+        if (!ticks && processExists(execution.pid)) {
+          return unconfirmed(instance, `cannot inspect whether former Loop process ${execution.pid} is still alive`, execution);
+        }
+      }
+      return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Stopped', ...(Number.isInteger(execution.port) ? { port: execution.port } : {}) };
+    }
     if (Number.isSafeInteger(execution.pid) && execution.pid > 0) {
       const ticks = processStartTicks(execution.pid);
       if (ticks && ticks !== execution.process_start_ticks) return unconfirmed(instance, `PID ${execution.pid} has been reused; refusing to treat it as this Loop`, execution);
       if (!processExists(execution.pid)) {
-        await saveObservedStatus(paths, execution, 'Stopped', { pid: execution.pid, process_start_ticks: execution.process_start_ticks });
-        return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Stopped', port: execution.port };
+        return recordRuntimeExit(paths, instance, execution, { pid: execution.pid, process_start_ticks: execution.process_start_ticks });
       }
       return unconfirmed(instance, `runtime state is missing while process ${execution.pid} is alive`, execution);
     }
@@ -157,8 +187,7 @@ export async function loopInstanceStatus(id, options = {}) {
     if (!processExists(state.pid)) {
       const readback = await verifyRuntimeResponse(state, execution, await resolveRuntimePath(execution.runtime_path, options));
       if (readback.stopped) {
-        await saveObservedStatus(paths, execution, 'Stopped', { pid: state.pid, process_start_ticks: state.process_start_ticks });
-        return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Stopped', port: execution.port };
+        return recordRuntimeExit(paths, instance, execution, state);
       }
       return unconfirmed(instance, 'runtime process disappeared but its final state could not be confirmed', execution);
     }
@@ -172,15 +201,43 @@ export async function loopInstanceStatus(id, options = {}) {
   if (execution.port !== Number(new URL(state.effective?.dashboard || 'http://127.0.0.1').port)) return unconfirmed(instance, 'runtime port differs from the execution record', execution);
   const ready = await verifyRuntimeResponse(state, execution, runtimePath);
   if (ready.stopped) {
-    await saveObservedStatus(paths, execution, 'Stopped', { pid: state.pid, process_start_ticks: state.process_start_ticks });
-    return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Stopped', port: execution.port };
+    return recordRuntimeExit(paths, instance, execution, state);
   }
   if (ready.ready) {
     await saveObservedStatus(paths, execution, 'Running', { runtime_id: state.runtime_id, pid: state.pid, process_start_ticks: state.process_start_ticks, port: execution.port });
     return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Running', port: execution.port, runtime_version: runtimePath.id };
   }
   if (state.status === 'starting' || state.status === 'provisional' || state.status === 'committed-disabled') {
-    return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Starting', port: execution.port, ...(ready.detail ? { detail: ready.detail } : {}) };
+    if (execution.status === 'Failed') {
+      return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail: execution.detail || ready.detail || 'Loop startup failed before becoming ready', port: execution.port };
+    }
+    if (execution.status === 'Stopping') {
+      const detail = 'Loop stop was interrupted before the runtime became ready';
+      await saveObservedStatus(paths, execution, 'Failed', { detail });
+      return { id: instance.id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail, port: execution.port };
+    }
+    if (execution.status !== 'Starting') {
+      return unconfirmed(instance, ready.detail || `runtime is not ready while Manager records ${execution.status}`, execution);
+    }
+    if (Number.isSafeInteger(execution.launcher_pid) && execution.launcher_pid > 0) {
+      if (processExists(execution.launcher_pid)) {
+        const launcherTicks = processStartTicks(execution.launcher_pid);
+        if (!launcherTicks) return unconfirmed(instance, `cannot inspect the identity of startup launcher ${execution.launcher_pid}`, execution);
+        if (launcherTicks === execution.launcher_start_ticks) {
+          return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Starting', port: execution.port, ...(ready.detail ? { detail: ready.detail } : {}) };
+        }
+      }
+      const detail = 'startup launcher exited before the Loop runtime became ready';
+      await saveObservedStatus(paths, execution, 'Failed', { detail });
+      return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail, port: execution.port };
+    }
+    const startupAge = Date.now() - Date.parse(execution.started_at || 0);
+    if (startupAge < 15_000) {
+      return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Starting', port: execution.port, ...(ready.detail ? { detail: ready.detail } : {}) };
+    }
+    const detail = 'Loop runtime remained unready after its startup launcher identity was lost';
+    await saveObservedStatus(paths, execution, 'Failed', { detail });
+    return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail, port: execution.port };
   }
   return unconfirmed(instance, ready.detail || 'runtime readiness is unconfirmed', execution);
 }

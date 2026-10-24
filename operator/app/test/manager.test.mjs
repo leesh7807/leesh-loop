@@ -453,6 +453,152 @@ test('Running requires a matching process identity, ownership, dispatch acknowle
   assert.match(replaced.detail, /PID .* reused/);
 });
 
+test('a stopped execution record stays Stopped when its former PID has been reused', async t => {
+  const paths = await fixture(t);
+  const repository = await makeRepository(join(paths.directory, 'repositories'), 'stopped-project');
+  const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
+  const executionDirectory = join(managerPaths(paths).loopExecutionRoot, instance.id);
+  await mkdir(executionDirectory, { recursive: true });
+  await writeFile(join(executionDirectory, 'execution.json'), `${JSON.stringify({
+    schema_version: 1,
+    id: instance.id,
+    status: 'Stopped',
+    pid: process.pid,
+    process_start_ticks: 'old-process-identity',
+    port: 4180
+  })}\n`);
+
+  const observed = await loopInstanceStatus(instance.id, paths);
+  assert.equal(observed.status, 'Stopped');
+  assert.equal(observed.port, 4180);
+
+  const liveRepository = await makeRepository(join(paths.directory, 'repositories'), 'still-live-project');
+  const liveInstance = await createLoopInstance(liveRepository, { sourceRoot, ...paths });
+  const liveExecutionDirectory = join(managerPaths(paths).loopExecutionRoot, liveInstance.id);
+  await mkdir(liveExecutionDirectory, { recursive: true });
+  const processStat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+  const currentProcessTicks = processStat.slice(processStat.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
+  await writeFile(join(liveExecutionDirectory, 'execution.json'), `${JSON.stringify({
+    schema_version: 1,
+    id: liveInstance.id,
+    status: 'Stopped',
+    pid: process.pid,
+    process_start_ticks: currentProcessTicks,
+    port: 4181
+  })}\n`);
+
+  const stillAlive = await loopInstanceStatus(liveInstance.id, paths);
+  assert.equal(stillAlive.status, 'Unconfirmed');
+  assert.match(stillAlive.detail, /Stopped record still matches live Loop process/);
+});
+
+test('an orphaned unready runtime after its startup launcher exits is Failed and recoverable', async t => {
+  const paths = await fixture(t);
+  const repository = await makeRepository(join(paths.directory, 'repositories'), 'orphan-project');
+  const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
+  const runtime = await installTestRuntime(paths, 'orphan-fixture-runtime');
+  const executionDirectory = join(managerPaths(paths).loopExecutionRoot, instance.id);
+  await mkdir(executionDirectory, { recursive: true });
+  const processStat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+  const processStartTicks = processStat.slice(processStat.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
+  const ownershipPath = join(executionDirectory, 'ownership.json');
+  const acknowledgementPath = join(executionDirectory, 'dispatch-acknowledgement.json');
+  const runtimeId = 'orphan-runtime-1';
+  await writeFile(ownershipPath, `${JSON.stringify({ project_root: runtime.path, runtime_id: runtimeId, pid: process.pid, process_start_ticks: processStartTicks })}\n`);
+  await writeFile(acknowledgementPath, `${JSON.stringify({ runtime_id: 'not-ready', pid: process.pid, dispatch_capable: false })}\n`);
+  await writeFile(join(executionDirectory, 'runtime.json'), `${JSON.stringify({
+    status: 'provisional',
+    runtime_id: runtimeId,
+    pid: process.pid,
+    process_start_ticks: processStartTicks,
+    effective: { dashboard: 'http://127.0.0.1:4198' },
+    ownership_path: ownershipPath,
+    acknowledgement_path: acknowledgementPath
+  })}\n`);
+  const executionPath = join(executionDirectory, 'execution.json');
+  await writeFile(executionPath, `${JSON.stringify({
+    schema_version: 1,
+    id: instance.id,
+    status: 'Starting',
+    runtime_path: runtime.path,
+    runtime_version: runtime.id,
+    runtime_id: runtimeId,
+    pid: process.pid,
+    process_start_ticks: processStartTicks,
+    launcher_pid: 2147483647,
+    launcher_start_ticks: 'exited-launcher',
+    port: 4198,
+    started_at: new Date(Date.now() - 20_000).toISOString()
+  })}\n`);
+
+  const observed = await loopInstanceStatus(instance.id, paths);
+  assert.equal(observed.status, 'Failed');
+  assert.match(observed.detail, /startup launcher exited/);
+  assert.equal(JSON.parse(await readFile(executionPath, 'utf8')).status, 'Failed');
+});
+
+test('unexpected Loop exits report Failed while a confirmed stop reports Stopped', async t => {
+  const paths = await fixture(t);
+  const runtime = await installTestRuntime(paths, 'exit-fixture-runtime');
+  const repositoryRoot = join(paths.directory, 'repositories');
+  const running = await createLoopInstance(await makeRepository(repositoryRoot, 'crashed-project'), { sourceRoot, ...paths });
+  const stopping = await createLoopInstance(await makeRepository(repositoryRoot, 'stopping-project'), { sourceRoot, ...paths });
+
+  async function seedExitedRuntime(instance, status, port) {
+    const executionDirectory = join(managerPaths(paths).loopExecutionRoot, instance.id);
+    await mkdir(executionDirectory, { recursive: true });
+    const runtimeId = `dead-${instance.id}`;
+    const pid = 2147483647;
+    const processStartTicks = 'former-process-identity';
+    const ownershipPath = join(executionDirectory, 'ownership.json');
+    const acknowledgementPath = join(executionDirectory, 'dispatch-acknowledgement.json');
+    await writeFile(ownershipPath, `${JSON.stringify({ project_root: runtime.path, runtime_id: runtimeId, pid, process_start_ticks: processStartTicks })}\n`);
+    await writeFile(acknowledgementPath, `${JSON.stringify({ runtime_id: runtimeId, pid, dispatch_capable: true })}\n`);
+    await writeFile(join(executionDirectory, 'runtime.json'), `${JSON.stringify({
+      status: 'running',
+      runtime_id: runtimeId,
+      pid,
+      process_start_ticks: processStartTicks,
+      effective: { dashboard: `http://127.0.0.1:${port}` },
+      ownership_path: ownershipPath,
+      acknowledgement_path: acknowledgementPath
+    })}\n`);
+    await writeFile(join(executionDirectory, 'execution.json'), `${JSON.stringify({
+      schema_version: 1,
+      id: instance.id,
+      status,
+      runtime_path: runtime.path,
+      runtime_version: runtime.id,
+      runtime_id: runtimeId,
+      pid,
+      process_start_ticks: processStartTicks,
+      port
+    })}\n`);
+  }
+
+  async function closedPort() {
+    const server = createNetServer();
+    await new Promise((resolveListen, rejectListen) => {
+      server.once('error', rejectListen);
+      server.listen(0, '127.0.0.1', resolveListen);
+    });
+    const port = server.address().port;
+    await new Promise(resolveClose => server.close(resolveClose));
+    return port;
+  }
+
+  await seedExitedRuntime(running, 'Running', await closedPort());
+  await seedExitedRuntime(stopping, 'Stopping', await closedPort());
+
+  const unexpected = await loopInstanceStatus(running.id, paths);
+  const expected = await loopInstanceStatus(stopping.id, paths);
+  assert.equal(unexpected.status, 'Failed');
+  assert.match(unexpected.detail, /without a confirmed stop request/);
+  assert.equal(JSON.parse(await readFile(join(managerPaths(paths).loopExecutionRoot, running.id, 'execution.json'), 'utf8')).status, 'Failed');
+  assert.equal(expected.status, 'Stopped');
+  assert.equal(JSON.parse(await readFile(join(managerPaths(paths).loopExecutionRoot, stopping.id, 'execution.json'), 'utf8')).status, 'Stopped');
+});
+
 test('a stale Starting record without launcher identity remains Unconfirmed', async t => {
   const paths = await fixture(t);
   const repository = await makeRepository(join(paths.directory, 'repositories'), 'unconfirmed-project');
