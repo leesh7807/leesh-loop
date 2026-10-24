@@ -214,9 +214,9 @@ export function installRuntimeDistributionInWorker(sourceRoot = defaultSourceRoo
 
 export async function resolveRuntimePath(runtimePath, options = {}) {
   const paths = managerPaths(options);
-  const active = await activeRuntime(options);
+  const active = runtimePath ? null : await activeRuntime(options);
   const candidate = runtimePath ? resolve(runtimePath) : active?.path;
-  if (!candidate || !active) throw new Error('No central Runtime is installed. Run leesh-loop update or initialize an instance first.');
+  if (!candidate) throw new Error('No central Runtime is installed. Run leesh-loop update or initialize an instance first.');
   const canonical = await realpath(candidate);
   const relativePath = relative(paths.runtimeRoot, canonical);
   if (!relativePath || relativePath.startsWith(`..${sep}`) || relativePath === '..' || relativePath.startsWith(sep)) throw new Error('Runtime path is outside the managed distribution directory');

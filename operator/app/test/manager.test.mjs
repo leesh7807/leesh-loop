@@ -14,7 +14,7 @@ import { createOperatorUiServer } from '../operator-ui-server.mjs';
 import { hashDistribution } from '../installation-metadata.mjs';
 import { allocatePort, discoverRunningLoops, loopInstanceStatus, startLoopInstance, stopLoopInstance } from '../manager-lifecycle.mjs';
 import { createLoopInstance, listLoopInstances, managerPaths } from '../manager-storage.mjs';
-import { installRuntimeDistributionInWorker } from '../runtime-distribution.mjs';
+import { activeRuntime, installRuntimeDistributionInWorker } from '../runtime-distribution.mjs';
 
 const execFile = promisify(execute);
 const sourceRoot = resolve(import.meta.dirname, '../../..');
@@ -377,6 +377,33 @@ test('Manager log read reports one unavailable file and returns the other', asyn
   assert.ok(body.logs.includes('AVAILABLE-LOG-CONTENT'));
 });
 
+test('Manager rejects stale Task Store configuration until it restarts', async t => {
+  const paths = await fixture(t);
+  const repository = await makeRepository(join(paths.directory, 'repositories'), 'task-store-config-drift-project');
+  const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
+  const manager = await startManagerFixture(t, paths, {
+    taskStoreOpener: async () => ({ listTasks: () => [], close: () => {} })
+  });
+
+  const initialConfig = await api(manager, '/api/v1/config', { instanceId: instance.id });
+  assert.equal(initialConfig.response.status, 200);
+  const projectFile = join(instance.data_directory, 'project.toml');
+  const project = await readFile(projectFile, 'utf8');
+  const stateDirectory = /^state_directory = "([^"]+)"$/m.exec(project);
+  assert.ok(stateDirectory);
+  const changedProject = project.replace(stateDirectory[0], 'state_directory = "' + join(paths.directory, 'changed-state-directory') + '"');
+  await writeFile(projectFile, changedProject);
+
+  const [config, tasks] = await Promise.all([
+    api(manager, '/api/v1/config', { instanceId: instance.id }),
+    api(manager, '/api/v1/tasks', { instanceId: instance.id })
+  ]);
+  assert.equal(config.response.status, 409);
+  assert.equal(tasks.response.status, 409);
+  assert.match(config.body.error, /project.toml changed.*Restart the Manager/);
+  assert.match(tasks.body.error, /project.toml changed.*Restart the Manager/);
+});
+
 test('concurrent first-use config and task reads share and close one Task Store', async t => {
   const paths = await fixture(t);
   const repository = await makeRepository(join(paths.directory, 'repositories'), 'concurrent-task-store-project');
@@ -653,12 +680,15 @@ test('port allocation releases ports held only by stale execution records withou
   assert.equal(reconciled.status, 'Running');
 });
 
-test('Running requires a matching process identity, ownership, dispatch acknowledgement, and runtime API', async t => {
+test('Running remains observable through its pinned Runtime when the Active Runtime is damaged', async t => {
   const paths = await fixture(t);
   const repository = await makeRepository(join(paths.directory, 'repositories'), 'running-project');
   const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
   const managerState = managerPaths(paths);
-  const runtime = await installTestRuntime(paths, 'status-fixture-runtime');
+  const runtime = await installTestRuntime(paths, 'status-fixture-runtime-v1');
+  const activeVersion = await installTestRuntime(paths, 'status-fixture-runtime-v2');
+  await writeFile(join(activeVersion.path, 'runtime-fixture.mjs'), 'damaged active Runtime contents');
+  await assert.rejects(activeRuntime(paths), /contents do not match/);
   const runtimeId = runtime.id;
   const runtimePath = runtime.path;
 
