@@ -10,7 +10,7 @@ import { managerLifecycleAction } from './manager-lifecycle-action.js';
 import { createManagerInstanceListGate } from './manager-instance-list-gate.js';
 import { createManagerSelectionGate } from './manager-selection-gate.js';
 import { initialManagerFeedback, managerFeedbackReducer } from './manager-feedback.js';
-import { managerInventoryViewState, operatorConfigViewState, readFailureState } from './manager-read-state.js';
+import { managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState } from './manager-read-state.js';
 import { workflowUpdateEligibility } from './workflow-update-eligibility.js';
 import { createWorkflowDiff } from './workflow-diff.js';
 import './style.css';
@@ -743,6 +743,7 @@ function ManagerApp() {
   const workflowRefreshControllerRef = useRef(null);
   const [repositoryPath, setRepositoryPath] = useState('');
   const [runtime, setRuntime] = useState(null);
+  const [runtimeReadState, setRuntimeReadState] = useState('loading');
   const [workflow, setWorkflow] = useState(null);
   const [logs, setLogs] = useState('');
   const [workflowOpen, setWorkflowOpen] = useState(false);
@@ -753,6 +754,7 @@ function ManagerApp() {
 
   const selected = instances.find(instance => instance.id === selectedId) || null;
   const inventoryViewState = managerInventoryViewState(instanceReadState, instances.length);
+  const runtimeViewState = sharedRuntimeViewState(runtimeReadState, runtime);
   const workflowEligibility = selected ? workflowUpdateEligibility(selected) : null;
   const selectedRuntimeVersion = runtime?.distributions?.find(distribution => distribution.id === selected?.runtime_version)?.version
     || selected?.runtime_version?.slice(0, 12)
@@ -791,9 +793,13 @@ function ManagerApp() {
   const refreshRuntime = useCallback(async () => {
     try {
       setRuntime(await readManagerJson(await apiFetch('/api/v1/runtime')));
+      setRuntimeReadState('loaded');
       dispatchFeedback({ type: 'read-cleared', target: 'runtime' });
     }
-    catch (requestError) { dispatchFeedback({ type: 'read-error', target: 'runtime', message: requestError.message || 'Could not load the Runtime version.' }); }
+    catch (requestError) {
+      setRuntimeReadState(readFailureState);
+      dispatchFeedback({ type: 'read-error', target: 'runtime', message: requestError.message || 'Could not load the Runtime version.' });
+    }
   }, []);
 
   useEffect(() => {
@@ -997,9 +1003,13 @@ function ManagerApp() {
         </details>
 
         <section className="manager-runtime" aria-label="Central Runtime">
-          <div><p className="eyebrow">Shared Runtime</p><h2>{runtime?.active ? `Version ${runtime.active.version}` : 'Runtime unavailable'}</h2><p className="manager-help">New Loop starts use this immutable Runtime distribution. Running Loops keep their selected version.</p>{runtime?.active && runtime.manager_runtime_version !== runtime.active.id && <p className="inline-message" role="status">The Manager uses an older Runtime. Run <code>leesh-loop</code> to reopen Manager with fresh access.</p>}</div>
+          <div><p className="eyebrow">Shared Runtime</p><h2>{runtimeViewState === 'loading'
+            ? 'Loading Runtime…'
+            : runtimeViewState === 'ready'
+              ? `Version ${runtime.active.version}`
+              : runtimeViewState === 'missing' ? 'Runtime not installed' : 'Runtime unavailable'}</h2><p className="manager-help">New Loop starts use this immutable Runtime distribution. Running Loops keep their selected version.</p>{runtime?.active && runtime.manager_runtime_version !== runtime.active.id && <p className="inline-message" role="status">The Manager uses an older Runtime. Run <code>leesh-loop</code> to reopen Manager with fresh access.</p>}</div>
           <div className="manager-runtime-action">
-            <button className="manager-action secondary" type="button" disabled={Boolean(busy)} onClick={() => void perform('/api/v1/runtime/update', { label: 'Updating Runtime', target: 'runtime' })}>{busy === 'Updating Runtime' ? 'Updating…' : 'Update Runtime'}</button>
+            <button className="manager-action secondary" type="button" disabled={Boolean(busy) || runtimeReadState === 'loading'} onClick={() => void perform('/api/v1/runtime/update', { label: 'Updating Runtime', target: 'runtime' })}>{busy === 'Updating Runtime' ? 'Updating…' : 'Update Runtime'}</button>
             <ManagerFeedback feedback={feedback} target="runtime" />
           </div>
         </section>
