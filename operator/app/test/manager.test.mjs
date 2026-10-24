@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFile as execute } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer, request as httpRequest } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { createManagerController, ensureManagerService, managerApiToken, managerBrowserUrl } from '../manager-service.mjs';
+import { createManagerController, ensureManagerService, managerApiToken, managerBrowserBootstrapHtml } from '../manager-service.mjs';
 import { createOperatorUiServer } from '../operator-ui-server.mjs';
 import { hashDistribution } from '../installation-metadata.mjs';
 import { allocatePort, loopInstanceStatus } from '../manager-lifecycle.mjs';
@@ -228,13 +229,13 @@ test('Manager API token is bound to the immutable Runtime and rejects the persis
   assert.equal(await controller.authorize(request(masterToken)), false);
 });
 
-test('Manager browser bootstrap sends its credential only in the URL fragment', () => {
+test('Manager browser bootstrap keeps its credential in the private local bootstrap document', () => {
   const token = 'd'.repeat(64);
-  const url = new URL(managerBrowserUrl('http://127.0.0.1:4320', token));
+  const html = managerBrowserBootstrapHtml('http://127.0.0.1:4320', token);
 
-  assert.equal(url.origin, 'http://127.0.0.1:4320');
-  assert.equal(url.search, '');
-  assert.equal(url.hash, `#manager-token=${token}`);
+  assert.match(html, new RegExp(`location\\.replace\\("http://127\\.0\\.0\\.1:4320/#manager-token=${token}"\\)`));
+  assert.match(html, /Content-Security-Policy/);
+  assert.match(html, /no-referrer/);
 });
 
 test('Manager CLI recognizes a previous Runtime through its legacy credential so update can restart it', async t => {
@@ -264,6 +265,9 @@ test('Manager CLI recognizes a previous Runtime through its legacy credential so
   assert.equal(confirmed.token, manager.masterToken);
   assert.equal(confirmed.managerRestartRequired, true);
   assert.equal(confirmed.managerRuntimeVersion, 'legacy-runtime-id');
+  const replacementMaster = (await readFile(managedPaths.managerApiMaster, 'utf8')).trim();
+  assert.match(replacementMaster, /^[a-f0-9]{64}$/);
+  assert.notEqual(replacementMaster, manager.masterToken);
 });
 
 test('port allocation skips externally occupied ports and reports an exhausted range', async t => {
@@ -376,7 +380,7 @@ test('CLI init and list use the same central instance registry as the Manager UI
   const runtimePath = runtime.path;
   await mkdir(managedPaths.configRoot, { recursive: true });
   await mkdir(managedPaths.managerStateRoot, { recursive: true });
-  await writeFile(managedPaths.managerToken, `${manager.masterToken}\n`, { mode: 0o600 });
+  await writeFile(managedPaths.managerApiMaster, `${manager.masterToken}\n`, { mode: 0o600 });
   await writeFile(managedPaths.managerConfiguration, `${JSON.stringify({ schema_version: 1, port: manager.port, symphony_port_min: 4200, symphony_port_max: 4209 })}\n`, { mode: 0o600 });
   const processStat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
   const processStartTicks = processStat.slice(processStat.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
@@ -389,6 +393,25 @@ test('CLI init and list use the same central instance registry as the Manager UI
     runtime_path: runtimePath,
     runtime_version: runtimeId
   })}\n`, { mode: 0o600 });
+
+  const browserCapture = join(paths.directory, 'browser-argument.txt');
+  const browserCommand = join(paths.directory, 'capture-browser.mjs');
+  await writeFile(browserCommand, `#!/usr/bin/env node\nimport { writeFile } from 'node:fs/promises';\nawait writeFile(${JSON.stringify(browserCapture)}, process.argv[2] || '');\n`, { mode: 0o700 });
+  await chmod(browserCommand, 0o700);
+  paths.environment.LEESH_LOOP_BROWSER_COMMAND = browserCommand;
+  await ensureManagerService({ sourceRoot, openBrowser: true, environment: paths.environment, homeDirectory: paths.homeDirectory });
+  let browserArgument;
+  for (let attempt = 0; attempt < 50 && browserArgument === undefined; attempt += 1) {
+    browserArgument = await readFile(browserCapture, 'utf8').catch(error => error?.code === 'ENOENT' ? undefined : Promise.reject(error));
+    if (browserArgument === undefined) await new Promise(resolveSleep => setTimeout(resolveSleep, 20));
+  }
+  assert.ok(browserArgument);
+  assert.equal(new URL(browserArgument).protocol, 'file:');
+  assert.ok(!browserArgument.includes(manager.token));
+  const bootstrapPath = fileURLToPath(new URL(browserArgument));
+  const bootstrapHtml = await readFile(bootstrapPath, 'utf8');
+  assert.ok(bootstrapHtml.includes(`#manager-token=${manager.token}`));
+  assert.equal((await lstat(bootstrapPath)).mode & 0o077, 0);
 
   const repository = await makeRepository(join(paths.directory, 'repositories'), 'cli-project');
   const cli = resolve(import.meta.dirname, '../../../bin/leesh-loop.mjs');

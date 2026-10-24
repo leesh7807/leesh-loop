@@ -35,6 +35,8 @@ export function managerPaths({ environment = process.env, homeDirectory = homedi
     managerStateRoot: join(stateRoot, 'manager'),
     managerServiceRecord: join(stateRoot, 'manager', 'service.json'),
     managerToken: join(stateRoot, 'manager', 'token'),
+    managerApiMaster: join(stateRoot, 'manager', 'api-master'),
+    managerBrowserBootstrap: join(stateRoot, 'manager', 'browser-bootstrap.html'),
     managerLog: join(stateRoot, 'manager', 'manager.log'),
     configRoot,
     activeRuntime: join(configRoot, 'active-runtime.json'),
