@@ -830,7 +830,7 @@ function ManagerApp() {
         {selected && (
           <div className="manager-lifecycle">
             <span className={`manager-status status-${selected.status.toLowerCase()}`}>{selected.status}</span>
-            {selected.status === 'Running' || selected.status === 'Starting' || selected.status === 'Stopping' ? (
+            {selected.status === 'Running' || selected.status === 'Starting' || selected.status === 'Stopping' || (selected.status === 'Failed' && selected.can_stop === true) ? (
               <button type="button" className="manager-action secondary" disabled={Boolean(busy) || selected.status === 'Stopping'} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop' })}>{busy === 'Stopping Loop' ? 'Stopping…' : 'Stop Loop'}</button>
             ) : (
               <button type="button" className="manager-action" disabled={Boolean(busy) || selected.status === 'Unconfirmed'} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop' })}>{busy === 'Starting Loop' ? 'Starting…' : 'Start Loop'}</button>

@@ -209,12 +209,12 @@ export async function loopInstanceStatus(id, options = {}) {
   }
   if (state.status === 'starting' || state.status === 'provisional' || state.status === 'committed-disabled') {
     if (execution.status === 'Failed') {
-      return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail: execution.detail || ready.detail || 'Loop startup failed before becoming ready', port: execution.port };
+      return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail: execution.detail || ready.detail || 'Loop startup failed before becoming ready', port: execution.port, can_stop: true };
     }
     if (execution.status === 'Stopping') {
       const detail = 'Loop stop was interrupted before the runtime became ready';
       await saveObservedStatus(paths, execution, 'Failed', { detail });
-      return { id: instance.id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail, port: execution.port };
+      return { id: instance.id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail, port: execution.port, can_stop: true };
     }
     if (execution.status !== 'Starting') {
       return unconfirmed(instance, ready.detail || `runtime is not ready while Manager records ${execution.status}`, execution);
@@ -229,7 +229,7 @@ export async function loopInstanceStatus(id, options = {}) {
       }
       const detail = 'startup launcher exited before the Loop runtime became ready';
       await saveObservedStatus(paths, execution, 'Failed', { detail });
-      return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail, port: execution.port };
+      return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail, port: execution.port, can_stop: true };
     }
     const startupAge = Date.now() - Date.parse(execution.started_at || 0);
     if (startupAge < 15_000) {
@@ -237,7 +237,7 @@ export async function loopInstanceStatus(id, options = {}) {
     }
     const detail = 'Loop runtime remained unready after its startup launcher identity was lost';
     await saveObservedStatus(paths, execution, 'Failed', { detail });
-    return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail, port: execution.port };
+    return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail, port: execution.port, can_stop: true };
   }
   return unconfirmed(instance, ready.detail || 'runtime readiness is unconfirmed', execution);
 }
@@ -397,12 +397,13 @@ export async function stopLoopInstance(id, options = {}) {
   if (status.status === 'Stopped') return { ...status, stopped: false };
   if (status.status === 'Starting') {
     status = await waitForLoopState(id, 'Running', { timeoutMs: 20_000, ...options });
-    if (status.status === 'Failed' || status.status === 'Stopped') return { ...status, stopped: false };
-    if (status.status !== 'Running') {
+    if (status.status === 'Stopped') return { ...status, stopped: false };
+    if (status.status !== 'Running' && !(status.status === 'Failed' && status.can_stop === true)) {
+      if (status.status === 'Failed') return { ...status, stopped: false };
       throw Object.assign(new Error(`Loop stop could not proceed while startup remains ${status.status}${status.detail ? `: ${status.detail}` : ''}.`), { status: 409 });
     }
   }
-  if (status.status === 'Failed') return { ...status, stopped: false };
+  if (status.status === 'Failed' && status.can_stop !== true) return { ...status, stopped: false };
   if (status.status === 'Unconfirmed') throw Object.assign(new Error(`Loop stop is unsafe while process ownership is unconfirmed: ${status.detail}`), { status: 409 });
   const execution = await readExecution(paths, id);
   if (!execution?.runtime_path) throw Object.assign(new Error('Loop execution record has no Runtime identity.'), { status: 409 });
