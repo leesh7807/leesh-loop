@@ -915,3 +915,70 @@ test('Workflow repair is available after a failed launcher exits and remains blo
   assert.equal(refused.response.status, 409);
   assert.equal(await readFile(activeCurrentPath, 'utf8'), activeCurrent);
 });
+
+test('Workflow repair recovers a confirmed-exited pre-ready runtime without its readiness acknowledgement', async t => {
+  const paths = await fixture(t);
+  const repository = await makeRepository(join(paths.directory, 'repositories'), 'unacknowledged-workflow-project');
+  const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
+  const manager = await startManagerFixture(t, paths);
+  const runtime = await installTestRuntime(paths, 'unacknowledged-runtime-fixture');
+  const probe = createNetServer();
+  await new Promise((resolveListen, rejectListen) => {
+    probe.once('error', rejectListen);
+    probe.listen(0, '127.0.0.1', resolveListen);
+  });
+  const port = probe.address().port;
+  await new Promise(resolveClose => probe.close(resolveClose));
+
+  const executionDirectory = join(managerPaths(paths).loopExecutionRoot, instance.id);
+  await mkdir(executionDirectory, { recursive: true });
+  const runtimeId = 'runtime-before-readiness-ack';
+  const pid = 2147483647;
+  const processTicks = 'exited-before-readiness';
+  const ownershipPath = join(executionDirectory, 'ownership.json');
+  const acknowledgementPath = join(executionDirectory, 'dispatch-acknowledgement.json');
+  await writeFile(ownershipPath, `${JSON.stringify({
+    project_root: runtime.path,
+    runtime_id: runtimeId,
+    pid,
+    process_start_ticks: processTicks
+  })}\n`);
+  await writeFile(join(executionDirectory, 'runtime.json'), `${JSON.stringify({
+    status: 'provisional',
+    runtime_id: runtimeId,
+    pid,
+    process_start_ticks: processTicks,
+    effective: { dashboard: `http://127.0.0.1:${port}` },
+    ownership_path: ownershipPath,
+    acknowledgement_path: acknowledgementPath
+  })}\n`);
+  await writeFile(join(executionDirectory, 'execution.json'), `${JSON.stringify({
+    schema_version: 1,
+    id: instance.id,
+    status: 'Starting',
+    runtime_path: runtime.path,
+    runtime_version: runtime.id,
+    runtime_id: runtimeId,
+    pid,
+    process_start_ticks: processTicks,
+    launcher_pid: 2147483646,
+    launcher_start_ticks: 'exited-launcher-identity',
+    port
+  })}\n`);
+
+  const listed = await api(manager, '/api/v1/instances');
+  const status = listed.body.instances.find(value => value.id === instance.id);
+  assert.equal(status.status, 'Failed');
+  assert.equal(status.can_update_workflow, true);
+
+  const workflowPath = join(instance.data_directory, 'WORKFLOW.md');
+  const current = `${await readFile(workflowPath, 'utf8')}\nKeep this pre-ready repair input.\n`;
+  await writeFile(workflowPath, current);
+  const repaired = await api(manager, `/api/v1/instances/${instance.id}/workflow`, {
+    method: 'PUT', origin: manager.url,
+    body: { confirm: true, expectedCurrent: current }
+  });
+  assert.equal(repaired.response.status, 200);
+  assert.equal(repaired.body.updated, true);
+  assert.equal(await readFile(repaired.body.backup, 'utf8'), current);
+});

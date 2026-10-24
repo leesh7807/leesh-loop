@@ -74,6 +74,18 @@ async function verifyRuntimeResponse(state, execution, runtimePath) {
     || ownership.process_start_ticks !== state.process_start_ticks) {
     return { ready: false, ownership_verified: false, detail: 'runtime ownership identity does not match' };
   }
+  let observed;
+  try {
+    const response = await fetch(`${dashboard}/api/v1/runtime`, { signal: AbortSignal.timeout(1000) });
+    if (!response.ok) return { ready: false, ownership_verified: true, detail: `runtime status returned HTTP ${response.status}` };
+    observed = await response.json();
+    if (observed?.runtime_id !== state.runtime_id || observed?.pid !== state.pid || observed?.dispatch_capable !== true) {
+      return { ready: false, ownership_verified: true, detail: 'runtime API identity does not match the recorded Loop process' };
+    }
+  } catch (error) {
+    if (error?.cause?.code === 'ECONNREFUSED' && !processExists(state.pid)) return { ready: false, ownership_verified: true, stopped: true };
+    return { ready: false, ownership_verified: true, detail: `runtime readiness could not be confirmed: ${error.message}` };
+  }
   let acknowledgement;
   try {
     acknowledgement = await readJsonFile(state.acknowledgement_path, 'Loop readiness acknowledgement');
@@ -83,18 +95,7 @@ async function verifyRuntimeResponse(state, execution, runtimePath) {
     || acknowledgement.dispatch_capable !== true) {
     return { ready: false, ownership_verified: true, detail: 'runtime readiness acknowledgement does not match' };
   }
-  try {
-    const response = await fetch(`${dashboard}/api/v1/runtime`, { signal: AbortSignal.timeout(1000) });
-    if (!response.ok) return { ready: false, ownership_verified: true, detail: `runtime status returned HTTP ${response.status}` };
-    const observed = await response.json();
-    if (observed?.runtime_id !== state.runtime_id || observed?.pid !== state.pid || observed?.dispatch_capable !== true) {
-      return { ready: false, ownership_verified: true, detail: 'runtime API identity does not match the recorded Loop process' };
-    }
-    return { ready: true, ownership_verified: true };
-  } catch (error) {
-    if (error?.cause?.code === 'ECONNREFUSED' && !processExists(state.pid)) return { ready: false, ownership_verified: true, stopped: true };
-    return { ready: false, ownership_verified: true, detail: `runtime readiness could not be confirmed: ${error.message}` };
-  }
+  return { ready: true, ownership_verified: true };
 }
 
 async function saveObservedStatus(paths, execution, status, details = {}) {
