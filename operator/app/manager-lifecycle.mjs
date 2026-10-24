@@ -1,7 +1,7 @@
 import { execFile as execFileCallback, spawn } from 'node:child_process';
 import { createServer } from 'node:net';
-import { readFileSync } from 'node:fs';
-import { lstat, open, readFile, stat, unlink } from 'node:fs/promises';
+import { constants, readFileSync } from 'node:fs';
+import { lstat, open, readFile, unlink } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -595,11 +595,27 @@ export async function readLoopLogs(id, options = {}) {
   const files = [launcherLogPath(paths, id), processLogPath(paths, id)];
   const sections = [];
   for (const file of files) {
-    const details = await stat(file).catch(error => error?.code === 'ENOENT' ? null : Promise.reject(error));
-    if (!details) continue;
-    if (!details.isFile() || details.size > 2 * 1024 * 1024) throw new Error('Loop log is not a safe regular file or exceeds the read limit');
-    const content = await readFile(file, 'utf8');
-    sections.push(`--- ${file.split('/').at(-1)} ---\n${content.slice(-100_000)}`);
+    let handle;
+    try {
+      handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const details = await handle.stat();
+      if (!details.isFile()) throw Object.assign(new Error('Loop log is not a regular file'), { code: 'UNSAFE_FILE' });
+      const length = Math.min(details.size, 100_000);
+      const content = Buffer.alloc(length);
+      const { bytesRead } = length
+        ? await handle.read(content, 0, length, details.size - length)
+        : { bytesRead: 0 };
+      const omitted = details.size > bytesRead;
+      const text = content.subarray(0, bytesRead).toString('utf8');
+      const marker = omitted ? '[Earlier log output omitted; showing the last ' + bytesRead + ' bytes.]\n' : '';
+      sections.push('--- ' + file.split('/').at(-1) + ' ---\n' + marker + text);
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      const reason = typeof error?.code === 'string' && /^[A-Z0-9_]+$/.test(error.code) ? error.code : 'READ_FAILED';
+      sections.push('--- ' + file.split('/').at(-1) + ' ---\n[Log unavailable: ' + reason + '.]');
+    } finally {
+      await handle?.close().catch(() => {});
+    }
   }
   return { logs: sections.join('\n\n') || 'No Loop logs are available yet.' };
 }

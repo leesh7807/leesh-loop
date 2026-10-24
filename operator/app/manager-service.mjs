@@ -131,10 +131,12 @@ function equalToken(received, expected) {
   return first.length === second.length && timingSafeEqual(first, second);
 }
 
-export function createManagerController({ runtimeRoot, token, port, sourceRoot = process.env.LEESH_LOOP_RUNTIME_SOURCE || runtimeRoot, environment = process.env, homeDirectory = homedir(), lifecycle = {}, runtimeInstaller = installRuntimeDistributionInWorker } = {}) {
+export function createManagerController({ runtimeRoot, token, port, sourceRoot = process.env.LEESH_LOOP_RUNTIME_SOURCE || runtimeRoot, environment = process.env, homeDirectory = homedir(), lifecycle = {}, runtimeInstaller = installRuntimeDistributionInWorker, taskStoreOpener = openLoopTaskStore } = {}) {
   const runtime = resolve(runtimeRoot);
   const paths = managerPaths({ environment, homeDirectory });
   const taskStores = new Map();
+  let taskStoresClosed = false;
+  let taskStoresClosePromise = null;
   let startQueue = Promise.resolve();
   let runtimeUpdateQueue = Promise.resolve();
   const lifecycleQueues = new Map();
@@ -164,16 +166,37 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
     };
   }
 
-  async function taskContext(id) {
-    const instance = await getLoopInstance(id, { environment, homeDirectory });
+  function taskContext(id) {
+    if (taskStoresClosed) return Promise.reject(new Error('Manager Task Stores are closing.'));
     let context = taskStores.get(id);
     if (!context) {
-      const config = await readProjectConfiguration(instance.project_file, { validateWorkspaceFileSources: true, homeDirectory });
-      const store = await openLoopTaskStore(config.state_directory);
-      context = { instance, config, store };
+      context = (async () => {
+        const instance = await getLoopInstance(id, { environment, homeDirectory });
+        const config = await readProjectConfiguration(instance.project_file, { validateWorkspaceFileSources: true, homeDirectory });
+        const store = await taskStoreOpener(config.state_directory);
+        return { instance, config, store };
+      })();
       taskStores.set(id, context);
+      void context.catch(() => {
+        if (taskStores.get(id) === context) taskStores.delete(id);
+      });
     }
     return context;
+  }
+
+  function closeTaskStores() {
+    if (taskStoresClosePromise) return taskStoresClosePromise;
+    taskStoresClosed = true;
+    const pending = [...taskStores.values()];
+    taskStores.clear();
+    taskStoresClosePromise = (async () => {
+      const initialized = await Promise.allSettled(pending);
+      const stores = initialized.filter(result => result.status === 'fulfilled').map(result => result.value.store);
+      const closed = await Promise.allSettled(stores.map(store => Promise.resolve().then(() => store.close())));
+      const failures = closed.filter(result => result.status === 'rejected').map(result => result.reason);
+      if (failures.length) throw new AggregateError(failures, 'One or more Manager Task Stores could not be closed.');
+    })();
+    return taskStoresClosePromise;
   }
 
   async function latestSourceRoot() {
@@ -313,10 +336,7 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
     },
     async resolveTaskContext(id) { return taskContext(id); },
     handleRequest,
-    closeTaskStores() {
-      for (const context of taskStores.values()) context.store.close();
-      taskStores.clear();
-    }
+    closeTaskStores
   };
 }
 
@@ -351,7 +371,9 @@ export async function startManagerServer({ runtimeRoot, environment = process.en
     runtime_version: active?.id ?? null,
     started_at: new Date().toISOString()
   });
-  server.once('close', () => controller.closeTaskStores());
+  server.once('close', () => {
+    void controller.closeTaskStores().catch(error => console.error('Manager Task Store shutdown failed:', error));
+  });
   return { server, url: `http://127.0.0.1:${config.port}`, token, record: paths.managerServiceRecord };
 }
 
