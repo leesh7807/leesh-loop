@@ -204,6 +204,14 @@ export class LocalTaskStore {
   }
 
   publishTask(input) {
+    return this.#publishTask(input, false);
+  }
+
+  publishTaskWithUniqueTitle(input) {
+    return this.#publishTask(input, true);
+  }
+
+  #publishTask(input, uniqueTitle) {
     this.#assertOpen();
     const publication = publicationInput(input);
     const create = this.#database.transaction(() => {
@@ -213,6 +221,16 @@ export class LocalTaskStore {
           throw new Error(`publicationKey was already used with different task data: ${publication.publicationKey}`);
         }
         return this.#taskFromRow(existing);
+      }
+
+      let title = publication.title;
+      if (uniqueTitle) {
+        const existingTitles = new Set(this.#database.prepare('SELECT title FROM tasks').all().map(row => row.title));
+        let suffix = 0;
+        while (existingTitles.has(title)) {
+          suffix += 1;
+          title = `${publication.title} (${suffix})`;
+        }
       }
 
       const id = randomUUID();
@@ -225,7 +243,7 @@ export class LocalTaskStore {
       `).run(
         id,
         publication.identifier,
-        publication.title,
+        title,
         publication.state,
         publication.priority,
         JSON.stringify(publication.labels),
