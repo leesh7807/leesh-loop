@@ -147,6 +147,10 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
     });
   }
 
+  function lifecycleStatusOptions() {
+    return { environment, homeDirectory, isLifecycleOperationActive: id => lifecycleQueues.has(id) };
+  }
+
   async function taskContext(id) {
     const instance = await getLoopInstance(id, { environment, homeDirectory });
     let context = taskStores.get(id);
@@ -173,7 +177,7 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
       return true;
     }
     if (pathname === '/api/v1/instances' && request.method === 'GET') {
-      respond(response, 200, { instances: await discoverRunningLoops({ environment, homeDirectory }) });
+      respond(response, 200, { instances: await discoverRunningLoops(lifecycleStatusOptions()) });
       return true;
     }
     if (pathname === '/api/v1/instances' && request.method === 'POST') {
@@ -240,7 +244,7 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
         const instances = await listLoopInstances({ environment, homeDirectory });
         const record = instances.find(value => value.id === id);
         if (!record) throw Object.assign(new Error('Loop instance was not found.'), { status: 404 });
-        respond(response, 200, { instance: { ...record, ...(await loopInstanceStatus(id, { environment, homeDirectory })) } });
+        respond(response, 200, { instance: { ...record, ...(await loopInstanceStatus(id, lifecycleStatusOptions())) } });
         return true;
       }
       throw Object.assign(new Error('Method not allowed.'), { status: 405 });
