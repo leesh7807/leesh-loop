@@ -12,10 +12,18 @@ export function managerOperationAnnouncement(operation) {
   return `${operation.label}${target} is in progress. Other Manager actions are temporarily unavailable; instance switching and Task management remain available.`;
 }
 
-export function lifecycleCompletionMessage(action, instance) {
+export function lifecycleCompletionMessage(operation, instance) {
   const name = instance?.repository_name || instance?.id || 'Loop';
   const status = instance?.status ? ` Manager reported ${instance.status} at completion.` : '';
+  const action = operation === 'start-loop' ? 'Start' : operation === 'stop-loop' ? 'Stop' : 'Loop';
   return `${action} request completed for ${name}.${status}`;
+}
+
+export function managerOperationCompletionMessage(operation, instance) {
+  if (operation === 'update-runtime') return 'Runtime update completed.';
+  if (operation === 'update-workflow') return 'Workflow update completed.';
+  if (operation === 'start-loop' || operation === 'stop-loop') return lifecycleCompletionMessage(operation, instance);
+  return 'Change saved.';
 }
 
 export function workflowOperationFeedbackPlacement(isOpen, hasComparison) {
