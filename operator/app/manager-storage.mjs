@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { resolveTargetRepository } from './git-target.mjs';
 import { generatedWorkflow } from './workflow-template.mjs';
@@ -156,6 +156,26 @@ export async function validateManagedInstanceStateDirectory(instance, config) {
   return canonicalStateDirectory;
 }
 
+export async function validateManagedInstanceWorkspaceRoot(instance, config) {
+  const workspaceRoot = resolve(config.symphony_workspace_root || '');
+  const expectedWorkspaceRoot = resolve(instance.workspace_root);
+  const invalidWorkspace = () => Object.assign(
+    new Error('Instance project.toml symphony_workspace_root must match its managed per-instance workspace directory.'),
+    { status: 409 }
+  );
+  if (workspaceRoot !== expectedWorkspaceRoot) throw invalidWorkspace();
+
+  const instanceRoot = await realpath(instance.data_directory);
+  const workspaceDetails = await lstat(expectedWorkspaceRoot).catch(error => {
+    if (missing(error)) throw invalidWorkspace();
+    throw error;
+  });
+  if (workspaceDetails.isSymbolicLink() || !workspaceDetails.isDirectory()) throw invalidWorkspace();
+  const canonicalWorkspaceRoot = await realpath(expectedWorkspaceRoot);
+  if (canonicalWorkspaceRoot !== join(instanceRoot, 'workspaces')) throw invalidWorkspace();
+  return canonicalWorkspaceRoot;
+}
+
 export async function validateManagedInstanceWorkflowPath(instance, config) {
   const workflowPath = resolve(config.workflow_path);
   const relativeWorkflowPath = relative(instance.data_directory, workflowPath);
@@ -179,18 +199,35 @@ export async function validateManagedInstanceWorkflowPath(instance, config) {
     && canonicalWorkflowRelative !== '..'
     && !canonicalWorkflowRelative.startsWith('..' + sep)
     && !isAbsolute(canonicalWorkflowRelative);
-  if (workflowDetails.isSymbolicLink() || !workflowDetails.isFile() || !workflowTargetIsInside) {
-    throw Object.assign(new Error('Instance project.toml workflow_path must point to a regular file inside its managed data directory.'), { status: 409 });
+  const reservedFiles = new Set([resolve(instance.project_file)]);
+  const reservedDirectories = [
+    resolve(instance.state_directory),
+    resolve(instance.workspace_root),
+    resolve(join(instance.data_directory, 'workflow-backups'))
+  ];
+  const reservedDirectoryTarget = reservedDirectories.some(directory => {
+    const relativeTarget = relative(directory, canonicalWorkflowPath);
+    return relativeTarget === ''
+      || (relativeTarget !== '..' && !relativeTarget.startsWith('..' + sep) && !isAbsolute(relativeTarget));
+  });
+  if (workflowDetails.isSymbolicLink()
+    || !workflowDetails.isFile()
+    || !workflowTargetIsInside
+    || extname(canonicalWorkflowPath).toLowerCase() !== '.md'
+    || reservedFiles.has(canonicalWorkflowPath)
+    || reservedDirectoryTarget) {
+    throw Object.assign(new Error('Instance project.toml workflow_path must point to a dedicated Markdown file inside its managed data directory.'), { status: 409 });
   }
   return canonicalWorkflowPath;
 }
 
 export async function validateManagedInstanceConfiguration(instance, config) {
-  const [state_directory, workflow_path] = await Promise.all([
+  const [state_directory, workspace_root, workflow_path] = await Promise.all([
     validateManagedInstanceStateDirectory(instance, config),
+    validateManagedInstanceWorkspaceRoot(instance, config),
     validateManagedInstanceWorkflowPath(instance, config)
   ]);
-  return { state_directory, workflow_path };
+  return { state_directory, workspace_root, workflow_path };
 }
 
 export async function createLoopInstance(repositoryPath, { sourceRoot, environment = process.env, homeDirectory = homedir() } = {}) {

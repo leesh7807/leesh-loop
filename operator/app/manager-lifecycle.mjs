@@ -444,7 +444,10 @@ async function invokeLoopCommand({ runtimePath, instance, command, args = [], ti
   const executionDirectory = join(managerPaths({ environment }).loopExecutionRoot, instance.id);
   const env = { ...environment, LEESH_LOOP_EXECUTION_STATE_DIRECTORY: executionDirectory, LEESH_LOOP_MANAGER_MANAGED: 'true' };
   try {
-    const result = await execFile(process.execPath, [join(runtimePath.path, 'operator/app/leesh-loop.mjs'), command, instance.project_file, ...args], {
+    const cliArguments = command === 'stop-owned-managed'
+      ? [join(runtimePath.path, 'operator/app/leesh-loop.mjs'), command, instance.id, ...args]
+      : [join(runtimePath.path, 'operator/app/leesh-loop.mjs'), command, instance.project_file, ...args];
+    const result = await execFile(process.execPath, cliArguments, {
       cwd: runtimePath.path,
       env,
       timeout,
@@ -472,7 +475,10 @@ async function cleanupPreviousRuntime(instance, options = {}) {
       return;
     }
     const runtime = await resolveRuntimePath(execution.runtime_path, options);
-    await invokeLoopCommand({ runtimePath: runtime, instance, command: 'stop', timeout: 30_000, environment: options.environment });
+    const runtimeId = execution.runtime_id || state?.runtime_id;
+    if (!runtimeId) throw new Error('Loop execution record has no runtime identity for cleanup.');
+    const result = await invokeLoopCommand({ runtimePath: runtime, instance, command: 'stop-owned-managed', args: [runtimeId], timeout: 30_000, environment: options.environment });
+    if (result?.stopped !== true) throw new Error('Loop cleanup did not confirm that the owned runtime stopped.');
   }
 }
 
@@ -575,9 +581,14 @@ export async function stopLoopInstance(id, options = {}) {
   const execution = await readExecution(paths, id);
   if (!execution?.runtime_path) throw Object.assign(new Error('Loop execution record has no Runtime identity.'), { status: 409 });
   const runtimePath = await resolveRuntimePath(execution.runtime_path, options);
+  const runtimeState = await readRuntimeState(paths, id);
+  const runtimeId = execution.runtime_id || runtimeState?.runtime_id;
+  if (!runtimeId || (execution.runtime_id && runtimeState?.runtime_id && execution.runtime_id !== runtimeState.runtime_id)) {
+    throw Object.assign(new Error('Loop runtime identity could not be confirmed before stop.'), { status: 409 });
+  }
   await saveObservedStatus(paths, execution, 'Stopping');
   try {
-    const result = await invokeLoopCommand({ runtimePath, instance, command: 'stop', timeout: 30 * 60_000, environment: options.environment });
+    const result = await invokeLoopCommand({ runtimePath, instance, command: 'stop-owned-managed', args: [runtimeId], timeout: 30 * 60_000, environment: options.environment });
     if (result?.stopped !== true) throw new Error('Loop stop command did not confirm that the owned runtime stopped.');
   } catch (error) {
     const latest = await readExecution(paths, id);

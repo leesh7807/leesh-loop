@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
-import { chmod, mkdir, open, readFile, readlink, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, readFile, readlink, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { validateWorkspaceFiles } from './workspace-files.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
@@ -411,6 +412,43 @@ async function serve(config, { prepared = false } = {}) {
   server.once('error', error => { console.error(`Operator UI server failed: ${error.message}`); process.exitCode = 1; });
 }
 
+async function stopManagerOwnedRuntime(values, locked) {
+  const [instanceId, runtimeId] = values;
+  const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (values.length !== 2 || !idPattern.test(instanceId || '') || !idPattern.test(runtimeId || '')) {
+    throw new Error('stop-owned-managed requires a managed instance ID and runtime ID');
+  }
+  if (process.env.LEESH_LOOP_MANAGER_MANAGED !== 'true') {
+    throw new Error('stop-owned-managed is available only to the central Manager');
+  }
+  const executionDirectory = process.env.LEESH_LOOP_EXECUTION_STATE_DIRECTORY;
+  if (typeof executionDirectory !== 'string' || !isAbsolute(executionDirectory)) {
+    throw new Error('Manager Loop execution state directory is invalid');
+  }
+  const stateHome = process.env.XDG_STATE_HOME || join(homedir(), '.local/state');
+  if (!isAbsolute(stateHome)) throw new Error('XDG_STATE_HOME must be an absolute path');
+  const expectedDirectory = resolve(join(stateHome, 'leesh-loop', 'loops', instanceId));
+  if (resolve(executionDirectory) !== expectedDirectory
+    || basename(expectedDirectory) !== instanceId
+    || basename(dirname(expectedDirectory)) !== 'loops'
+    || basename(dirname(dirname(expectedDirectory))) !== 'leesh-loop') {
+    throw new Error('Manager Loop execution state directory does not match its managed instance ID');
+  }
+  const details = await lstat(expectedDirectory);
+  if (details.isSymbolicLink() || !details.isDirectory()) {
+    throw new Error('Manager Loop execution state directory must be a real directory');
+  }
+  if (!locked) {
+    const lockedArgs = ['-x', join(expectedDirectory, 'lifecycle.flock'), process.execPath, appScript, '__locked', 'stop-owned-managed', instanceId, runtimeId];
+    const result = spawnSync('flock', lockedArgs, { cwd: root, stdio: 'inherit' });
+    if (result.error) throw result.error;
+    process.exitCode = result.status ?? 1;
+    return;
+  }
+  const result = await stopOwnedRuntime({}, runtimeId);
+  console.log(JSON.stringify(result));
+}
+
 const args = process.argv.slice(2);
 const locked = args[0] === '__locked';
 const [command, ...commandArgs] = locked ? args.slice(1) : args;
@@ -423,10 +461,15 @@ if (command === 'start') {
 const configFile = startOptions?.configurationPath || commandArgs[0] || defaultConfig;
 let directExecution = false;
 try { directExecution = Boolean(process.argv[1] && realpathSync(process.argv[1]) === appScript); } catch { /* Node may be importing this module from another entry point. */ }
-if (directExecution && startArgumentError) {
+if (directExecution && command === 'stop-owned-managed') {
+  stopManagerOwnedRuntime(commandArgs, locked).catch(error => {
+    console.error('Leesh Loop could not stop the Manager-owned runtime: ' + error.message);
+    process.exitCode = 1;
+  });
+} else if (directExecution && startArgumentError) {
   console.error(`Leesh Loop could not start: ${startArgumentError.message}`);
   process.exitCode = 2;
-} else if (directExecution && !['start', 'stop', 'stop-owned', 'serve', 'serve-prepared'].includes(command)) {
+} else if (directExecution && !['start', 'stop', 'stop-owned', 'stop-owned-managed', 'serve', 'serve-prepared'].includes(command)) {
   const usage = 'Usage: node operator/app/leesh-loop.mjs <start|stop|stop-owned|serve> [project.toml] [runtime-id] [--skip-external-readiness for start]';
   if (command === '--help' || command === '-h') console.log(usage);
   else { console.error(usage); process.exitCode = 2; }
