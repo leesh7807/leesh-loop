@@ -1,7 +1,7 @@
 import { execFile as execFileCallback, spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { readFileSync } from 'node:fs';
-import { lstat, open, readFile, stat } from 'node:fs/promises';
+import { lstat, open, readFile, stat, unlink } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -30,6 +30,13 @@ function processExists(pid) {
   catch (error) { return error?.code === 'EPERM'; }
 }
 
+function processIdentityIsAbsent(pid, startTicks) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  const observedTicks = processStartTicks(pid);
+  if (observedTicks) return typeof startTicks === 'string' && startTicks.length > 0 && observedTicks !== startTicks;
+  return !processExists(pid);
+}
+
 function recordedProcessesAreAbsent(execution, { requireLauncher = false, requireRuntime = false } = {}) {
   if (requireLauncher && (!Number.isSafeInteger(execution.launcher_pid) || execution.launcher_pid <= 0)) return false;
   if (requireRuntime && (!Number.isSafeInteger(execution.pid) || execution.pid <= 0)) return false;
@@ -42,7 +49,7 @@ function recordedProcessesAreAbsent(execution, { requireLauncher = false, requir
       continue;
     }
     hasRecordedProcess = true;
-    if (!Number.isSafeInteger(pid) || pid <= 0 || processExists(pid)) return false;
+    if (!processIdentityIsAbsent(pid, ticks)) return false;
   }
   return hasRecordedProcess;
 }
@@ -53,6 +60,14 @@ async function readExecution(paths, id) {
 
 async function readRuntimeState(paths, id) {
   return readJsonFile(runtimeStatePath(paths, id), 'Loop runtime state');
+}
+
+async function runtimePortRefused(port) {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return false;
+  try {
+    await fetch(`http://127.0.0.1:${port}/api/v1/runtime`, { signal: AbortSignal.timeout(1000) });
+    return false;
+  } catch (error) { return error?.cause?.code === 'ECONNREFUSED'; }
 }
 
 function unconfirmed(instance, detail, execution = null) {
@@ -79,11 +94,20 @@ async function verifyRuntimeResponse(state, execution, runtimePath) {
     const response = await fetch(`${dashboard}/api/v1/runtime`, { signal: AbortSignal.timeout(1000) });
     if (!response.ok) return { ready: false, ownership_verified: true, detail: `runtime status returned HTTP ${response.status}` };
     observed = await response.json();
+    if (typeof observed?.runtime_id === 'string'
+      && observed.runtime_id
+      && observed.runtime_id !== state.runtime_id
+      && Number.isSafeInteger(observed.pid)
+      && observed.dispatch_capable === true) {
+      return { ready: false, ownership_verified: true, stopped: true, detail: `a different Loop runtime ${observed.runtime_id} responds on the assigned port` };
+    }
     if (observed?.runtime_id !== state.runtime_id || observed?.pid !== state.pid || observed?.dispatch_capable !== true) {
       return { ready: false, ownership_verified: true, detail: 'runtime API identity does not match the recorded Loop process' };
     }
   } catch (error) {
-    if (error?.cause?.code === 'ECONNREFUSED' && !processExists(state.pid)) return { ready: false, ownership_verified: true, stopped: true };
+    if (error?.cause?.code === 'ECONNREFUSED' && processIdentityIsAbsent(state.pid, state.process_start_ticks)) {
+      return { ready: false, ownership_verified: true, stopped: true };
+    }
     return { ready: false, ownership_verified: true, detail: `runtime readiness could not be confirmed: ${error.message}` };
   }
   let acknowledgement;
@@ -96,6 +120,36 @@ async function verifyRuntimeResponse(state, execution, runtimePath) {
     return { ready: false, ownership_verified: true, detail: 'runtime readiness acknowledgement does not match' };
   }
   return { ready: true, ownership_verified: true };
+}
+
+async function recordedRuntimeIsAbsent(execution, state, options = {}) {
+  if (!state) {
+    const hasProcessIdentity = execution.pid != null || execution.process_start_ticks != null
+      || execution.launcher_pid != null || execution.launcher_start_ticks != null;
+    if (hasProcessIdentity && !recordedProcessesAreAbsent(execution)) return false;
+    return runtimePortRefused(execution.port);
+  }
+  if (!processIdentityIsAbsent(state.pid, state.process_start_ticks)) return false;
+  let runtimePath;
+  try { runtimePath = await resolveRuntimePath(execution.runtime_path, options); }
+  catch { return false; }
+  const observed = await verifyRuntimeResponse(state, execution, runtimePath);
+  return observed.stopped === true;
+}
+
+async function clearRuntimeExecutionState(paths, id) {
+  const directory = join(paths.loopExecutionRoot, id);
+  const directoryDetails = await lstat(directory).catch(error => error?.code === 'ENOENT' ? null : Promise.reject(error));
+  if (!directoryDetails) return;
+  if (directoryDetails.isSymbolicLink() || !directoryDetails.isDirectory()) throw new Error('Loop execution state directory must be a real directory');
+  await ensurePrivateDirectory(directory);
+  for (const name of ['runtime.json', 'ownership.json', 'dispatch-authorization.json', 'dispatch-acknowledgement.json', 'startup-status']) {
+    const path = join(directory, name);
+    const details = await lstat(path).catch(error => error?.code === 'ENOENT' ? null : Promise.reject(error));
+    if (!details) continue;
+    if (details.isSymbolicLink() || !details.isFile()) throw new Error(`Loop runtime record must be a regular file: ${path}`);
+    await unlink(path);
+  }
 }
 
 async function saveObservedStatus(paths, execution, status, details = {}) {
@@ -160,7 +214,12 @@ export async function loopInstanceStatus(id, options = {}) {
     }
     if (Number.isSafeInteger(execution.pid) && execution.pid > 0) {
       const ticks = processStartTicks(execution.pid);
-      if (ticks && ticks !== execution.process_start_ticks) return unconfirmed(instance, `PID ${execution.pid} has been reused; refusing to treat it as this Loop`, execution);
+      if (ticks && ticks !== execution.process_start_ticks) {
+        if (await runtimePortRefused(execution.port) && recordedProcessesAreAbsent(execution)) {
+          return recordRuntimeExit(paths, instance, execution, { pid: execution.pid, process_start_ticks: execution.process_start_ticks });
+        }
+        return unconfirmed(instance, `PID ${execution.pid} has been reused; Loop runtime absence is not confirmed`, execution);
+      }
       if (!processExists(execution.pid)) {
         return recordRuntimeExit(paths, instance, execution, { pid: execution.pid, process_start_ticks: execution.process_start_ticks });
       }
@@ -213,7 +272,12 @@ export async function loopInstanceStatus(id, options = {}) {
   if (state.status === 'failed') {
     if (Number.isSafeInteger(state.pid) && processExists(state.pid)) {
       const ticks = processStartTicks(state.pid);
-      if (ticks !== state.process_start_ticks) return unconfirmed(instance, `PID ${state.pid} has been reused; refusing to control it`, execution);
+      if (ticks !== state.process_start_ticks) {
+        if (await recordedRuntimeIsAbsent(execution, state, options)) {
+          return recordRuntimeExit(paths, instance, execution, state);
+        }
+        return unconfirmed(instance, `PID ${state.pid} has been reused; Loop runtime absence is not confirmed`, execution);
+      }
       return unconfirmed(instance, 'Loop reported startup failure but its recorded process is still alive', execution);
     }
     await saveObservedStatus(paths, execution, 'Failed', { detail: state.cleanup_error || state.detail || 'Loop startup failed' });
@@ -250,7 +314,12 @@ export async function loopInstanceStatus(id, options = {}) {
     }
     return unconfirmed(instance, `cannot inspect the identity of runtime process ${state.pid}`, execution);
   }
-  if (observedTicks !== state.process_start_ticks) return unconfirmed(instance, `PID ${state.pid} has been reused; refusing to treat it as this Loop`, execution);
+  if (observedTicks !== state.process_start_ticks) {
+    if (await recordedRuntimeIsAbsent(execution, state, options)) {
+      return recordRuntimeExit(paths, instance, execution, state);
+    }
+    return unconfirmed(instance, `PID ${state.pid} has been reused; Loop runtime absence is not confirmed`, execution);
+  }
   let runtimePath;
   try { runtimePath = await resolveRuntimePath(execution.runtime_path, options); }
   catch (error) { return unconfirmed(instance, error.message, execution); }
@@ -366,6 +435,11 @@ async function cleanupPreviousRuntime(instance, options = {}) {
     throw Object.assign(new Error(`Loop cannot be restarted while its status is ${status.status}${status.detail ? `: ${status.detail}` : ''}.`), { status: 409 });
   }
   if (execution.runtime_path) {
+    const state = await readRuntimeState(paths, instance.id);
+    if (await recordedRuntimeIsAbsent(execution, state, options)) {
+      await clearRuntimeExecutionState(paths, instance.id);
+      return;
+    }
     const runtime = await resolveRuntimePath(execution.runtime_path, options);
     await invokeLoopCommand({ runtimePath: runtime, instance, command: 'stop', timeout: 30_000, environment: options.environment });
   }
