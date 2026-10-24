@@ -161,7 +161,10 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .manager-header { display: grid; width: min(100% - 3.5rem, 100rem); grid-template-columns: minmax(10rem, .7fr) minmax(0, 1fr); align-items: end; gap: 1.4rem; margin: 0 auto; padding: 1.35rem 0 1rem; border-bottom: 1px solid #d7d7d7; }
 .manager-brand .eyebrow { margin-bottom: .2rem; }
 .manager-brand h1 { font-size: 1.45rem; }
-.manager-lifecycle { display: flex; align-items: center; justify-content: flex-end; gap: .7rem; }
+.manager-lifecycle { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .7rem; }
+.manager-lifecycle-target { min-width: 0; max-width: 14rem; overflow-wrap: anywhere; color: #444; font-size: .74rem; font-weight: 650; }
+.manager-task-jump { color: #343434; font-size: .72rem; text-decoration: underline; text-decoration-color: #a8a8a8; text-underline-offset: .2em; white-space: nowrap; }
+.manager-task-jump:hover { text-decoration-color: #111; }
 .manager-status { color: #444; font-size: .74rem; font-weight: 650; }
 .manager-status::before { display: inline-block; width: .48rem; height: .48rem; margin-right: .38rem; border-radius: 50%; background: #9a9a9a; content: ''; vertical-align: .04rem; }
 .manager-status.status-running::before { background: #347a54; }
@@ -264,6 +267,8 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
   .manager-header { grid-template-columns: 1fr; gap: .8rem; padding-top: .85rem; }
   .manager-brand h1 { font-size: 1.35rem; }
   .manager-lifecycle { grid-column: 1; justify-content: flex-start; }
+  .manager-lifecycle { column-gap: .55rem; row-gap: .45rem; }
+  .manager-lifecycle-target { max-width: 9rem; }
   .manager-console { padding-top: .85rem; }
   .manager-input-row { grid-template-columns: 1fr; }
   .manager-input-row .manager-action { justify-self: start; }

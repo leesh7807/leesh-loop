@@ -152,7 +152,7 @@ function TaskSurface({ tasks, selectedTaskId, loading, error, refreshedAt, onRet
   return (
     <aside className="task-surface" aria-labelledby="tasks-heading" aria-busy={loading && !refreshedAt}>
       <div className="surface-header">
-        <div><p className="eyebrow">Work queue</p><h2 id="tasks-heading">Tasks</h2></div>
+        <div><p className="eyebrow">Work queue</p><h2 id="tasks-heading" tabIndex={-1}>Tasks</h2></div>
         <div className="task-surface-meta">
           <span className="task-total">{tasks.length}</span>
           <button type="button" className="quiet-button" onClick={onRetry} disabled={loading}>Refresh</button>
@@ -721,6 +721,9 @@ function ManagerApp() {
   const [notice, setNotice] = useState('');
 
   const selected = instances.find(instance => instance.id === selectedId) || null;
+  const selectedRuntimeVersion = runtime?.distributions?.find(distribution => distribution.id === selected?.runtime_version)?.version
+    || selected?.runtime_version?.slice(0, 12)
+    || '—';
 
   const refreshInstances = useCallback(async () => {
     try {
@@ -851,11 +854,13 @@ function ManagerApp() {
         {selected && (
           <div className="manager-lifecycle">
             <span className={`manager-status status-${selected.status.toLowerCase()}`}>{selected.status}</span>
+            <span className="manager-lifecycle-target">{selected.repository_name}</span>
             {selected.status === 'Running' || selected.status === 'Starting' || selected.status === 'Stopping' || (selected.status === 'Failed' && selected.can_stop === true) ? (
               <button type="button" className="manager-action secondary" disabled={Boolean(busy) || selected.status === 'Stopping'} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop' })}>{busy === 'Stopping Loop' ? 'Stopping…' : 'Stop Loop'}</button>
             ) : (
               <button type="button" className="manager-action" disabled={Boolean(busy) || selected.status === 'Unconfirmed'} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop' })}>{busy === 'Starting Loop' ? 'Starting…' : 'Start Loop'}</button>
             )}
+            <a className="manager-task-jump" href="#tasks-heading">View tasks</a>
           </div>
         )}
       </header>
@@ -904,7 +909,7 @@ function ManagerApp() {
         {selected && (
           <section className="manager-instance-info" aria-label="Selected Loop details">
             <div><p className="eyebrow">Selected Loop</p><h2>{selected.repository_name}</h2><p className="manager-repository-path">{selected.repository_root}</p></div>
-            <div className="manager-instance-meta"><span>Base branch <strong>{selected.base_branch}</strong></span><span>Internal port <strong>{selected.port || '—'}</strong></span><span>Runtime <strong>{selected.runtime_version?.slice(0, 12) || '—'}</strong></span></div>
+            <div className="manager-instance-meta"><span>Base branch <strong>{selected.base_branch}</strong></span><span>Internal port <strong>{selected.port || '—'}</strong></span><span>Runtime <strong title={selected.runtime_version || undefined}>{selectedRuntimeVersion}</strong></span></div>
           </section>
         )}
 
