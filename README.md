@@ -2,7 +2,7 @@
 
 Leesh Loop manages multiple repository Loops from one local web Operator. The central Manager owns instance data, process control, port allocation, Runtime updates, and Workflow updates. Each Loop Process keeps its own SQLite task store, workspace, configuration, and Workflow, and continues working if the browser or Manager closes.
 
-Leesh Loop runs on Linux or Unix; on Windows, use WSL2. Install Node.js 20.19+ or 22.12+, npm, Git, GitHub CLI, mise, Codex CLI, and configure `chatgpt-shot` on the machine that runs the Loops. The Manager listens on `127.0.0.1` and uses a private per-user token.
+Leesh Loop currently supports Linux; Manager and Loop lifecycle ownership use Linux procfs to verify process identity safely. On Windows, use WSL2; macOS and BSD are not currently supported. Install Node.js 20.19+ or 22.12+, npm, Git, GitHub CLI, mise, Codex CLI, and configure `chatgpt-shot` on the machine that runs the Loops. The Manager listens on `127.0.0.1` and uses a private per-user token.
 
 ## Open the Manager and add repositories
 

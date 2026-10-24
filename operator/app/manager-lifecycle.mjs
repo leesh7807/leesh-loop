@@ -97,6 +97,9 @@ export async function loopInstanceStatus(id, options = {}) {
   if (execution.schema_version !== 1 || execution.id !== id || !['Starting', 'Running', 'Stopping', 'Stopped', 'Failed', 'Unconfirmed'].includes(execution.status)) {
     return unconfirmed(instance, 'execution record is invalid');
   }
+  if (execution.status === 'Stopping' && options.isLifecycleOperationActive?.(id)) {
+    return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Stopping', ...(Number.isInteger(execution.port) ? { port: execution.port } : {}) };
+  }
   let state;
   try { state = await readRuntimeState(paths, id); }
   catch (error) { return unconfirmed(instance, error.message, execution); }
@@ -149,7 +152,6 @@ export async function loopInstanceStatus(id, options = {}) {
     }
     return unconfirmed(instance, 'runtime process identity is incomplete', execution);
   }
-  if (execution.status === 'Stopping') return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Stopping', port: execution.port };
   const observedTicks = processStartTicks(state.pid);
   if (!observedTicks) {
     if (!processExists(state.pid)) {

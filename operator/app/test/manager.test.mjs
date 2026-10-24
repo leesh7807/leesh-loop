@@ -441,6 +441,11 @@ test('Running requires a matching process identity, ownership, dispatch acknowle
   const observed = await loopInstanceStatus(instance.id, paths);
   assert.equal(observed.status, 'Running');
   assert.equal(observed.port, port);
+  const executionPath = join(executionDirectory, 'execution.json');
+  const execution = JSON.parse(await readFile(executionPath, 'utf8'));
+  await writeFile(executionPath, `${JSON.stringify({ ...execution, status: 'Stopping' })}\n`);
+  assert.equal((await loopInstanceStatus(instance.id, { ...paths, isLifecycleOperationActive: () => true })).status, 'Stopping');
+  assert.equal((await loopInstanceStatus(instance.id, paths)).status, 'Running');
   const state = JSON.parse(await readFile(runtimeStatePath, 'utf8'));
   await writeFile(runtimeStatePath, `${JSON.stringify({ ...state, process_start_ticks: 'reused-pid' })}\n`);
   const replaced = await loopInstanceStatus(instance.id, paths);
