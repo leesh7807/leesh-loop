@@ -9,7 +9,7 @@ import { createManagerApiFetch } from './manager-api.js';
 import { managerLifecycleAction } from './manager-lifecycle-action.js';
 import { createManagerInstanceListGate } from './manager-instance-list-gate.js';
 import { createManagerSelectionGate } from './manager-selection-gate.js';
-import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, managerFeedbackReducer, managerOperationAnnouncement } from './manager-feedback.js';
+import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, lifecycleCompletionMessage, managerFeedbackReducer, managerOperationAnnouncement } from './manager-feedback.js';
 import { logsPanelViewState, logsReadFailureState, logsReadStartState, managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from './manager-read-state.js';
 import { workflowUpdateEligibility } from './workflow-update-eligibility.js';
 import { workflowComparisonAfterApply } from './workflow-apply-result.js';
@@ -927,8 +927,8 @@ function ManagerApp() {
         const scopedMessage = target === 'workflow'
           ? 'Workflow update completed.'
           : result.instance
-            ? `${result.instance.repository_name || result.instance.id}: ${result.instance.status}.`
-            : 'Loop action completed.';
+            ? lifecycleCompletionMessage(label === 'Starting Loop' ? 'Start' : 'Stop', result.instance)
+            : lifecycleCompletionMessage(label === 'Starting Loop' ? 'Start' : 'Stop');
         dispatchInstanceOperationFeedback({ type: 'success', instanceId: scopedInstanceId, target, message: scopedMessage });
       } else if (selectionIsCurrent()) dispatchFeedback({ type: 'operation-success', target, message });
       await refreshInstances();

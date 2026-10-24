@@ -12,6 +12,12 @@ export function managerOperationAnnouncement(operation) {
   return `${operation.label}${target} is in progress. Other Manager actions are temporarily unavailable; instance switching and Task management remain available.`;
 }
 
+export function lifecycleCompletionMessage(action, instance) {
+  const name = instance?.repository_name || instance?.id || 'Loop';
+  const status = instance?.status ? ` Manager reported ${instance.status} at completion.` : '';
+  return `${action} request completed for ${name}.${status}`;
+}
+
 export function instanceOperationFeedbackReducer(state, action) {
   const targetFeedback = { ...(state[action.instanceId] || {}) };
   if (action.type === 'started') delete targetFeedback[action.target];
