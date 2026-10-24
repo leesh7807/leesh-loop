@@ -4,6 +4,7 @@ import { createSerializedRefreshQueue } from './refresh-queue.js';
 import { clearPublicationDraft, readPublicationDraft, writePublicationDraft } from './publication-draft.js';
 import { groupTasksForOperatorDisplay } from './operator-task-display-order.js';
 import { readTaskDetailDraft } from './task-detail-draft.js';
+import { bootstrapManagerToken } from './manager-auth.js';
 import './style.css';
 
 const REFRESH_INTERVAL_MS = 7500;
@@ -11,11 +12,11 @@ const MANAGER_SELECTION_KEY = 'leesh-loop.manager.selected-instance.v1';
 const formatTime = value => new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' }).format(value);
 const taskUrl = id => `/api/v1/tasks/${encodeURIComponent(id)}`;
 const taskDraftKey = id => `leesh-loop.operator.task-draft.v1:${id}`;
+const managerToken = bootstrapManagerToken();
 
 function apiFetch(input, init = {}) {
   const headers = new Headers(init.headers || {});
-  const token = document.querySelector('meta[name="leesh-loop-manager-token"]')?.content;
-  if (token && token !== '__LEESH_LOOP_MANAGER_TOKEN__') headers.set('x-leesh-loop-token', token);
+  if (managerToken) headers.set('x-leesh-loop-token', managerToken);
   try {
     const instanceId = window.localStorage.getItem(MANAGER_SELECTION_KEY);
     if (instanceId) headers.set('x-leesh-loop-instance-id', instanceId);

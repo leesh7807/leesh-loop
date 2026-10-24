@@ -55,7 +55,14 @@ async function main() {
   }
   const selectedCommand = command || 'open';
   if (selectedCommand === 'open' && args.length === 0) {
-    const manager = await ensureManagerService({ sourceRoot, openBrowser: true });
+    let manager = await ensureManagerService({ sourceRoot, openBrowser: true });
+    if (manager.managerRestartRequired) {
+      const paths = managerPaths();
+      const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
+      await managerRequest(manager, '/api/v1/manager/restart', { method: 'POST' });
+      await waitForManagerExit(service);
+      manager = await ensureManagerService({ sourceRoot, openBrowser: true });
+    }
     console.log(`Leesh Loop Manager: ${manager.url}`);
     return;
   }

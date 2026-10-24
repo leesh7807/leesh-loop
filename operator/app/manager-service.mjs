@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createServer as createHttpServer } from 'node:http';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { constants, readFileSync } from 'node:fs';
 import { lstat, open, readFile, truncate, unlink } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -85,6 +85,10 @@ async function ensureManagerToken(paths) {
   try { await file.writeFile(`${token}\n`); await file.sync(); }
   finally { await file.close(); }
   return token;
+}
+
+export function managerApiToken(masterToken, runtimeId) {
+  return createHmac('sha256', masterToken).update(`leesh-loop-manager-api:v1:${runtimeId}`).digest('hex');
 }
 
 export async function readManagerConfiguration(options = {}) {
@@ -270,12 +274,13 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
 export async function startManagerServer({ runtimeRoot, environment = process.env, homeDirectory = homedir() } = {}) {
   const paths = managerPaths({ environment, homeDirectory });
   const config = await readManagerConfiguration({ environment, homeDirectory });
-  const token = await ensureManagerToken(paths);
+  const masterToken = await ensureManagerToken(paths);
   const runtime = resolve(runtimeRoot || fileURLToPath(new URL('../..', import.meta.url)));
   const active = await activeRuntime({ environment, homeDirectory });
   if (!active || resolve(active.path) !== runtime) throw new Error('Manager must run from the active central Runtime distribution');
+  const token = managerApiToken(masterToken, active.id);
   const controller = createManagerController({ runtimeRoot: runtime, token, port: config.port, environment, homeDirectory });
-  const dependencies = { root: runtime, managerController: controller, managerToken: token, managerPort: config.port };
+  const dependencies = { root: runtime, managerController: controller };
   const server = await createOperatorUiServer(dependencies);
   await new Promise((resolveListen, rejectListen) => {
     server.once('error', rejectListen);
@@ -318,6 +323,18 @@ async function clientToken(paths) {
   return token;
 }
 
+export function managerBrowserUrl(baseUrl, token) {
+  const browserUrl = new URL(baseUrl);
+  browserUrl.hash = new URLSearchParams({ 'manager-token': token }).toString();
+  return browserUrl.toString();
+}
+
+function openManagerBrowser(baseUrl, token, environment) {
+  const browser = spawn(environment.LEESH_LOOP_BROWSER_COMMAND || 'xdg-open', [managerBrowserUrl(baseUrl, token)], { detached: true, stdio: 'ignore' });
+  browser.once('error', () => {});
+  browser.unref();
+}
+
 export async function ensureManagerService({ sourceRoot, openBrowser = false, environment = process.env, homeDirectory = homedir() } = {}) {
   const options = { environment, homeDirectory };
   const paths = managerPaths(options);
@@ -327,10 +344,13 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
   let active = await activeRuntime(options);
   if (!active) active = await installRuntimeDistribution(source, options);
   await ensurePrivateDirectory(paths.managerStateRoot);
-  const token = await clientToken(paths).catch(async error => {
+  let masterToken;
+  try { masterToken = await clientToken(paths); }
+  catch (error) {
     if (error?.code !== 'ENOENT') throw error;
-    return ensureManagerToken(paths);
-  });
+    masterToken = await ensureManagerToken(paths);
+  }
+  const token = managerApiToken(masterToken, active.id);
   const baseUrl = `http://127.0.0.1:${config.port}`;
   let record;
   try { record = await readJsonFile(paths.managerServiceRecord, 'Manager service record'); }
@@ -339,11 +359,27 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
     const live = processAlive(record.pid) && processStartTicks(record.pid) === record.process_start_ticks;
     if (live) {
       const health = await managerHealth(baseUrl, token);
-      if (health?.status === 'Running') return { url: baseUrl, token, port: config.port, runtime: active, alreadyRunning: true };
+      if (health?.status === 'Running') {
+        if (openBrowser) openManagerBrowser(baseUrl, token, environment);
+        return { url: baseUrl, token, port: config.port, runtime: active, alreadyRunning: true };
+      }
+      if (record.runtime_version !== active.id && (await managerHealth(baseUrl, masterToken))?.status === 'Running') {
+        return {
+          url: baseUrl,
+          token: masterToken,
+          port: config.port,
+          runtime: active,
+          managerRuntimeVersion: record.runtime_version,
+          managerRestartRequired: true,
+          alreadyRunning: true
+        };
+      }
       throw new Error('Manager process is alive but its HTTP identity cannot be confirmed; refusing to start a second Manager.');
     }
     if (processAlive(record.pid)) throw new Error('Manager PID identity changed; refusing to control the process.');
     await unlink(paths.managerServiceRecord).catch(error => { if (error?.code !== 'ENOENT') throw error; });
+  } else if (await managerHealth(baseUrl, token) || await managerHealth(baseUrl, masterToken)) {
+    throw new Error('A Manager responds without a verifiable execution record; refusing to start a second Manager.');
   }
   await ensurePrivateDirectory(paths.managerStateRoot);
   const logDetails = await lstat(paths.managerLog).catch(error => error?.code === 'ENOENT' ? null : Promise.reject(error));
@@ -375,11 +411,7 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
   }
   const health = await managerHealth(baseUrl, token);
   if (!health) throw new Error(`Manager service did not become ready at ${baseUrl}.`);
-  if (openBrowser) {
-    const browser = spawn(environment.LEESH_LOOP_BROWSER_COMMAND || 'xdg-open', [baseUrl], { detached: true, stdio: 'ignore' });
-    browser.once('error', () => {});
-    browser.unref();
-  }
+  if (openBrowser) openManagerBrowser(baseUrl, token, environment);
   return { url: baseUrl, token, port: config.port, runtime: active, alreadyRunning: false };
 }
 

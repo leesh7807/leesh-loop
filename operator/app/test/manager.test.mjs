@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { createManagerController } from '../manager-service.mjs';
+import { createManagerController, ensureManagerService, managerApiToken, managerBrowserUrl } from '../manager-service.mjs';
 import { createOperatorUiServer } from '../operator-ui-server.mjs';
 import { hashDistribution } from '../installation-metadata.mjs';
 import { allocatePort, loopInstanceStatus } from '../manager-lifecycle.mjs';
@@ -50,7 +50,7 @@ async function fixture(t) {
   return { directory, environment, homeDirectory: directory };
 }
 
-async function startManagerFixture(t, paths) {
+async function startManagerFixture(t, paths, { runtimeId } = {}) {
   const reservation = createHttpServer();
   await new Promise((resolveListen, rejectListen) => {
     reservation.once('error', rejectListen);
@@ -61,8 +61,9 @@ async function startManagerFixture(t, paths) {
 
   const root = join(paths.directory, 'web-root');
   await mkdir(join(root, 'operator/ui/dist'), { recursive: true });
-  await writeFile(join(root, 'operator/ui/dist/index.html'), '<meta name="leesh-loop-manager-token" content="__LEESH_LOOP_MANAGER_TOKEN__"><meta name="port" content="__LEESH_LOOP_MANAGER_PORT__"><h1>Manager</h1>');
-  const token = 'a'.repeat(64);
+  await writeFile(join(root, 'operator/ui/dist/index.html'), '<h1>Manager</h1>');
+  const masterToken = 'a'.repeat(64);
+  const token = runtimeId ? managerApiToken(masterToken, runtimeId) : masterToken;
   const managerController = createManagerController({
     runtimeRoot: sourceRoot,
     sourceRoot,
@@ -80,7 +81,7 @@ async function startManagerFixture(t, paths) {
     server.close(resolveClose);
     server.closeAllConnections();
   }));
-  return { port, token, url: `http://127.0.0.1:${port}` };
+  return { port, token, masterToken, url: `http://127.0.0.1:${port}` };
 }
 
 async function installTestRuntime(paths, directoryName = 'fixture-runtime') {
@@ -185,8 +186,8 @@ test('managed instances share one Runtime and keep their files and Task Stores i
   const page = await fetch(manager.url);
   const pageText = await page.text();
   assert.equal(page.status, 200);
-  assert.ok(pageText.includes(manager.token));
-  assert.ok(pageText.includes(String(manager.port)));
+  assert.equal(pageText, '<h1>Manager</h1>');
+  assert.ok(!pageText.includes(manager.token));
   assert.equal(page.headers.get('x-frame-options'), 'DENY');
   assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
 });
@@ -206,6 +207,63 @@ test('Manager Host validation rejects an unauthorized Host header', async t => {
     request.end();
   });
   assert.equal(response.statusCode, 403);
+});
+
+test('Manager API token is bound to the immutable Runtime and rejects the persisted master token', async t => {
+  const paths = await fixture(t);
+  const masterToken = 'c'.repeat(64);
+  const token = managerApiToken(masterToken, 'runtime-version-2');
+  const controller = createManagerController({
+    runtimeRoot: sourceRoot,
+    token,
+    port: 4320,
+    environment: paths.environment,
+    homeDirectory: paths.homeDirectory
+  });
+  const request = candidate => ({ headers: { host: '127.0.0.1:4320', 'x-leesh-loop-token': candidate } });
+
+  assert.notEqual(token, masterToken);
+  assert.notEqual(token, managerApiToken(masterToken, 'runtime-version-1'));
+  assert.equal(await controller.authorize(request(token)), true);
+  assert.equal(await controller.authorize(request(masterToken)), false);
+});
+
+test('Manager browser bootstrap sends its credential only in the URL fragment', () => {
+  const token = 'd'.repeat(64);
+  const url = new URL(managerBrowserUrl('http://127.0.0.1:4320', token));
+
+  assert.equal(url.origin, 'http://127.0.0.1:4320');
+  assert.equal(url.search, '');
+  assert.equal(url.hash, `#manager-token=${token}`);
+});
+
+test('Manager CLI recognizes a previous Runtime through its legacy credential so update can restart it', async t => {
+  const paths = await fixture(t);
+  const runtime = await installTestRuntime(paths, 'cli-fixture-runtime');
+  const manager = await startManagerFixture(t, paths);
+  const managedPaths = managerPaths(paths);
+  await mkdir(managedPaths.configRoot, { recursive: true });
+  await mkdir(managedPaths.managerStateRoot, { recursive: true });
+  await writeFile(managedPaths.managerToken, `${manager.masterToken}\n`, { mode: 0o600 });
+  await writeFile(managedPaths.managerConfiguration, `${JSON.stringify({ schema_version: 1, port: manager.port, symphony_port_min: 4200, symphony_port_max: 4209 })}\n`, { mode: 0o600 });
+  const processStat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+  const processStartTicks = processStat.slice(processStat.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
+  await writeFile(managedPaths.managerServiceRecord, `${JSON.stringify({
+    schema_version: 1,
+    pid: process.pid,
+    process_start_ticks: processStartTicks,
+    host: '127.0.0.1',
+    port: manager.port,
+    runtime_path: runtime.path,
+    runtime_version: 'legacy-runtime-id'
+  })}\n`, { mode: 0o600 });
+
+  const confirmed = await ensureManagerService({ sourceRoot, environment: paths.environment, homeDirectory: paths.homeDirectory });
+
+  assert.equal(confirmed.alreadyRunning, true);
+  assert.equal(confirmed.token, manager.masterToken);
+  assert.equal(confirmed.managerRestartRequired, true);
+  assert.equal(confirmed.managerRuntimeVersion, 'legacy-runtime-id');
 });
 
 test('port allocation skips externally occupied ports and reports an exhausted range', async t => {
@@ -311,14 +369,14 @@ test('a stale Starting record without launcher identity remains Unconfirmed', as
 
 test('CLI init and list use the same central instance registry as the Manager UI', async t => {
   const paths = await fixture(t);
-  const manager = await startManagerFixture(t, paths);
-  const managedPaths = managerPaths(paths);
   const runtime = await installTestRuntime(paths, 'cli-fixture-runtime');
+  const manager = await startManagerFixture(t, paths, { runtimeId: runtime.id });
+  const managedPaths = managerPaths(paths);
   const runtimeId = runtime.id;
   const runtimePath = runtime.path;
   await mkdir(managedPaths.configRoot, { recursive: true });
   await mkdir(managedPaths.managerStateRoot, { recursive: true });
-  await writeFile(managedPaths.managerToken, `${manager.token}\n`, { mode: 0o600 });
+  await writeFile(managedPaths.managerToken, `${manager.masterToken}\n`, { mode: 0o600 });
   await writeFile(managedPaths.managerConfiguration, `${JSON.stringify({ schema_version: 1, port: manager.port, symphony_port_min: 4200, symphony_port_max: 4209 })}\n`, { mode: 0o600 });
   const processStat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
   const processStartTicks = processStat.slice(processStat.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
