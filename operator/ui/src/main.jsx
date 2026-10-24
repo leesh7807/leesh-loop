@@ -9,7 +9,7 @@ import { createManagerApiFetch } from './manager-api.js';
 import { managerLifecycleAction } from './manager-lifecycle-action.js';
 import { createManagerInstanceListGate } from './manager-instance-list-gate.js';
 import { createManagerSelectionGate } from './manager-selection-gate.js';
-import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, lifecycleCompletionMessage, managerFeedbackReducer, managerOperationAnnouncement } from './manager-feedback.js';
+import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, lifecycleCompletionMessage, managerFeedbackReducer, managerOperationAnnouncement, workflowOperationFeedbackPlacement } from './manager-feedback.js';
 import { logsPanelViewState, logsReadFailureState, logsReadStartState, managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from './manager-read-state.js';
 import { workflowUpdateEligibility } from './workflow-update-eligibility.js';
 import { workflowComparisonAfterApply } from './workflow-apply-result.js';
@@ -777,6 +777,7 @@ function ManagerApp() {
   const workflowEligibility = selected ? workflowUpdateEligibility(selected) : null;
   const selectedScopedLifecycleFeedback = instanceOperationFeedbackFor(instanceOperationFeedback, selectedId, 'lifecycle');
   const selectedScopedWorkflowFeedback = instanceOperationFeedbackFor(instanceOperationFeedback, selectedId, 'workflow');
+  const scopedWorkflowFeedbackPlacement = workflowOperationFeedbackPlacement(workflowOpen, Boolean(workflow));
   const busyOperationInstance = busyOperation?.instanceId
     ? instances.find(instance => instance.id === busyOperation.instanceId)
     : null;
@@ -1052,7 +1053,7 @@ function ManagerApp() {
             {selected.detail && <p className="inline-message failure manager-lifecycle-detail" role="status">{selected.detail}</p>}
             <ManagerFeedback feedback={feedback} target="lifecycle" />
             <InstanceOperationFeedback feedback={selectedScopedLifecycleFeedback} target="lifecycle" />
-            {!workflowOpen && <InstanceOperationFeedback feedback={selectedScopedWorkflowFeedback} target="workflow" />}
+            {scopedWorkflowFeedbackPlacement === 'header' && <InstanceOperationFeedback feedback={selectedScopedWorkflowFeedback} target="workflow" />}
           </div>
         )}
         {busyOperationMessage && <p className="inline-message manager-operation-pending" id="manager-operation-pending" role="status">{busyOperationMessage}</p>}
@@ -1126,6 +1127,11 @@ function ManagerApp() {
             <details open={workflowOpen} onToggle={event => setWorkflowOpen(event.currentTarget.open)}>
               <summary><span>Workflow</span><span>{workflow ? (workflow.changed ? 'Update available' : 'Current') : 'Compare with template'}</span></summary>
               <ManagerFeedback feedback={feedback} target="workflow" />
+              {scopedWorkflowFeedbackPlacement === 'panel' && selectedScopedWorkflowFeedback && (
+                <div className="workflow-read-feedback">
+                  <InstanceOperationFeedback feedback={selectedScopedWorkflowFeedback} target="workflow" />
+                </div>
+              )}
               {!workflow && workflowPanelState === 'loading' && <p className="manager-help workflow-read-state" role="status">Loading Workflow comparison…</p>}
               {!workflow && workflowPanelState === 'error' && <button type="button" className="manager-action secondary workflow-retry" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void refreshWorkflowComparison()}>{busyOperation?.label === 'Refreshing Workflow' && busyOperation.instanceId === selectedId ? 'Retrying…' : 'Retry comparison'}</button>}
               {workflow && (
@@ -1137,7 +1143,7 @@ function ManagerApp() {
                     <button type="button" className="manager-action secondary" disabled={Boolean(busy) || !workflow.changed || !workflowEligibility?.canApply} aria-describedby={[workflow.changed && !workflowEligibility?.canApply ? 'workflow-update-disabled-reason' : '', busy ? 'manager-operation-pending' : ''].filter(Boolean).join(' ') || undefined} onClick={() => void updateWorkflow()}>{busyOperation?.label === 'Updating Workflow' && busyOperation.instanceId === selectedId ? 'Updating…' : 'Apply Workflow Update'}</button>
                     {workflow.changed && !workflowEligibility?.canApply && <p className="manager-help" id="workflow-update-disabled-reason">{workflowEligibility?.controlHint || 'This Loop must be stopped before applying the update.'}</p>}
                     <button type="button" className="manager-action secondary" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void refreshWorkflowComparison()}>{busyOperation?.label === 'Refreshing Workflow' && busyOperation.instanceId === selectedId ? 'Refreshing…' : 'Refresh comparison'}</button>
-                    {selectedScopedWorkflowFeedback && (
+                    {scopedWorkflowFeedbackPlacement === 'actions' && selectedScopedWorkflowFeedback && (
                       <div className="workflow-update-feedback">
                         <InstanceOperationFeedback feedback={selectedScopedWorkflowFeedback} target="workflow" />
                       </div>

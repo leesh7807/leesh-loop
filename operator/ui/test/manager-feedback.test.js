@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, lifecycleCompletionMessage, managerFeedbackReducer, managerOperationAnnouncement } from '../src/manager-feedback.js';
+import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, lifecycleCompletionMessage, managerFeedbackReducer, managerOperationAnnouncement, workflowOperationFeedbackPlacement } from '../src/manager-feedback.js';
 
 test('a successful instance poll clears read errors without dismissing an operation failure', () => {
   let feedback = managerFeedbackReducer(initialManagerFeedback, {
@@ -87,6 +87,13 @@ test('lifecycle feedback states the action result separately from the current st
     'Stop request completed for loop-a. Manager reported Stopped at completion.'
   );
   assert.equal(lifecycleCompletionMessage('Start'), 'Start request completed for Loop.');
+});
+
+test('Workflow operation feedback has one visible location across closed, loading, failed, and loaded states', () => {
+  assert.equal(workflowOperationFeedbackPlacement(false, false), 'header');
+  assert.equal(workflowOperationFeedbackPlacement(false, true), 'header');
+  assert.equal(workflowOperationFeedbackPlacement(true, false), 'panel');
+  assert.equal(workflowOperationFeedbackPlacement(true, true), 'actions');
 });
 
 test('a successful Runtime or Workflow read clears only its own read error', () => {
