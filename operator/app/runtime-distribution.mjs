@@ -3,6 +3,7 @@ import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import { managerPaths, ensurePrivateDirectory, readJsonFile, writeAtomicJson } from './manager-storage.mjs';
 import { listRuntimeSnapshotFiles, materializeRuntimeSnapshot } from './runtime-manifest.mjs';
@@ -12,6 +13,21 @@ import { prepareNpmDependencies } from './dependency-preparation.mjs';
 const thisDirectory = new URL('.', import.meta.url);
 const defaultSourceRoot = resolve(fileURLToPath(new URL('../..', thisDirectory)));
 const digestPattern = /^[a-f0-9]{64}$/;
+const runtimeInstallWorkerSource = `
+const { parentPort, workerData } = require('node:worker_threads');
+import(workerData.moduleUrl)
+  .then(module => {
+    if (typeof module.installRuntimeDistribution !== 'function') throw new Error('Runtime installation worker module has no installer');
+    return module.installRuntimeDistribution(workerData.sourceRoot, {
+      environment: workerData.environment,
+      homeDirectory: workerData.homeDirectory
+    });
+  })
+  .then(result => parentPort.postMessage({ ok: true, result }), error => parentPort.postMessage({
+    ok: false,
+    error: { message: error?.message || String(error), stack: error?.stack }
+  }));
+`;
 
 async function sourceIdentity(sourceRoot) {
   let root;
@@ -158,6 +174,42 @@ export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot,
   const existing = await activeRuntime(options);
   await writeAtomicJson(paths.activeRuntime, { schema_version: 1, id: source.id, activated_at: new Date().toISOString() });
   return { ...(await activeRuntime(options)), changed: existing?.id !== source.id };
+}
+
+export function installRuntimeDistributionInWorker(sourceRoot = defaultSourceRoot, options = {}, { moduleUrl = import.meta.url } = {}) {
+  const worker = new Worker(runtimeInstallWorkerSource, {
+    eval: true,
+    workerData: {
+      moduleUrl,
+      sourceRoot,
+      environment: { ...(options.environment ?? process.env) },
+      homeDirectory: options.homeDirectory ?? homedir()
+    }
+  });
+
+  return new Promise((resolveInstall, rejectInstall) => {
+    let settled = false;
+    worker.once('message', message => {
+      settled = true;
+      if (message?.ok) {
+        resolveInstall(message.result);
+        return;
+      }
+      const error = new Error(message?.error?.message || 'Runtime installation worker failed without a message.');
+      if (message?.error?.stack) error.stack = message.error.stack;
+      rejectInstall(error);
+    });
+    worker.once('error', error => {
+      if (settled) return;
+      settled = true;
+      rejectInstall(error);
+    });
+    worker.once('exit', code => {
+      if (settled) return;
+      settled = true;
+      rejectInstall(new Error(`Runtime installation worker exited with status ${code} before returning a result.`));
+    });
+  });
 }
 
 export async function resolveRuntimePath(runtimePath, options = {}) {
