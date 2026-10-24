@@ -44,35 +44,39 @@ function unconfirmed(instance, detail, execution = null) {
 
 async function verifyRuntimeResponse(state, execution, runtimePath) {
   const dashboard = state?.effective?.dashboard;
-  if (typeof dashboard !== 'string' || !/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(dashboard)) return { ready: false, detail: 'runtime dashboard address is invalid' };
+  if (typeof dashboard !== 'string' || !/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(dashboard)) return { ready: false, ownership_verified: false, detail: 'runtime dashboard address is invalid' };
   const expectedDashboard = `http://127.0.0.1:${execution.port}`;
-  if (dashboard !== expectedDashboard) return { ready: false, detail: 'runtime dashboard does not match the assigned port' };
+  if (dashboard !== expectedDashboard) return { ready: false, ownership_verified: false, detail: 'runtime dashboard does not match the assigned port' };
   let ownership;
-  let acknowledgement;
   try {
     ownership = await readJsonFile(state.ownership_path, 'Loop process ownership record');
-    acknowledgement = await readJsonFile(state.acknowledgement_path, 'Loop readiness acknowledgement');
-  } catch (error) { return { ready: false, detail: error.message }; }
+  } catch (error) { return { ready: false, ownership_verified: false, detail: error.message }; }
   if (ownership?.project_root !== runtimePath.path
     || ownership.runtime_id !== state.runtime_id
     || ownership.pid !== state.pid
-    || ownership.process_start_ticks !== state.process_start_ticks
-    || acknowledgement?.runtime_id !== state.runtime_id
+    || ownership.process_start_ticks !== state.process_start_ticks) {
+    return { ready: false, ownership_verified: false, detail: 'runtime ownership identity does not match' };
+  }
+  let acknowledgement;
+  try {
+    acknowledgement = await readJsonFile(state.acknowledgement_path, 'Loop readiness acknowledgement');
+  } catch (error) { return { ready: false, ownership_verified: true, detail: error.message }; }
+  if (acknowledgement?.runtime_id !== state.runtime_id
     || acknowledgement.pid !== state.pid
     || acknowledgement.dispatch_capable !== true) {
-    return { ready: false, detail: 'runtime ownership or readiness identity does not match' };
+    return { ready: false, ownership_verified: true, detail: 'runtime readiness acknowledgement does not match' };
   }
   try {
     const response = await fetch(`${dashboard}/api/v1/runtime`, { signal: AbortSignal.timeout(1000) });
-    if (!response.ok) return { ready: false, detail: `runtime status returned HTTP ${response.status}` };
+    if (!response.ok) return { ready: false, ownership_verified: true, detail: `runtime status returned HTTP ${response.status}` };
     const observed = await response.json();
     if (observed?.runtime_id !== state.runtime_id || observed?.pid !== state.pid || observed?.dispatch_capable !== true) {
-      return { ready: false, detail: 'runtime API identity does not match the recorded Loop process' };
+      return { ready: false, ownership_verified: true, detail: 'runtime API identity does not match the recorded Loop process' };
     }
-    return { ready: true };
+    return { ready: true, ownership_verified: true };
   } catch (error) {
-    if (error?.cause?.code === 'ECONNREFUSED' && !processExists(state.pid)) return { ready: false, stopped: true };
-    return { ready: false, detail: `runtime readiness could not be confirmed: ${error.message}` };
+    if (error?.cause?.code === 'ECONNREFUSED' && !processExists(state.pid)) return { ready: false, ownership_verified: true, stopped: true };
+    return { ready: false, ownership_verified: true, detail: `runtime readiness could not be confirmed: ${error.message}` };
   }
 }
 
@@ -209,9 +213,11 @@ export async function loopInstanceStatus(id, options = {}) {
   }
   if (state.status === 'starting' || state.status === 'provisional' || state.status === 'committed-disabled') {
     if (execution.status === 'Failed') {
+      if (ready.ownership_verified !== true) return unconfirmed(instance, ready.detail || 'Loop process ownership could not be confirmed', execution);
       return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail: execution.detail || ready.detail || 'Loop startup failed before becoming ready', port: execution.port, can_stop: true };
     }
     if (execution.status === 'Stopping') {
+      if (ready.ownership_verified !== true) return unconfirmed(instance, ready.detail || 'Loop process ownership could not be confirmed', execution);
       const detail = 'Loop stop was interrupted before the runtime became ready';
       await saveObservedStatus(paths, execution, 'Failed', { detail });
       return { id: instance.id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail, port: execution.port, can_stop: true };
@@ -227,6 +233,7 @@ export async function loopInstanceStatus(id, options = {}) {
           return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Starting', port: execution.port, ...(ready.detail ? { detail: ready.detail } : {}) };
         }
       }
+      if (ready.ownership_verified !== true) return unconfirmed(instance, ready.detail || 'Loop process ownership could not be confirmed', execution);
       const detail = 'startup launcher exited before the Loop runtime became ready';
       await saveObservedStatus(paths, execution, 'Failed', { detail });
       return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail, port: execution.port, can_stop: true };
@@ -235,6 +242,7 @@ export async function loopInstanceStatus(id, options = {}) {
     if (startupAge < 15_000) {
       return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Starting', port: execution.port, ...(ready.detail ? { detail: ready.detail } : {}) };
     }
+    if (ready.ownership_verified !== true) return unconfirmed(instance, ready.detail || 'Loop process ownership could not be confirmed', execution);
     const detail = 'Loop runtime remained unready after its startup launcher identity was lost';
     await saveObservedStatus(paths, execution, 'Failed', { detail });
     return { id, name: instance.repository_name, repository_root: instance.repository_root, repository_url: instance.repository_url, status: 'Failed', detail, port: execution.port, can_stop: true };
@@ -260,7 +268,8 @@ export async function allocatePort(paths, { minPort = 4100, maxPort = 4199, envi
   const reserved = new Set();
   for (const instance of await listLoopInstances({ environment, homeDirectory })) {
     const status = await loopInstanceStatus(instance.id, { environment, homeDirectory });
-    if (['Starting', 'Running', 'Stopping', 'Unconfirmed'].includes(status.status) && Number.isInteger(status.port)) reserved.add(status.port);
+    if ((['Starting', 'Running', 'Stopping', 'Unconfirmed'].includes(status.status)
+      || (status.status === 'Failed' && status.can_stop === true)) && Number.isInteger(status.port)) reserved.add(status.port);
   }
   for (let port = minPort; port <= maxPort; port += 1) {
     if (reserved.has(port)) continue;

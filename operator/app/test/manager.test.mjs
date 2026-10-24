@@ -535,6 +535,13 @@ test('an orphaned unready runtime after its startup launcher exits can be stoppe
   const runtime = await installStopTestRuntime(paths);
   const executionDirectory = join(managerPaths(paths).loopExecutionRoot, instance.id);
   await mkdir(executionDirectory, { recursive: true });
+  const portProbe = createNetServer();
+  await new Promise((resolveListen, rejectListen) => {
+    portProbe.once('error', rejectListen);
+    portProbe.listen(0, '127.0.0.1', resolveListen);
+  });
+  const port = portProbe.address().port;
+  await new Promise(resolveClose => portProbe.close(resolveClose));
   const ownedProcess = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
   await new Promise((resolveSpawn, rejectSpawn) => {
     ownedProcess.once('spawn', resolveSpawn);
@@ -556,7 +563,7 @@ test('an orphaned unready runtime after its startup launcher exits can be stoppe
     runtime_id: runtimeId,
     pid: ownedProcess.pid,
     process_start_ticks: processStartTicks,
-    effective: { dashboard: 'http://127.0.0.1:4198' },
+    effective: { dashboard: `http://127.0.0.1:${port}` },
     ownership_path: ownershipPath,
     acknowledgement_path: acknowledgementPath
   })}\n`);
@@ -572,7 +579,7 @@ test('an orphaned unready runtime after its startup launcher exits can be stoppe
     process_start_ticks: processStartTicks,
     launcher_pid: 2147483647,
     launcher_start_ticks: 'exited-launcher',
-    port: 4198,
+    port,
     started_at: new Date(Date.now() - 20_000).toISOString()
   })}\n`);
 
@@ -581,12 +588,69 @@ test('an orphaned unready runtime after its startup launcher exits can be stoppe
   assert.equal(observed.can_stop, true);
   assert.match(observed.detail, /startup launcher exited/);
   assert.equal(JSON.parse(await readFile(executionPath, 'utf8')).status, 'Failed');
+  await assert.rejects(allocatePort(managerPaths(paths), { minPort: port, maxPort: port, ...paths }), /no available Symphony port/);
 
   const stopped = await stopLoopInstance(instance.id, paths);
   await exited;
   assert.equal(stopped.status, 'Stopped');
   assert.equal(stopped.stopped, true);
   assert.equal(JSON.parse(await readFile(executionPath, 'utf8')).status, 'Stopped');
+  assert.equal(await allocatePort(managerPaths(paths), { minPort: port, maxPort: port, ...paths }), port);
+});
+
+test('an orphaned Loop without a matching ownership record cannot be stopped', async t => {
+  const paths = await fixture(t);
+  const repository = await makeRepository(join(paths.directory, 'repositories'), 'unowned-orphan-project');
+  const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
+  const runtime = await installTestRuntime(paths, 'unowned-orphan-fixture-runtime');
+  const executionDirectory = join(managerPaths(paths).loopExecutionRoot, instance.id);
+  await mkdir(executionDirectory, { recursive: true });
+  const ownedProcess = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  await new Promise((resolveSpawn, rejectSpawn) => {
+    ownedProcess.once('spawn', resolveSpawn);
+    ownedProcess.once('error', rejectSpawn);
+  });
+  t.after(() => {
+    if (ownedProcess.exitCode === null && ownedProcess.signalCode === null) ownedProcess.kill('SIGKILL');
+  });
+  const processStat = readFileSync(`/proc/${ownedProcess.pid}/stat`, 'utf8');
+  const processStartTicks = processStat.slice(processStat.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
+  const runtimeId = 'orphan-without-owner-1';
+  const ownershipPath = join(executionDirectory, 'ownership.json');
+  const acknowledgementPath = join(executionDirectory, 'dispatch-acknowledgement.json');
+  await writeFile(ownershipPath, `${JSON.stringify({ project_root: runtime.path, runtime_id: runtimeId, pid: ownedProcess.pid, process_start_ticks: 'mismatched-start-ticks' })}\n`);
+  await writeFile(acknowledgementPath, `${JSON.stringify({ runtime_id: runtimeId, pid: ownedProcess.pid, dispatch_capable: false })}\n`);
+  await writeFile(join(executionDirectory, 'runtime.json'), `${JSON.stringify({
+    status: 'provisional',
+    runtime_id: runtimeId,
+    pid: ownedProcess.pid,
+    process_start_ticks: processStartTicks,
+    effective: { dashboard: 'http://127.0.0.1:4197' },
+    ownership_path: ownershipPath,
+    acknowledgement_path: acknowledgementPath
+  })}\n`);
+  await writeFile(join(executionDirectory, 'execution.json'), `${JSON.stringify({
+    schema_version: 1,
+    id: instance.id,
+    status: 'Starting',
+    runtime_path: runtime.path,
+    runtime_version: runtime.id,
+    runtime_id: runtimeId,
+    pid: ownedProcess.pid,
+    process_start_ticks: processStartTicks,
+    launcher_pid: 2147483647,
+    launcher_start_ticks: 'exited-launcher',
+    port: 4197,
+    started_at: new Date(Date.now() - 20_000).toISOString()
+  })}\n`);
+
+  const observed = await loopInstanceStatus(instance.id, paths);
+  assert.equal(observed.status, 'Unconfirmed');
+  assert.equal(observed.can_stop, undefined);
+  assert.match(observed.detail, /ownership identity does not match/);
+  await assert.rejects(stopLoopInstance(instance.id, paths), /process ownership is unconfirmed/);
+  assert.equal(ownedProcess.exitCode, null);
+  assert.equal(ownedProcess.signalCode, null);
 });
 
 test('unexpected Loop exits report Failed while a confirmed stop reports Stopped', async t => {
