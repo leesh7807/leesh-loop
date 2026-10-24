@@ -424,6 +424,9 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
 }
 
 export async function managerRequest(manager, path, { method = 'GET', body, instanceId } = {}) {
+  if (manager.managerRestartRequired && path !== '/api/v1/manager/restart') {
+    throw new Error('The previous Manager credential may only be used to restart that Manager.');
+  }
   const headers = { accept: 'application/json', 'x-leesh-loop-token': manager.token };
   if (instanceId) headers['x-leesh-loop-instance-id'] = instanceId;
   const options = { method, headers, signal: AbortSignal.timeout(30 * 60_000) };

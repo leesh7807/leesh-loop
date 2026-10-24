@@ -47,6 +47,17 @@ async function waitForManagerExit(record) {
   throw new Error('Manager restart was requested but its process did not exit.');
 }
 
+async function ensureReadyManager({ openBrowser = false } = {}) {
+  let manager = await ensureManagerService({ sourceRoot, openBrowser });
+  if (!manager.managerRestartRequired) return manager;
+  const paths = managerPaths();
+  const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
+  await managerRequest(manager, '/api/v1/manager/restart', { method: 'POST' });
+  await waitForManagerExit(service);
+  manager = await ensureManagerService({ sourceRoot, openBrowser });
+  return manager;
+}
+
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (command === '--help' || command === '-h') {
@@ -55,19 +66,12 @@ async function main() {
   }
   const selectedCommand = command || 'open';
   if (selectedCommand === 'open' && args.length === 0) {
-    let manager = await ensureManagerService({ sourceRoot, openBrowser: true });
-    if (manager.managerRestartRequired) {
-      const paths = managerPaths();
-      const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
-      await managerRequest(manager, '/api/v1/manager/restart', { method: 'POST' });
-      await waitForManagerExit(service);
-      manager = await ensureManagerService({ sourceRoot, openBrowser: true });
-    }
+    const manager = await ensureReadyManager({ openBrowser: true });
     console.log(`Leesh Loop Manager: ${manager.url}`);
     return;
   }
   if (selectedCommand === 'init' && args.length === 0) {
-    const manager = await ensureManagerService({ sourceRoot });
+    const manager = await ensureReadyManager();
     const result = await managerRequest(manager, '/api/v1/instances', { method: 'POST', body: { repositoryPath: process.cwd() } });
     console.log(`Leesh Loop instance created: ${result.instance.repository_name} (${result.instance.id})`);
     console.log(`Repository: ${result.instance.repository_root}`);
@@ -75,26 +79,26 @@ async function main() {
     return;
   }
   if (selectedCommand === 'list' && args.length === 0) {
-    const manager = await ensureManagerService({ sourceRoot });
+    const manager = await ensureReadyManager();
     const result = await managerRequest(manager, '/api/v1/instances');
     printInstances(result.instances);
     return;
   }
   if (selectedCommand === 'start' && args.length === 1) {
-    const manager = await ensureManagerService({ sourceRoot });
+    const manager = await ensureReadyManager();
     const result = await managerRequest(manager, `/api/v1/instances/${encodeURIComponent(args[0])}/start`, { method: 'POST' });
     console.log(`Loop ${result.instance.id}: ${result.instance.status}${result.instance.port ? ` on port ${result.instance.port}` : ''}`);
     return;
   }
   if (selectedCommand === 'stop' && args.length === 1) {
-    const manager = await ensureManagerService({ sourceRoot });
+    const manager = await ensureReadyManager();
     const result = await managerRequest(manager, `/api/v1/instances/${encodeURIComponent(args[0])}/stop`, { method: 'POST' });
     console.log(`Loop ${result.instance.id}: ${result.instance.status}`);
     return;
   }
   if (selectedCommand === 'update' && args.length === 0) {
     const updated = await installRuntimeDistribution(sourceRoot);
-    let manager = await ensureManagerService({ sourceRoot });
+    let manager = await ensureReadyManager();
     if (manager.alreadyRunning) {
       const paths = managerPaths();
       const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
