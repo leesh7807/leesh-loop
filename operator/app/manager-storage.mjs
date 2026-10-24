@@ -1,11 +1,11 @@
 import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { resolveTargetRepository } from './git-target.mjs';
 import { generatedWorkflow } from './workflow-template.mjs';
-import { stringifyProjectConfiguration } from '../project-config.mjs';
+import { readProjectConfiguration, stringifyProjectConfiguration } from '../project-config.mjs';
 import { openLoopTaskStore } from './local-task-store-runtime.mjs';
 
 const missing = error => error?.code === 'ENOENT';
@@ -133,7 +133,64 @@ export async function getLoopInstance(id, options = {}) {
   if (!instance) throw Object.assign(new Error('Loop instance was not found.'), { status: 404 });
   const details = await lstat(instance.data_directory);
   if (details.isSymbolicLink() || !details.isDirectory()) throw new Error(`instance data directory is unsafe: ${instance.data_directory}`);
-  return { ...instance, project_file: join(instance.data_directory, 'project.toml'), workflow_file: join(instance.data_directory, 'WORKFLOW.md'), state_directory: join(instance.data_directory, 'state'), workspace_root: join(instance.data_directory, 'workspaces') };
+  return { ...instance, project_file: join(instance.data_directory, 'project.toml'), state_directory: join(instance.data_directory, 'state'), workspace_root: join(instance.data_directory, 'workspaces') };
+}
+
+export async function validateManagedInstanceStateDirectory(instance, config) {
+  const stateDirectory = resolve(config.state_directory || '');
+  const expectedStateDirectory = resolve(instance.state_directory);
+  const invalidState = () => Object.assign(
+    new Error('Instance project.toml state_directory must match its managed per-instance state directory.'),
+    { status: 409 }
+  );
+  if (stateDirectory !== expectedStateDirectory) throw invalidState();
+
+  const instanceRoot = await realpath(instance.data_directory);
+  const stateDetails = await lstat(expectedStateDirectory).catch(error => {
+    if (missing(error)) throw invalidState();
+    throw error;
+  });
+  if (stateDetails.isSymbolicLink() || !stateDetails.isDirectory()) throw invalidState();
+  const canonicalStateDirectory = await realpath(expectedStateDirectory);
+  if (canonicalStateDirectory !== join(instanceRoot, 'state')) throw invalidState();
+  return canonicalStateDirectory;
+}
+
+export async function validateManagedInstanceWorkflowPath(instance, config) {
+  const workflowPath = resolve(config.workflow_path);
+  const relativeWorkflowPath = relative(instance.data_directory, workflowPath);
+  const workflowIsInside = relativeWorkflowPath !== ''
+    && relativeWorkflowPath !== '..'
+    && !relativeWorkflowPath.startsWith('..' + sep)
+    && !isAbsolute(relativeWorkflowPath);
+  if (!workflowIsInside) {
+    throw Object.assign(new Error('Instance project.toml workflow_path must point to a regular file inside its managed data directory.'), { status: 409 });
+  }
+  const workflowDetails = await lstat(workflowPath).catch(error => {
+    if (missing(error)) {
+      throw Object.assign(new Error('Instance project.toml workflow_path must point to an existing regular file inside its managed data directory.'), { status: 409 });
+    }
+    throw error;
+  });
+  const instanceRoot = await realpath(instance.data_directory);
+  const canonicalWorkflowPath = await realpath(workflowPath);
+  const canonicalWorkflowRelative = relative(instanceRoot, canonicalWorkflowPath);
+  const workflowTargetIsInside = canonicalWorkflowRelative !== ''
+    && canonicalWorkflowRelative !== '..'
+    && !canonicalWorkflowRelative.startsWith('..' + sep)
+    && !isAbsolute(canonicalWorkflowRelative);
+  if (workflowDetails.isSymbolicLink() || !workflowDetails.isFile() || !workflowTargetIsInside) {
+    throw Object.assign(new Error('Instance project.toml workflow_path must point to a regular file inside its managed data directory.'), { status: 409 });
+  }
+  return canonicalWorkflowPath;
+}
+
+export async function validateManagedInstanceConfiguration(instance, config) {
+  const [state_directory, workflow_path] = await Promise.all([
+    validateManagedInstanceStateDirectory(instance, config),
+    validateManagedInstanceWorkflowPath(instance, config)
+  ]);
+  return { state_directory, workflow_path };
 }
 
 export async function createLoopInstance(repositoryPath, { sourceRoot, environment = process.env, homeDirectory = homedir() } = {}) {
@@ -191,9 +248,10 @@ export async function createLoopInstance(repositoryPath, { sourceRoot, environme
 }
 
 export async function readInstanceWorkflow(id, { sourceRoot, ...options } = {}) {
-  const paths = managerPaths(options);
   const instance = await getLoopInstance(id, options);
-  const current = await readFile(instance.workflow_file, 'utf8');
+  const config = await readProjectConfiguration(instance.project_file, { homeDirectory: options.homeDirectory });
+  const workflow = await validateManagedInstanceConfiguration(instance, config);
+  const current = await readFile(workflow.workflow_path, 'utf8');
   const candidate = generatedWorkflow(await readFile(join(sourceRoot, 'docs/WORKFLOW_TEMPLATE.md'), 'utf8'));
   const candidateDigest = createHash('sha256').update(candidate, 'utf8').digest('hex');
   return { current, candidate, candidate_digest: candidateDigest, changed: current !== candidate };
@@ -202,7 +260,10 @@ export async function readInstanceWorkflow(id, { sourceRoot, ...options } = {}) 
 export async function applyInstanceWorkflow(id, { expectedCurrent, expectedCandidateDigest, sourceRoot, isRunning, ...options } = {}) {
   const instance = await getLoopInstance(id, options);
   if (await isRunning(id)) throw Object.assign(new Error('Stop this Loop before updating its Workflow.'), { status: 409 });
-  const current = await readFile(instance.workflow_file, 'utf8');
+  const config = await readProjectConfiguration(instance.project_file, { homeDirectory: options.homeDirectory });
+  const workflow = await validateManagedInstanceConfiguration(instance, config);
+  const workflowFile = workflow.workflow_path;
+  const current = await readFile(workflowFile, 'utf8');
   if (typeof expectedCurrent !== 'string' || current !== expectedCurrent) throw Object.assign(new Error('Workflow changed since it was reviewed. Refresh the comparison before applying.'), { status: 409 });
   const candidate = generatedWorkflow(await readFile(join(sourceRoot, 'docs/WORKFLOW_TEMPLATE.md'), 'utf8'));
   if (typeof expectedCandidateDigest !== 'string' || !/^[0-9a-f]{64}$/.test(expectedCandidateDigest)) {
@@ -217,6 +278,6 @@ export async function applyInstanceWorkflow(id, { expectedCurrent, expectedCandi
   await ensurePrivateDirectory(backupDirectory);
   const backupPath = join(backupDirectory, `${new Date().toISOString().replaceAll(':', '-')}.md`);
   await writeFile(backupPath, current, { mode: 0o600, flag: 'wx' });
-  await writeAtomic(instance.workflow_file, candidate, 0o600);
+  await writeAtomic(workflowFile, candidate, 0o600);
   return { updated: true, changed: true, backup: backupPath };
 }

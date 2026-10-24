@@ -5,7 +5,7 @@ import { lstat, open, readFile, unlink } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readJsonFile, writeAtomicJson } from './manager-storage.mjs';
+import { managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readJsonFile, validateManagedInstanceConfiguration, writeAtomicJson } from './manager-storage.mjs';
 import { resolveRuntimePath } from './runtime-distribution.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
 import { validateWorkspaceFiles } from './workspace-files.mjs';
@@ -435,6 +435,7 @@ async function readProject(instance) {
   const details = await lstat(instance.project_file);
   if (details.isSymbolicLink() || !details.isFile()) throw new Error('instance project.toml must be a regular file');
   const config = await readProjectConfiguration(instance.project_file, { validateWorkspaceFileSources: true });
+  await validateManagedInstanceConfiguration(instance, config);
   await validateWorkspaceFiles(config.workspace_files);
   return config;
 }

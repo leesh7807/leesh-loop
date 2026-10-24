@@ -377,6 +377,47 @@ test('Manager log read reports one unavailable file and returns the other', asyn
   assert.ok(body.logs.includes('AVAILABLE-LOG-CONTENT'));
 });
 
+test('Manager Task Store and Loop start reject a state path owned by another instance', async t => {
+  const paths = await fixture(t);
+  const repositories = join(paths.directory, 'repositories');
+  const first = await createLoopInstance(await makeRepository(repositories, 'state-owner-first'), { sourceRoot, ...paths });
+  const second = await createLoopInstance(await makeRepository(repositories, 'state-owner-second'), { sourceRoot, ...paths });
+  const projectFile = join(first.data_directory, 'project.toml');
+  const project = await readFile(projectFile, 'utf8');
+  const stateDirectory = /^state_directory = "([^"]+)"$/m.exec(project);
+  assert.ok(stateDirectory);
+  const redirectedProject = project.replace(stateDirectory[0], 'state_directory = "' + join(second.data_directory, 'state') + '"');
+  await writeFile(projectFile, redirectedProject);
+  const openedStores = [];
+  const manager = await startManagerFixture(t, paths, {
+    taskStoreOpener: async statePath => {
+      openedStores.push(statePath);
+      return { listTasks: () => [], close: () => {} };
+    }
+  });
+
+  const redirectedTasks = await api(manager, '/api/v1/tasks', { instanceId: first.id });
+  assert.equal(redirectedTasks.response.status, 409);
+  assert.match(redirectedTasks.body.error, /state_directory must match its managed per-instance state directory/);
+  assert.deepEqual(openedStores, []);
+  await assert.rejects(startLoopInstance(first.id, paths), /state_directory must match its managed per-instance state directory/);
+
+  await writeFile(projectFile, project);
+  const firstTasks = await api(manager, '/api/v1/tasks', { instanceId: first.id });
+  assert.equal(firstTasks.response.status, 200);
+  assert.deepEqual(openedStores, [join(first.data_directory, 'state')]);
+
+  await writeFile(projectFile, redirectedProject);
+  const redirectedAfterCache = await api(manager, '/api/v1/tasks', { instanceId: first.id });
+  assert.equal(redirectedAfterCache.response.status, 409);
+  assert.deepEqual(openedStores, [join(first.data_directory, 'state')]);
+
+  await writeFile(projectFile, await readFile(join(second.data_directory, 'project.toml'), 'utf8'));
+  const secondTasks = await api(manager, '/api/v1/tasks', { instanceId: second.id });
+  assert.equal(secondTasks.response.status, 200);
+  assert.deepEqual(openedStores, [join(first.data_directory, 'state'), join(second.data_directory, 'state')]);
+});
+
 test('Manager rejects stale Task Store configuration until it restarts', async t => {
   const paths = await fixture(t);
   const repository = await makeRepository(join(paths.directory, 'repositories'), 'task-store-config-drift-project');
@@ -389,9 +430,9 @@ test('Manager rejects stale Task Store configuration until it restarts', async t
   assert.equal(initialConfig.response.status, 200);
   const projectFile = join(instance.data_directory, 'project.toml');
   const project = await readFile(projectFile, 'utf8');
-  const stateDirectory = /^state_directory = "([^"]+)"$/m.exec(project);
-  assert.ok(stateDirectory);
-  const changedProject = project.replace(stateDirectory[0], 'state_directory = "' + join(paths.directory, 'changed-state-directory') + '"');
+  const repositoryUrl = /^github_repository_url = "([^"]+)"$/m.exec(project);
+  assert.ok(repositoryUrl);
+  const changedProject = project.replace(repositoryUrl[0], 'github_repository_url = "https://github.com/config-drift/changed.git"');
   await writeFile(projectFile, changedProject);
 
   const [config, tasks] = await Promise.all([
@@ -1442,6 +1483,45 @@ test('CLI init and list use the same central instance registry as the Manager UI
 
   const uiList = await api(manager, '/api/v1/instances');
   assert.deepEqual(uiList.body.instances.map(instance => instance.repository_root), [repository]);
+});
+
+test('Workflow review and apply follow a custom instance-owned workflow_path', async t => {
+  const paths = await fixture(t);
+  const repository = await makeRepository(join(paths.directory, 'repositories'), 'custom-workflow-project');
+  const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
+  const defaultWorkflowPath = join(instance.data_directory, 'WORKFLOW.md');
+  const defaultWorkflow = await readFile(defaultWorkflowPath, 'utf8');
+  const customWorkflowPath = join(instance.data_directory, 'custom', 'WORKFLOW.md');
+  await mkdir(join(instance.data_directory, 'custom'), { recursive: true });
+  const customWorkflow = defaultWorkflow + '\nCustom workflow content remains until approved.\n';
+  await writeFile(customWorkflowPath, customWorkflow);
+  const projectFile = join(instance.data_directory, 'project.toml');
+  const project = await readFile(projectFile, 'utf8');
+  const workflowPath = /^workflow_path = "([^"]+)"$/m.exec(project);
+  assert.ok(workflowPath);
+  await writeFile(projectFile, project.replace(workflowPath[0], 'workflow_path = "custom/WORKFLOW.md"'));
+  const manager = await startManagerFixture(t, paths);
+
+  const comparison = await api(manager, '/api/v1/instances/' + instance.id + '/workflow');
+  assert.equal(comparison.response.status, 200);
+  assert.equal(comparison.body.current, customWorkflow);
+  assert.equal(comparison.body.changed, true);
+  const applied = await api(manager, '/api/v1/instances/' + instance.id + '/workflow', {
+    method: 'PUT', origin: manager.url,
+    body: { confirm: true, expectedCurrent: customWorkflow, expectedCandidateDigest: comparison.body.candidate_digest }
+  });
+  assert.equal(applied.response.status, 200);
+  assert.equal(await readFile(customWorkflowPath, 'utf8'), comparison.body.candidate);
+  assert.equal(await readFile(defaultWorkflowPath, 'utf8'), defaultWorkflow);
+  assert.equal(await readFile(applied.body.backup, 'utf8'), customWorkflow);
+
+  const outsideWorkflowPath = join(paths.directory, 'outside-workflow.md');
+  await writeFile(outsideWorkflowPath, 'outside the instance');
+  const currentProject = await readFile(projectFile, 'utf8');
+  await writeFile(projectFile, currentProject.replace('workflow_path = "custom/WORKFLOW.md"', 'workflow_path = "' + outsideWorkflowPath + '"'));
+  const rejected = await api(manager, '/api/v1/instances/' + instance.id + '/workflow');
+  assert.equal(rejected.response.status, 409);
+  assert.match(rejected.body.error, /workflow_path must point to a regular file inside its managed data directory/);
 });
 
 test('Workflow updates require a stopped selected instance and preserve the prior file', async t => {

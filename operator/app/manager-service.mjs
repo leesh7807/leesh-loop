@@ -5,8 +5,7 @@ import { constants, readFileSync } from 'node:fs';
 import { lstat, open, readFile, truncate, unlink } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readJsonFile, writeAtomic, writeAtomicJson } from './manager-storage.mjs';
-import { applyInstanceWorkflow, readInstanceWorkflow } from './manager-storage.mjs';
+import { applyInstanceWorkflow, managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readInstanceWorkflow, readJsonFile, validateManagedInstanceStateDirectory, writeAtomic, writeAtomicJson } from './manager-storage.mjs';
 import { discoverRunningLoops, loopInstanceStatus, readLoopLogs, startLoopInstance, stopLoopInstance } from './manager-lifecycle.mjs';
 import { activeRuntime, currentRuntimeSource, installRuntimeDistribution, installRuntimeDistributionInWorker, listRuntimeDistributions, recordRuntimeSource } from './runtime-distribution.mjs';
 import { openLoopTaskStore } from './local-task-store-runtime.mjs';
@@ -173,8 +172,10 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
       context = (async () => {
         const instance = await getLoopInstance(id, { environment, homeDirectory });
         const config = await readProjectConfiguration(instance.project_file, { validateWorkspaceFileSources: true, homeDirectory });
-        const store = await taskStoreOpener(config.state_directory);
-        return { instance, config, store, configurationFingerprint: JSON.stringify(config) };
+        const stateDirectory = await validateManagedInstanceStateDirectory(instance, config);
+        const store = await taskStoreOpener(stateDirectory);
+        const configurationFingerprint = JSON.stringify({ state_directory: config.state_directory, github_repository_url: config.github_repository_url });
+        return { instance, config, store, configurationFingerprint };
       })();
       taskStores.set(id, context);
       void context.catch(() => {
@@ -182,8 +183,10 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
       });
     }
     return context.then(async initialized => {
-      const currentConfig = await readProjectConfiguration(initialized.instance.project_file, { validateWorkspaceFileSources: true, homeDirectory });
-      if (JSON.stringify(currentConfig) !== initialized.configurationFingerprint) {
+      const currentConfig = await readProjectConfiguration(initialized.instance.project_file, { homeDirectory });
+      await validateManagedInstanceStateDirectory(initialized.instance, currentConfig);
+      const currentFingerprint = JSON.stringify({ state_directory: currentConfig.state_directory, github_repository_url: currentConfig.github_repository_url });
+      if (currentFingerprint !== initialized.configurationFingerprint) {
         throw Object.assign(new Error('Instance project.toml changed after its Task Store was opened. Restart the Manager to reload this instance configuration.'), { status: 409 });
       }
       return initialized;
