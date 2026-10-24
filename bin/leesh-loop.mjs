@@ -116,6 +116,7 @@ async function main() {
     }
     console.log(`Central Runtime ${updated.version} (${updated.id}) is active.`);
     console.log(`Manager: ${manager.url}`);
+    console.log('If an existing Manager tab stops accepting requests after this update, run `leesh-loop` to reopen Manager with fresh access.');
     return;
   }
   console.error(usage);

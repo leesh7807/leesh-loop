@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const browserLaunchAckTimeoutMs = 1_000;
 
 function processStartTicks(pid) {
   try {
@@ -356,16 +357,22 @@ async function openManagerBrowser(baseUrl, token, environment, paths) {
   await writeAtomic(paths.managerBrowserBootstrap, managerBrowserBootstrapHtml(baseUrl, token), 0o600);
   const command = environment.LEESH_LOOP_BROWSER_COMMAND || 'xdg-open';
   const browser = spawn(command, [pathToFileURL(paths.managerBrowserBootstrap).toString()], { detached: true, stdio: 'ignore' });
-  try {
-    await new Promise((resolveSpawn, rejectSpawn) => {
-      browser.once('spawn', resolveSpawn);
-      browser.once('error', rejectSpawn);
+  return await new Promise(resolveLaunch => {
+    let acknowledgementTimer;
+    const finish = result => {
+      if (acknowledgementTimer) clearTimeout(acknowledgementTimer);
+      resolveLaunch(result);
+    };
+    browser.once('spawn', () => {
+      browser.unref();
+      acknowledgementTimer = setTimeout(() => finish({ opened: true }), browserLaunchAckTimeoutMs);
     });
-  } catch (error) {
-    return { error: `could not launch browser command ${command}: ${error.message}` };
-  }
-  browser.unref();
-  return { opened: true };
+    browser.once('error', error => finish({ error: `could not launch browser command ${command}: ${error.message}` }));
+    browser.once('exit', (code, signal) => {
+      if (code === 0) finish({ opened: true });
+      else finish({ error: `browser command ${command} exited unsuccessfully${signal ? ` after signal ${signal}` : ` with status ${code}`}` });
+    });
+  });
 }
 
 function browserLaunchDetails(result, paths) {
