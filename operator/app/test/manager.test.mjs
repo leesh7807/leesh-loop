@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { createManagerController, ensureManagerService, managerApiToken, managerBrowserBootstrapHtml } from '../manager-service.mjs';
+import { createManagerController, ensureManagerService, managerApiToken, managerBrowserBootstrapHtml, managerRequest } from '../manager-service.mjs';
 import { createOperatorUiServer } from '../operator-ui-server.mjs';
 import { hashDistribution } from '../installation-metadata.mjs';
 import { allocatePort, loopInstanceStatus } from '../manager-lifecycle.mjs';
@@ -265,6 +265,7 @@ test('Manager CLI recognizes a previous Runtime through its legacy credential so
   assert.equal(confirmed.token, manager.masterToken);
   assert.equal(confirmed.managerRestartRequired, true);
   assert.equal(confirmed.managerRuntimeVersion, 'legacy-runtime-id');
+  await assert.rejects(managerRequest(confirmed, '/api/v1/instances'), /only be used to restart/);
   const replacementMaster = (await readFile(managedPaths.managerApiMaster, 'utf8')).trim();
   assert.match(replacementMaster, /^[a-f0-9]{64}$/);
   assert.notEqual(replacementMaster, manager.masterToken);
