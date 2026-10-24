@@ -130,13 +130,23 @@ function equalToken(received, expected) {
   return first.length === second.length && timingSafeEqual(first, second);
 }
 
-export function createManagerController({ runtimeRoot, token, port, sourceRoot = process.env.LEESH_LOOP_RUNTIME_SOURCE || runtimeRoot, environment = process.env, homeDirectory = homedir() } = {}) {
+export function createManagerController({ runtimeRoot, token, port, sourceRoot = process.env.LEESH_LOOP_RUNTIME_SOURCE || runtimeRoot, environment = process.env, homeDirectory = homedir(), lifecycle = {} } = {}) {
   const runtime = resolve(runtimeRoot);
   const paths = managerPaths({ environment, homeDirectory });
   const taskStores = new Map();
   let startQueue = Promise.resolve();
+  const lifecycleQueues = new Map();
   let registryQueue = Promise.resolve();
   const workflowQueues = new Map();
+
+  function serializeLifecycle(id, operation) {
+    const previous = lifecycleQueues.get(id) || Promise.resolve();
+    const current = previous.catch(() => {}).then(operation);
+    lifecycleQueues.set(id, current);
+    return current.finally(() => {
+      if (lifecycleQueues.get(id) === current) lifecycleQueues.delete(id);
+    });
+  }
 
   async function taskContext(id) {
     const instance = await getLoopInstance(id, { environment, homeDirectory });
@@ -186,19 +196,23 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
       catch (error) { throw error; }
       const action = instanceRoute[2];
       if (request.method === 'POST' && action === 'start') {
-        const operation = startQueue.then(() => startLoopInstance(id, {
-          runtimeSource: sourceRoot,
-          minPort: configuration.symphony_port_min,
-          maxPort: configuration.symphony_port_max,
-          environment,
-          homeDirectory
-        }));
-        startQueue = operation.catch(() => {});
+        const operation = serializeLifecycle(id, () => {
+          const startOperation = startQueue.then(() => (lifecycle.start || startLoopInstance)(id, {
+            runtimeSource: sourceRoot,
+            minPort: configuration.symphony_port_min,
+            maxPort: configuration.symphony_port_max,
+            environment,
+            homeDirectory
+          }));
+          startQueue = startOperation.catch(() => {});
+          return startOperation;
+        });
         respond(response, 202, { instance: await operation });
         return true;
       }
       if (request.method === 'POST' && action === 'stop') {
-        respond(response, 200, { instance: await stopLoopInstance(id, { environment, homeDirectory }) });
+        const operation = serializeLifecycle(id, () => (lifecycle.stop || stopLoopInstance)(id, { environment, homeDirectory }));
+        respond(response, 200, { instance: await operation });
         return true;
       }
       if (request.method === 'GET' && action === 'logs') {

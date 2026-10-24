@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createSerializedRefreshQueue } from './refresh-queue.js';
 import { clearPublicationDraft, readPublicationDraft, writePublicationDraft } from './publication-draft.js';
 import { groupTasksForOperatorDisplay } from './operator-task-display-order.js';
 import { readTaskDetailDraft } from './task-detail-draft.js';
 import { bootstrapManagerToken } from './manager-auth.js';
+import { createManagerApiFetch } from './manager-api.js';
 import './style.css';
 
 const REFRESH_INTERVAL_MS = 7500;
@@ -13,16 +14,7 @@ const formatTime = value => new Intl.DateTimeFormat(undefined, { hour: 'numeric'
 const taskUrl = id => `/api/v1/tasks/${encodeURIComponent(id)}`;
 const taskDraftKey = id => `leesh-loop.operator.task-draft.v1:${id}`;
 const managerToken = bootstrapManagerToken();
-
-function apiFetch(input, init = {}) {
-  const headers = new Headers(init.headers || {});
-  if (managerToken) headers.set('x-leesh-loop-token', managerToken);
-  try {
-    const instanceId = window.localStorage.getItem(MANAGER_SELECTION_KEY);
-    if (instanceId) headers.set('x-leesh-loop-instance-id', instanceId);
-  } catch { /* The selected instance is also reflected in the active page. */ }
-  return fetch(input, { ...init, headers });
-}
+const apiFetch = createManagerApiFetch({ token: managerToken });
 
 async function responseJson(response) {
   const body = await response.json();
@@ -159,7 +151,7 @@ function TaskSurface({ tasks, selectedTaskId, loading, error, refreshedAt, onRet
   );
 }
 
-function PublicationSurface({ config, plan, state, selectedBlockers, publishing, onDraftChange, onReset, onPublished }) {
+function PublicationSurface({ config, plan, state, selectedBlockers, publishing, onDraftChange, onReset, onPublished, apiFetch }) {
   const [result, setResult] = useState(null);
   const submitInFlight = useRef(false);
 
@@ -254,7 +246,7 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
   );
 }
 
-function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTaskChanged, onTaskListRefresh }) {
+function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTaskChanged, onTaskListRefresh, apiFetch }) {
   const [task, setTask] = useState(null);
   const [workpad, setWorkpad] = useState([]);
   const [comments, setComments] = useState([]);
@@ -509,7 +501,8 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
   );
 }
 
-function OperatorApp() {
+function OperatorApp({ instanceId }) {
+  const instanceApiFetch = useMemo(() => createManagerApiFetch({ token: managerToken, instanceId }), [instanceId]);
   const [config, setConfig] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
@@ -530,7 +523,7 @@ function OperatorApp() {
     if (requestVersion === null) return;
     if (!hasReadTasks.current) setLoading(true);
     try {
-      const response = await apiFetch('/api/v1/tasks', { headers: { accept: 'application/json' } });
+      const response = await instanceApiFetch('/api/v1/tasks', { headers: { accept: 'application/json' } });
       const body = await responseJson(response);
       if (!taskListRefreshQueue.current.isCurrent(requestVersion)) {
         taskListRefreshQueue.current.markQueued();
@@ -559,15 +552,15 @@ function OperatorApp() {
       setLoading(false);
       if (shouldRefresh) void refresh();
     }
-  }, []);
+  }, [instanceApiFetch]);
 
   useEffect(() => {
     let active = true;
-    apiFetch('/api/v1/config').then(responseJson).then(value => { if (active) setConfig(value); }).catch(() => { if (active) setConfig(null); });
+    instanceApiFetch('/api/v1/config').then(responseJson).then(value => { if (active) setConfig(value); }).catch(() => { if (active) setConfig(null); });
     void refresh();
     const timer = window.setInterval(() => { void refresh(); }, REFRESH_INTERVAL_MS);
     return () => { active = false; window.clearInterval(timer); };
-  }, [refresh]);
+  }, [instanceApiFetch, refresh]);
 
   useEffect(() => {
     if (config?.githubRepositoryName) document.title = `${config.githubRepositoryName} · Loop`;
@@ -648,6 +641,7 @@ function OperatorApp() {
             onBackToPublish={returnToPublication}
             onTaskChanged={handleTaskChanged}
             onTaskListRefresh={refresh}
+            apiFetch={instanceApiFetch}
           />
         ) : (
           <PublicationSurface
@@ -663,6 +657,7 @@ function OperatorApp() {
             }}
             onReset={resetDraft}
             onPublished={openPublishedTask}
+            apiFetch={instanceApiFetch}
           />
         )}
       </main>
@@ -894,7 +889,7 @@ function ManagerApp() {
         {!selected && instances.length === 0 && <p className="manager-empty">Create an instance from a Git repository to see its tasks and lifecycle here.</p>}
       </section>
 
-      {selected ? <OperatorApp key={selectedId} /> : null}
+      {selected ? <OperatorApp key={selectedId} instanceId={selectedId} /> : null}
     </div>
   );
 }

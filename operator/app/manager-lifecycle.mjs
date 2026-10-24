@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { lstat, open, readFile, stat } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
-import { managerPaths, ensurePrivateDirectory, getLoopInstance, readJsonFile, writeAtomicJson } from './manager-storage.mjs';
+import { homedir } from 'node:os';
+import { managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readJsonFile, writeAtomicJson } from './manager-storage.mjs';
 import { resolveRuntimePath } from './runtime-distribution.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
 import { validateWorkspaceFiles } from './workspace-files.mjs';
@@ -192,17 +193,15 @@ async function availablePort(port) {
   return true;
 }
 
-export async function allocatePort(paths, { minPort = 4100, maxPort = 4199 } = {}) {
+export async function allocatePort(paths, { minPort = 4100, maxPort = 4199, environment = process.env, homeDirectory = homedir() } = {}) {
   if (!Number.isInteger(minPort) || !Number.isInteger(maxPort) || minPort < 1 || maxPort > 65535 || minPort > maxPort) {
     throw new Error('Manager Symphony port range is invalid');
   }
   await ensurePrivateDirectory(paths.loopExecutionRoot);
-  const { readdir } = await import('node:fs/promises');
   const reserved = new Set();
-  for (const name of await readdir(paths.loopExecutionRoot)) {
-    if (!/^[0-9a-f-]{36}$/i.test(name)) continue;
-    const record = await readJsonFile(executionRecordPath(paths, name), 'Loop execution record').catch(() => null);
-    if (record && ['Starting', 'Running', 'Stopping', 'Unconfirmed'].includes(record.status) && Number.isInteger(record.port)) reserved.add(record.port);
+  for (const instance of await listLoopInstances({ environment, homeDirectory })) {
+    const status = await loopInstanceStatus(instance.id, { environment, homeDirectory });
+    if (['Starting', 'Running', 'Stopping', 'Unconfirmed'].includes(status.status) && Number.isInteger(status.port)) reserved.add(status.port);
   }
   for (let port = minPort; port <= maxPort; port += 1) {
     if (reserved.has(port)) continue;
@@ -260,7 +259,7 @@ export async function startLoopInstance(id, { runtimeSource, minPort = 4100, max
   await cleanupPreviousRuntime(instance, options);
   const project = await readProject(instance);
   const runtimePath = await resolveRuntimePath(null, options);
-  const port = await allocatePort(paths, { minPort, maxPort });
+  const port = await allocatePort(paths, { minPort, maxPort, environment: options.environment || process.env, homeDirectory: options.homeDirectory || homedir() });
   const executionDirectory = join(paths.loopExecutionRoot, id);
   await ensurePrivateDirectory(executionDirectory);
   const logPath = launcherLogPath(paths, id);
@@ -335,15 +334,24 @@ export async function startLoopInstance(id, { runtimeSource, minPort = 4100, max
 export async function stopLoopInstance(id, options = {}) {
   const paths = managerPaths(options);
   const instance = await getLoopInstance(id, options);
-  const status = await loopInstanceStatus(id, options);
+  let status = await loopInstanceStatus(id, options);
   if (status.status === 'Stopped') return { ...status, stopped: false };
+  if (status.status === 'Starting') {
+    status = await waitForLoopState(id, 'Running', { timeoutMs: 20_000, ...options });
+    if (status.status === 'Failed' || status.status === 'Stopped') return { ...status, stopped: false };
+    if (status.status !== 'Running') {
+      throw Object.assign(new Error(`Loop stop could not proceed while startup remains ${status.status}${status.detail ? `: ${status.detail}` : ''}.`), { status: 409 });
+    }
+  }
+  if (status.status === 'Failed') return { ...status, stopped: false };
   if (status.status === 'Unconfirmed') throw Object.assign(new Error(`Loop stop is unsafe while process ownership is unconfirmed: ${status.detail}`), { status: 409 });
   const execution = await readExecution(paths, id);
   if (!execution?.runtime_path) throw Object.assign(new Error('Loop execution record has no Runtime identity.'), { status: 409 });
   const runtimePath = await resolveRuntimePath(execution.runtime_path, options);
   await saveObservedStatus(paths, execution, 'Stopping');
   try {
-    await invokeLoopCommand({ runtimePath, instance, command: 'stop', timeout: 30 * 60_000, environment: options.environment });
+    const result = await invokeLoopCommand({ runtimePath, instance, command: 'stop', timeout: 30 * 60_000, environment: options.environment });
+    if (result?.stopped !== true) throw new Error('Loop stop command did not confirm that the owned runtime stopped.');
   } catch (error) {
     const latest = await readExecution(paths, id);
     if (latest) await saveObservedStatus(paths, latest, 'Unconfirmed', { detail: error.message });
@@ -371,7 +379,6 @@ export async function readLoopLogs(id, options = {}) {
 }
 
 export async function discoverRunningLoops(options = {}) {
-  const { listLoopInstances } = await import('./manager-storage.mjs');
   const instances = await listLoopInstances(options);
   return Promise.all(instances.map(async instance => ({ ...instance, ...(await loopInstanceStatus(instance.id, options)) })));
 }
