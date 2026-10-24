@@ -7,7 +7,7 @@ import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { createManagerController, ensureManagerService, managerApiToken, managerBrowserBootstrapHtml, managerRequest } from '../manager-service.mjs';
 import { createOperatorUiServer } from '../operator-ui-server.mjs';
@@ -791,7 +791,8 @@ test('CLI init and list use the same central instance registry as the Manager UI
   await ensureManagerService({ sourceRoot, openBrowser: true, environment: paths.environment, homeDirectory: paths.homeDirectory });
   let browserArgument;
   for (let attempt = 0; attempt < 50 && browserArgument === undefined; attempt += 1) {
-    browserArgument = await readFile(browserCapture, 'utf8').catch(error => error?.code === 'ENOENT' ? undefined : Promise.reject(error));
+    const captured = await readFile(browserCapture, 'utf8').catch(error => error?.code === 'ENOENT' ? undefined : Promise.reject(error));
+    if (captured) browserArgument = captured;
     if (browserArgument === undefined) await new Promise(resolveSleep => setTimeout(resolveSleep, 20));
   }
   assert.ok(browserArgument);
@@ -810,6 +811,16 @@ test('CLI init and list use the same central instance registry as the Manager UI
   assert.match(listed.stdout, /cli-project/);
   assert.match(listed.stdout, new RegExp(repository.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.doesNotMatch(listed.stdout, /r\s+e\s+p\s+o\s+i\s+t/);
+
+  paths.environment.LEESH_LOOP_BROWSER_COMMAND = join(paths.directory, 'missing-browser-command');
+  const openAttempt = await execFile(process.execPath, [cli], { cwd: paths.directory, env: paths.environment, encoding: 'utf8', timeout: 10_000 })
+    .then(result => ({ result }), error => ({ error }));
+  assert.equal(openAttempt.error?.code, 1);
+  assert.match(openAttempt.error.stderr, /Manager is running at http:\/\/127\.0\.0\.1:/);
+  assert.match(openAttempt.error.stderr, /browser could not be opened/);
+  assert.match(openAttempt.error.stderr, /Open this private bootstrap file in a browser to sign in:/);
+  assert.ok(openAttempt.error.stderr.includes(pathToFileURL(managedPaths.managerBrowserBootstrap).toString()));
+  assert.equal((await api(manager, '/api/v1/manager')).response.status, 200);
 
   const uiList = await api(manager, '/api/v1/instances');
   assert.deepEqual(uiList.body.instances.map(instance => instance.repository_root), [repository]);

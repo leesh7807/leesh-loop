@@ -67,6 +67,12 @@ async function main() {
   const selectedCommand = command || 'open';
   if (selectedCommand === 'open' && args.length === 0) {
     const manager = await ensureReadyManager({ openBrowser: true });
+    if (manager.browserLaunchError) {
+      console.error(`leesh-loop: Manager is running at ${manager.url}, but the browser could not be opened: ${manager.browserLaunchError}`);
+      console.error(`Open this private bootstrap file in a browser to sign in: ${manager.browserBootstrapUrl}`);
+      process.exitCode = 1;
+      return;
+    }
     console.log(`Leesh Loop Manager: ${manager.url}`);
     return;
   }

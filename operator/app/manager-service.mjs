@@ -354,9 +354,27 @@ export function managerBrowserBootstrapHtml(baseUrl, token) {
 
 async function openManagerBrowser(baseUrl, token, environment, paths) {
   await writeAtomic(paths.managerBrowserBootstrap, managerBrowserBootstrapHtml(baseUrl, token), 0o600);
-  const browser = spawn(environment.LEESH_LOOP_BROWSER_COMMAND || 'xdg-open', [pathToFileURL(paths.managerBrowserBootstrap).toString()], { detached: true, stdio: 'ignore' });
-  browser.once('error', () => {});
+  const command = environment.LEESH_LOOP_BROWSER_COMMAND || 'xdg-open';
+  const browser = spawn(command, [pathToFileURL(paths.managerBrowserBootstrap).toString()], { detached: true, stdio: 'ignore' });
+  try {
+    await new Promise((resolveSpawn, rejectSpawn) => {
+      browser.once('spawn', resolveSpawn);
+      browser.once('error', rejectSpawn);
+    });
+  } catch (error) {
+    return { error: `could not launch browser command ${command}: ${error.message}` };
+  }
   browser.unref();
+  return { opened: true };
+}
+
+function browserLaunchDetails(result, paths) {
+  return result?.error
+    ? {
+        browserLaunchError: result.error,
+        browserBootstrapUrl: pathToFileURL(paths.managerBrowserBootstrap).toString()
+      }
+    : {};
 }
 
 export async function ensureManagerService({ sourceRoot, openBrowser = false, environment = process.env, homeDirectory = homedir() } = {}) {
@@ -380,8 +398,8 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
     if (live) {
       const health = await managerHealth(baseUrl, token);
       if (health?.status === 'Running') {
-        if (openBrowser) await openManagerBrowser(baseUrl, token, environment, paths);
-        return { url: baseUrl, token, port: config.port, runtime: active, alreadyRunning: true };
+        const browserResult = openBrowser ? await openManagerBrowser(baseUrl, token, environment, paths) : null;
+        return { url: baseUrl, token, port: config.port, runtime: active, alreadyRunning: true, ...browserLaunchDetails(browserResult, paths) };
       }
       let compatiblePrevious = null;
       if (record.runtime_version && record.runtime_version !== active.id) {
@@ -437,8 +455,8 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
   }
   const health = await managerHealth(baseUrl, token);
   if (!health) throw new Error(`Manager service did not become ready at ${baseUrl}.`);
-  if (openBrowser) await openManagerBrowser(baseUrl, token, environment, paths);
-  return { url: baseUrl, token, port: config.port, runtime: active, alreadyRunning: false };
+  const browserResult = openBrowser ? await openManagerBrowser(baseUrl, token, environment, paths) : null;
+  return { url: baseUrl, token, port: config.port, runtime: active, alreadyRunning: false, ...browserLaunchDetails(browserResult, paths) };
 }
 
 export async function managerRequest(manager, path, { method = 'GET', body, instanceId } = {}) {
