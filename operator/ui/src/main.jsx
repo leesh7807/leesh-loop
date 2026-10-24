@@ -9,7 +9,8 @@ import { createManagerApiFetch } from './manager-api.js';
 import { managerLifecycleAction } from './manager-lifecycle-action.js';
 import { createManagerInstanceListGate } from './manager-instance-list-gate.js';
 import { createManagerSelectionGate } from './manager-selection-gate.js';
-import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, lifecycleCompletionMessage, managerFeedbackReducer, managerOperationAnnouncement, workflowOperationFeedbackPlacement } from './manager-feedback.js';
+import { InstanceOperationFeedback, WorkflowOperationFeedback } from './manager-operation-feedback.js';
+import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, managerFeedbackReducer, managerOperationAnnouncement, managerOperationCompletionMessage, workflowOperationFeedbackPlacement } from './manager-feedback.js';
 import { logsPanelViewState, logsReadFailureState, logsReadStartState, managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from './manager-read-state.js';
 import { workflowUpdateEligibility } from './workflow-update-eligibility.js';
 import { workflowComparisonAfterApply } from './workflow-apply-result.js';
@@ -109,17 +110,6 @@ function ManagerFeedback({ feedback, target }) {
       {readError && <p className="inline-message failure" role="alert">{readError}</p>}
       {operationError && <p className="inline-message failure" role="alert">{operationError}</p>}
       {notice && <p className="inline-message" role="status">{notice}</p>}
-    </div>
-  );
-}
-
-function InstanceOperationFeedback({ feedback, target }) {
-  if (!feedback) return null;
-  return (
-    <div className={`manager-feedback manager-feedback-${target}`}>
-      {feedback.kind === 'failure'
-        ? <p className="inline-message failure" role="alert">{feedback.message}</p>
-        : <p className="inline-message" role="status">{feedback.message}</p>}
     </div>
   );
 }
@@ -899,7 +889,7 @@ function ManagerApp() {
     return () => { logsReadRequestRef.current += 1; };
   }, [selectedId, logsOpen, refreshLogs]);
 
-  async function perform(path, { method = 'POST', body, label, target = 'manager', selectionSnapshot, instanceId } = {}) {
+  async function perform(path, { method = 'POST', body, label, operation = 'manager-action', target = 'manager', selectionSnapshot, instanceId } = {}) {
     const selectionGate = selectionGateRef.current;
     const operationSelection = selectionSnapshot || (target === 'workflow' || target === 'lifecycle' ? selectionGate.capture() : null);
     if (operationSelection && instanceId && operationSelection.instanceId !== instanceId) return null;
@@ -923,13 +913,9 @@ function ManagerApp() {
         ? `${result.instance.repository_name || result.instance.id}: ${result.instance.status}.`
         : restartRequired
           ? 'Runtime updated. Run leesh-loop in a terminal to reopen Manager with fresh access. This tab loses access after restart; running Loops keep their selected Runtime.'
-          : (label === 'Updating Runtime' ? 'Runtime update completed.' : 'Change saved.');
+          : managerOperationCompletionMessage(operation);
       if (scopedInstanceId) {
-        const scopedMessage = target === 'workflow'
-          ? 'Workflow update completed.'
-          : result.instance
-            ? lifecycleCompletionMessage(label === 'Starting Loop' ? 'Start' : 'Stop', result.instance)
-            : lifecycleCompletionMessage(label === 'Starting Loop' ? 'Start' : 'Stop');
+        const scopedMessage = managerOperationCompletionMessage(operation, result.instance);
         dispatchInstanceOperationFeedback({ type: 'success', instanceId: scopedInstanceId, target, message: scopedMessage });
       } else if (selectionIsCurrent()) dispatchFeedback({ type: 'operation-success', target, message });
       await refreshInstances();
@@ -986,6 +972,7 @@ function ManagerApp() {
       method: 'PUT',
       body: { confirm: true, expectedCurrent: comparisonAtApply.current, expectedCandidateDigest: comparisonAtApply.candidate_digest },
       label: 'Updating Workflow',
+      operation: 'update-workflow',
       target: 'workflow',
       selectionSnapshot,
       instanceId
@@ -1045,15 +1032,15 @@ function ManagerApp() {
             ) : lifecycleAction === 'stopping' ? (
               <span className="manager-lifecycle-pending" role="status">Stopping…</span>
             ) : lifecycleAction === 'stop' ? (
-              <button type="button" className="manager-action secondary" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Stopping Loop' && busyOperation.instanceId === selectedId ? 'Stopping…' : 'Stop Loop'}</button>
+              <button type="button" className="manager-action secondary" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop', operation: 'stop-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Stopping Loop' && busyOperation.instanceId === selectedId ? 'Stopping…' : 'Stop Loop'}</button>
             ) : (
-              <button type="button" className="manager-action" disabled={Boolean(busy) || selected.status === 'Unconfirmed'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Starting Loop' && busyOperation.instanceId === selectedId ? 'Starting…' : 'Start Loop'}</button>
+              <button type="button" className="manager-action" disabled={Boolean(busy) || selected.status === 'Unconfirmed'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop', operation: 'start-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Starting Loop' && busyOperation.instanceId === selectedId ? 'Starting…' : 'Start Loop'}</button>
             )}
             <a className="manager-task-jump" href="#tasks-heading">View tasks</a>
             {selected.detail && <p className="inline-message failure manager-lifecycle-detail" role="status">{selected.detail}</p>}
             <ManagerFeedback feedback={feedback} target="lifecycle" />
             <InstanceOperationFeedback feedback={selectedScopedLifecycleFeedback} target="lifecycle" />
-            {scopedWorkflowFeedbackPlacement === 'header' && <InstanceOperationFeedback feedback={selectedScopedWorkflowFeedback} target="workflow" />}
+            <WorkflowOperationFeedback feedback={selectedScopedWorkflowFeedback} placement={scopedWorkflowFeedbackPlacement === 'header' ? 'header' : null} />
           </div>
         )}
         {busyOperationMessage && <p className="inline-message manager-operation-pending" id="manager-operation-pending" role="status">{busyOperationMessage}</p>}
@@ -1110,7 +1097,7 @@ function ManagerApp() {
               ? `Version ${runtime.active.version}`
               : runtimeViewState === 'missing' ? 'Runtime not installed' : 'Runtime unavailable'}</h2><p className="manager-help">New Loop starts use this immutable Runtime distribution. Running Loops keep their selected version.</p>{runtime?.active && runtime.manager_runtime_version !== runtime.active.id && <p className="inline-message" role="status">The Manager uses an older Runtime. Run <code>leesh-loop</code> to reopen Manager with fresh access.</p>}</div>
           <div className="manager-runtime-action">
-            <button className="manager-action secondary" type="button" disabled={Boolean(busy) || runtimeReadState === 'loading'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform('/api/v1/runtime/update', { label: 'Updating Runtime', target: 'runtime' })}>{busy === 'Updating Runtime' ? 'Updating…' : 'Update Runtime'}</button>
+            <button className="manager-action secondary" type="button" disabled={Boolean(busy) || runtimeReadState === 'loading'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform('/api/v1/runtime/update', { label: 'Updating Runtime', operation: 'update-runtime', target: 'runtime' })}>{busy === 'Updating Runtime' ? 'Updating…' : 'Update Runtime'}</button>
             <ManagerFeedback feedback={feedback} target="runtime" />
           </div>
         </section>
@@ -1127,11 +1114,7 @@ function ManagerApp() {
             <details open={workflowOpen} onToggle={event => setWorkflowOpen(event.currentTarget.open)}>
               <summary><span>Workflow</span><span>{workflow ? (workflow.changed ? 'Update available' : 'Current') : 'Compare with template'}</span></summary>
               <ManagerFeedback feedback={feedback} target="workflow" />
-              {scopedWorkflowFeedbackPlacement === 'panel' && selectedScopedWorkflowFeedback && (
-                <div className="workflow-read-feedback">
-                  <InstanceOperationFeedback feedback={selectedScopedWorkflowFeedback} target="workflow" />
-                </div>
-              )}
+              <WorkflowOperationFeedback feedback={selectedScopedWorkflowFeedback} placement={scopedWorkflowFeedbackPlacement === 'panel' ? 'panel' : null} />
               {!workflow && workflowPanelState === 'loading' && <p className="manager-help workflow-read-state" role="status">Loading Workflow comparison…</p>}
               {!workflow && workflowPanelState === 'error' && <button type="button" className="manager-action secondary workflow-retry" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void refreshWorkflowComparison()}>{busyOperation?.label === 'Refreshing Workflow' && busyOperation.instanceId === selectedId ? 'Retrying…' : 'Retry comparison'}</button>}
               {workflow && (
@@ -1143,11 +1126,7 @@ function ManagerApp() {
                     <button type="button" className="manager-action secondary" disabled={Boolean(busy) || !workflow.changed || !workflowEligibility?.canApply} aria-describedby={[workflow.changed && !workflowEligibility?.canApply ? 'workflow-update-disabled-reason' : '', busy ? 'manager-operation-pending' : ''].filter(Boolean).join(' ') || undefined} onClick={() => void updateWorkflow()}>{busyOperation?.label === 'Updating Workflow' && busyOperation.instanceId === selectedId ? 'Updating…' : 'Apply Workflow Update'}</button>
                     {workflow.changed && !workflowEligibility?.canApply && <p className="manager-help" id="workflow-update-disabled-reason">{workflowEligibility?.controlHint || 'This Loop must be stopped before applying the update.'}</p>}
                     <button type="button" className="manager-action secondary" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void refreshWorkflowComparison()}>{busyOperation?.label === 'Refreshing Workflow' && busyOperation.instanceId === selectedId ? 'Refreshing…' : 'Refresh comparison'}</button>
-                    {scopedWorkflowFeedbackPlacement === 'actions' && selectedScopedWorkflowFeedback && (
-                      <div className="workflow-update-feedback">
-                        <InstanceOperationFeedback feedback={selectedScopedWorkflowFeedback} target="workflow" />
-                      </div>
-                    )}
+                    <WorkflowOperationFeedback feedback={selectedScopedWorkflowFeedback} placement={scopedWorkflowFeedbackPlacement === 'actions' ? 'actions' : null} />
                   </div>
                 </div>
               )}

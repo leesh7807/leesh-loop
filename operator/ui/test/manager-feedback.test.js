@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, lifecycleCompletionMessage, managerFeedbackReducer, managerOperationAnnouncement, workflowOperationFeedbackPlacement } from '../src/manager-feedback.js';
+import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, lifecycleCompletionMessage, managerFeedbackReducer, managerOperationAnnouncement, managerOperationCompletionMessage, workflowOperationFeedbackPlacement } from '../src/manager-feedback.js';
 
 test('a successful instance poll clears read errors without dismissing an operation failure', () => {
   let feedback = managerFeedbackReducer(initialManagerFeedback, {
@@ -79,14 +79,29 @@ test('a Manager-wide busy notice names its target and says what remains availabl
 
 test('lifecycle feedback states the action result separately from the current status badge', () => {
   assert.equal(
-    lifecycleCompletionMessage('Start', { repository_name: 'payments-api', status: 'Running' }),
+    lifecycleCompletionMessage('start-loop', { repository_name: 'payments-api', status: 'Running' }),
     'Start request completed for payments-api. Manager reported Running at completion.'
   );
   assert.equal(
-    lifecycleCompletionMessage('Stop', { id: 'loop-a', status: 'Stopped' }),
+    lifecycleCompletionMessage('stop-loop', { id: 'loop-a', status: 'Stopped' }),
     'Stop request completed for loop-a. Manager reported Stopped at completion.'
   );
-  assert.equal(lifecycleCompletionMessage('Start'), 'Start request completed for Loop.');
+  assert.equal(lifecycleCompletionMessage('start-loop'), 'Start request completed for Loop.');
+  assert.equal(lifecycleCompletionMessage('unrecognized-operation'), 'Loop request completed for Loop.');
+});
+
+test('operation completion messages use stable operation IDs rather than presentation labels', () => {
+  assert.equal(managerOperationCompletionMessage('update-runtime'), 'Runtime update completed.');
+  assert.equal(managerOperationCompletionMessage('update-workflow'), 'Workflow update completed.');
+  assert.equal(
+    managerOperationCompletionMessage('start-loop', { repository_name: 'payments-api', status: 'Running' }),
+    'Start request completed for payments-api. Manager reported Running at completion.'
+  );
+  assert.equal(
+    managerOperationCompletionMessage('stop-loop', { id: 'loop-a', status: 'Stopped' }),
+    'Stop request completed for loop-a. Manager reported Stopped at completion.'
+  );
+  assert.equal(managerOperationCompletionMessage('another-manager-action'), 'Change saved.');
 });
 
 test('Workflow operation feedback has one visible location across closed, loading, failed, and loaded states', () => {
