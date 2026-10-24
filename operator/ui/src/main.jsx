@@ -842,12 +842,31 @@ function ManagerApp() {
     if (!accepted) return;
     const result = await perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/workflow`, {
       method: 'PUT',
-      body: { confirm: true, expectedCurrent: workflow.current },
+      body: { confirm: true, expectedCurrent: workflow.current, expectedCandidateDigest: workflow.candidate_digest },
       label: 'Updating Workflow'
     });
     if (result) {
       setWorkflow(null);
       setWorkflowOpen(false);
+    }
+  }
+
+  async function refreshWorkflowComparison() {
+    if (!selectedId) return;
+    const comparisonInstanceId = selectedId;
+    setBusy('Refreshing Workflow');
+    dispatchFeedback({ type: 'operation-started' });
+    setNotice('');
+    try {
+      const comparison = await readManagerJson(await apiFetch(`/api/v1/instances/${encodeURIComponent(comparisonInstanceId)}/workflow`));
+      if (selectedId !== comparisonInstanceId) return;
+      setWorkflow(comparison);
+      setNotice('Workflow comparison refreshed. Review the candidate before applying.');
+    } catch (requestError) {
+      if (selectedId !== comparisonInstanceId) return;
+      dispatchFeedback({ type: 'operation-error', message: requestError.message || 'Could not refresh the Workflow comparison.' });
+    } finally {
+      setBusy('');
     }
   }
 
@@ -932,6 +951,7 @@ function ManagerApp() {
                   <p className="manager-help">Review the current Workflow and Runtime template. Apply updates only when the Loop is stopped or its failed state has no active processes. A backup is saved.</p>
                   {workflow.changed ? <WorkflowComparison current={workflow.current} candidate={workflow.candidate} /> : <p className="manager-help">This Workflow matches the current template.</p>}
                   <button type="button" className="manager-action secondary" disabled={Boolean(busy) || !workflow.changed || (selected.status !== 'Stopped' && selected.can_update_workflow !== true)} onClick={() => void updateWorkflow()}>{busy === 'Updating Workflow' ? 'Updating…' : 'Apply Workflow Update'}</button>
+                  <button type="button" className="manager-action secondary" disabled={Boolean(busy)} onClick={() => void refreshWorkflowComparison()}>{busy === 'Refreshing Workflow' ? 'Refreshing…' : 'Refresh comparison'}</button>
                   {workflow.changed && selected.status !== 'Stopped' && (selected.can_update_workflow === true
                     ? <p className="manager-help">This Loop is not running and its recorded processes have exited. You can repair its Workflow before starting it again.</p>
                     : <p className="manager-help">Stop this Loop to update its Workflow.</p>)}

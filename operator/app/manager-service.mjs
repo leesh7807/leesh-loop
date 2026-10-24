@@ -237,6 +237,7 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
         if (submitted?.confirm !== true) throw Object.assign(new Error('Workflow update requires explicit confirmation.'), { status: 400 });
         const operation = serializeLifecycle(id, async () => (lifecycle.updateWorkflow || applyInstanceWorkflow)(id, {
             expectedCurrent: submitted?.expectedCurrent,
+            expectedCandidateDigest: submitted?.expectedCandidateDigest,
             sourceRoot: await latestSourceRoot(),
             isRunning: lifecycle.isRunning || (async instanceId => {
               const status = await loopInstanceStatus(instanceId, { environment, homeDirectory });

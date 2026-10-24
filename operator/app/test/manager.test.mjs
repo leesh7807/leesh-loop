@@ -61,7 +61,7 @@ async function fixture(t) {
   return { directory, environment, homeDirectory: directory };
 }
 
-async function startManagerFixture(t, paths, { runtimeId, lifecycle } = {}) {
+async function startManagerFixture(t, paths, { runtimeId, lifecycle, sourceRoot: managerSourceRoot = sourceRoot } = {}) {
   const reservation = createHttpServer();
   await new Promise((resolveListen, rejectListen) => {
     reservation.once('error', rejectListen);
@@ -77,7 +77,7 @@ async function startManagerFixture(t, paths, { runtimeId, lifecycle } = {}) {
   const token = runtimeId ? managerApiToken(masterToken, runtimeId) : masterToken;
   const managerController = createManagerController({
     runtimeRoot: sourceRoot,
-    sourceRoot,
+    sourceRoot: managerSourceRoot,
     token,
     port,
     environment: paths.environment,
@@ -431,7 +431,7 @@ test('Manager serializes Workflow replacement with start for the same instance',
   const instanceId = '123e4567-e89b-42d3-a456-426614174000';
 
   const updateRequest = api(manager, `/api/v1/instances/${instanceId}/workflow`, {
-    method: 'PUT', body: { confirm: true, expectedCurrent: 'reviewed workflow' }
+    method: 'PUT', body: { confirm: true, expectedCurrent: 'reviewed workflow', expectedCandidateDigest: 'a'.repeat(64) }
   });
   await updateEntered;
   const startRequest = api(manager, `/api/v1/instances/${instanceId}/start`, { method: 'POST' });
@@ -1317,17 +1317,64 @@ test('Workflow updates require a stopped selected instance and preserve the prio
   const comparison = await api(manager, `/api/v1/instances/${instance.id}/workflow`);
   assert.equal(comparison.response.status, 200);
   assert.equal(comparison.body.changed, true);
+  assert.match(comparison.body.candidate_digest, /^[0-9a-f]{64}$/);
   const missingConfirmation = await api(manager, `/api/v1/instances/${instance.id}/workflow`, {
     method: 'PUT', body: { expectedCurrent: current }
   });
   assert.equal(missingConfirmation.response.status, 400);
+  const missingCandidateDigest = await api(manager, `/api/v1/instances/${instance.id}/workflow`, {
+    method: 'PUT', origin: manager.url, body: { confirm: true, expectedCurrent: current }
+  });
+  assert.equal(missingCandidateDigest.response.status, 400);
 
   const applied = await api(manager, `/api/v1/instances/${instance.id}/workflow`, {
-    method: 'PUT', origin: manager.url, body: { confirm: true, expectedCurrent: current }
+    method: 'PUT', origin: manager.url,
+    body: { confirm: true, expectedCurrent: current, expectedCandidateDigest: comparison.body.candidate_digest }
   });
   assert.equal(applied.response.status, 200);
   assert.equal(applied.body.updated, true);
   assert.notEqual(await readFile(workflowPath, 'utf8'), current);
+  assert.equal(await readFile(applied.body.backup, 'utf8'), current);
+});
+
+test('Workflow Apply rejects a template candidate changed after comparison until the new diff is reviewed', async t => {
+  const paths = await fixture(t);
+  const repository = await makeRepository(join(paths.directory, 'repositories'), 'workflow-candidate-project');
+  const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
+  const workflowPath = join(instance.data_directory, 'WORKFLOW.md');
+  const current = `${await readFile(workflowPath, 'utf8')}\nPreserve this user edit.\n`;
+  await writeFile(workflowPath, current);
+
+  const managerSourceRoot = join(paths.directory, 'manager-source');
+  const templatePath = join(managerSourceRoot, 'docs/WORKFLOW_TEMPLATE.md');
+  await mkdir(join(managerSourceRoot, 'docs'), { recursive: true });
+  await writeFile(templatePath, 'Template A: reviewed workflow instructions.\n');
+  const manager = await startManagerFixture(t, paths, { sourceRoot: managerSourceRoot });
+
+  const reviewed = await api(manager, `/api/v1/instances/${instance.id}/workflow`);
+  assert.match(reviewed.body.candidate, /Template A/);
+  assert.match(reviewed.body.candidate_digest, /^[0-9a-f]{64}$/);
+  await writeFile(templatePath, 'Template B: changed after the comparison.\n');
+
+  const staleApproval = await api(manager, `/api/v1/instances/${instance.id}/workflow`, {
+    method: 'PUT', origin: manager.url,
+    body: { confirm: true, expectedCurrent: current, expectedCandidateDigest: reviewed.body.candidate_digest }
+  });
+  assert.equal(staleApproval.response.status, 409);
+  assert.match(staleApproval.body.error, /template changed since it was reviewed/);
+  assert.equal(await readFile(workflowPath, 'utf8'), current);
+  await assert.rejects(readdir(join(instance.data_directory, 'workflow-backups')), { code: 'ENOENT' });
+
+  const refreshed = await api(manager, `/api/v1/instances/${instance.id}/workflow`);
+  assert.notEqual(refreshed.body.candidate_digest, reviewed.body.candidate_digest);
+  assert.match(refreshed.body.candidate, /Template B/);
+  const applied = await api(manager, `/api/v1/instances/${instance.id}/workflow`, {
+    method: 'PUT', origin: manager.url,
+    body: { confirm: true, expectedCurrent: current, expectedCandidateDigest: refreshed.body.candidate_digest }
+  });
+  assert.equal(applied.response.status, 200);
+  assert.equal(applied.body.updated, true);
+  assert.equal(await readFile(workflowPath, 'utf8'), refreshed.body.candidate);
   assert.equal(await readFile(applied.body.backup, 'utf8'), current);
 });
 
@@ -1356,9 +1403,10 @@ test('Workflow repair is available after a failed launcher exits and remains blo
   const failedStatus = failedList.body.instances.find(value => value.id === failed.id);
   assert.equal(failedStatus.status, 'Failed');
   assert.equal(failedStatus.can_update_workflow, true);
+  const failedComparison = await api(manager, `/api/v1/instances/${failed.id}/workflow`);
   const repaired = await api(manager, `/api/v1/instances/${failed.id}/workflow`, {
     method: 'PUT', origin: manager.url,
-    body: { confirm: true, expectedCurrent: failedCurrent }
+    body: { confirm: true, expectedCurrent: failedCurrent, expectedCandidateDigest: failedComparison.body.candidate_digest }
   });
   assert.equal(repaired.response.status, 200);
   assert.equal(repaired.body.updated, true);
@@ -1398,9 +1446,10 @@ test('Workflow repair is available after a failed launcher exits and remains blo
   const activeStatus = activeList.body.instances.find(value => value.id === activeFailure.id);
   assert.equal(activeStatus.status, 'Unconfirmed');
   assert.equal(activeStatus.can_update_workflow, undefined);
+  const activeComparison = await api(manager, `/api/v1/instances/${activeFailure.id}/workflow`);
   const refused = await api(manager, `/api/v1/instances/${activeFailure.id}/workflow`, {
     method: 'PUT', origin: manager.url,
-    body: { confirm: true, expectedCurrent: activeCurrent }
+    body: { confirm: true, expectedCurrent: activeCurrent, expectedCandidateDigest: activeComparison.body.candidate_digest }
   });
   assert.equal(refused.response.status, 409);
   assert.equal(await readFile(activeCurrentPath, 'utf8'), activeCurrent);
@@ -1464,9 +1513,10 @@ test('Workflow repair recovers a confirmed-exited pre-ready runtime without its 
   const workflowPath = join(instance.data_directory, 'WORKFLOW.md');
   const current = `${await readFile(workflowPath, 'utf8')}\nKeep this pre-ready repair input.\n`;
   await writeFile(workflowPath, current);
+  const comparison = await api(manager, `/api/v1/instances/${instance.id}/workflow`);
   const repaired = await api(manager, `/api/v1/instances/${instance.id}/workflow`, {
     method: 'PUT', origin: manager.url,
-    body: { confirm: true, expectedCurrent: current }
+    body: { confirm: true, expectedCurrent: current, expectedCandidateDigest: comparison.body.candidate_digest }
   });
   assert.equal(repaired.response.status, 200);
   assert.equal(repaired.body.updated, true);
