@@ -14,6 +14,7 @@ import { createOperatorUiServer } from '../operator-ui-server.mjs';
 import { hashDistribution } from '../installation-metadata.mjs';
 import { allocatePort, discoverRunningLoops, loopInstanceStatus, startLoopInstance, stopLoopInstance } from '../manager-lifecycle.mjs';
 import { createLoopInstance, listLoopInstances, managerPaths } from '../manager-storage.mjs';
+import { installRuntimeDistributionInWorker } from '../runtime-distribution.mjs';
 
 const execFile = promisify(execute);
 const sourceRoot = resolve(import.meta.dirname, '../../..');
@@ -61,7 +62,7 @@ async function fixture(t) {
   return { directory, environment, homeDirectory: directory };
 }
 
-async function startManagerFixture(t, paths, { runtimeId, lifecycle, sourceRoot: managerSourceRoot = sourceRoot } = {}) {
+async function startManagerFixture(t, paths, { runtimeId, lifecycle, sourceRoot: managerSourceRoot = sourceRoot, runtimeInstaller } = {}) {
   const reservation = createHttpServer();
   await new Promise((resolveListen, rejectListen) => {
     reservation.once('error', rejectListen);
@@ -82,7 +83,8 @@ async function startManagerFixture(t, paths, { runtimeId, lifecycle, sourceRoot:
     port,
     environment: paths.environment,
     homeDirectory: paths.homeDirectory,
-    lifecycle
+    lifecycle,
+    runtimeInstaller
   });
   const server = await createOperatorUiServer({ root, managerController, managerToken: token, managerPort: port });
   await new Promise((resolveListen, rejectListen) => {
@@ -370,6 +372,47 @@ test('Manager API token is bound to the immutable Runtime and rejects the persis
   assert.notEqual(token, managerApiToken(masterToken, 'runtime-version-1'));
   assert.equal(await controller.authorize(request(token)), true);
   assert.equal(await controller.authorize(request(masterToken)), false);
+});
+
+test('web Runtime installation runs on a worker while the Manager serves other requests', async t => {
+  const paths = await fixture(t);
+  const previousRuntime = await installTestRuntime(paths, 'responsive-runtime-before');
+  const workerStartedPath = join(paths.directory, 'runtime-worker-started');
+  const installerModulePath = join(paths.directory, 'blocking-runtime-installer.mjs');
+  paths.environment.LEESH_LOOP_TEST_RUNTIME_WORKER_MARKER = workerStartedPath;
+  await writeFile(installerModulePath, `
+import { writeFileSync } from 'node:fs';
+
+export function installRuntimeDistribution(sourceRoot, { environment }) {
+  writeFileSync(environment.LEESH_LOOP_TEST_RUNTIME_WORKER_MARKER, 'started');
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
+  return { id: '${'f'.repeat(64)}', version: '0.2.0', path: sourceRoot, changed: true };
+}
+`);
+  const moduleUrl = pathToFileURL(installerModulePath).toString();
+  const manager = await startManagerFixture(t, paths, {
+    runtimeInstaller: (root, options) => installRuntimeDistributionInWorker(root, options, { moduleUrl })
+  });
+
+  const updateResult = api(manager, '/api/v1/runtime/update', { method: 'POST', origin: manager.url });
+  let marker = '';
+  for (let attempt = 0; attempt < 200 && !marker; attempt += 1) {
+    marker = await readFile(workerStartedPath, 'utf8').catch(error => error?.code === 'ENOENT' ? '' : Promise.reject(error));
+    if (!marker) await new Promise(resolveSleep => setTimeout(resolveSleep, 10));
+  }
+  assert.equal(marker, 'started', 'the Runtime installation worker must enter its synchronous build step');
+
+  const probeStarted = Date.now();
+  const health = await api(manager, '/api/v1/manager');
+  const probeElapsed = Date.now() - probeStarted;
+  assert.equal(health.response.status, 200);
+  assert.ok(probeElapsed < 1_000, `Manager health request took ${probeElapsed} ms while Runtime installation was active`);
+
+  const updated = await updateResult;
+  assert.equal(updated.response.status, 200);
+  assert.equal(updated.body.previous.id, previousRuntime.id);
+  assert.equal(updated.body.active.id, 'f'.repeat(64));
+  assert.equal(updated.body.changed, true);
 });
 
 test('Manager browser bootstrap keeps its credential in the private local bootstrap document', () => {

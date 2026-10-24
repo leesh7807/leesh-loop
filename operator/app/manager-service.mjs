@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readJsonFile, writeAtomic, writeAtomicJson } from './manager-storage.mjs';
 import { applyInstanceWorkflow, readInstanceWorkflow } from './manager-storage.mjs';
 import { discoverRunningLoops, loopInstanceStatus, readLoopLogs, startLoopInstance, stopLoopInstance } from './manager-lifecycle.mjs';
-import { activeRuntime, currentRuntimeSource, installRuntimeDistribution, listRuntimeDistributions, recordRuntimeSource } from './runtime-distribution.mjs';
+import { activeRuntime, currentRuntimeSource, installRuntimeDistribution, installRuntimeDistributionInWorker, listRuntimeDistributions, recordRuntimeSource } from './runtime-distribution.mjs';
 import { openLoopTaskStore } from './local-task-store-runtime.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
 import { createOperatorUiServer } from './operator-ui-server.mjs';
@@ -131,11 +131,12 @@ function equalToken(received, expected) {
   return first.length === second.length && timingSafeEqual(first, second);
 }
 
-export function createManagerController({ runtimeRoot, token, port, sourceRoot = process.env.LEESH_LOOP_RUNTIME_SOURCE || runtimeRoot, environment = process.env, homeDirectory = homedir(), lifecycle = {} } = {}) {
+export function createManagerController({ runtimeRoot, token, port, sourceRoot = process.env.LEESH_LOOP_RUNTIME_SOURCE || runtimeRoot, environment = process.env, homeDirectory = homedir(), lifecycle = {}, runtimeInstaller = installRuntimeDistributionInWorker } = {}) {
   const runtime = resolve(runtimeRoot);
   const paths = managerPaths({ environment, homeDirectory });
   const taskStores = new Map();
   let startQueue = Promise.resolve();
+  let runtimeUpdateQueue = Promise.resolve();
   const lifecycleQueues = new Map();
   let registryQueue = Promise.resolve();
 
@@ -146,6 +147,12 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
     return current.finally(() => {
       if (lifecycleQueues.get(id) === current) lifecycleQueues.delete(id);
     });
+  }
+
+  function serializeRuntimeUpdate(operation) {
+    const current = runtimeUpdateQueue.catch(() => {}).then(operation);
+    runtimeUpdateQueue = current.catch(() => {});
+    return current;
   }
 
   function lifecycleStatusOptions() {
@@ -266,16 +273,19 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
       return true;
     }
     if (pathname === '/api/v1/runtime/update' && request.method === 'POST') {
-      const previous = await activeRuntime({ environment, homeDirectory });
-      const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
-      const updated = await installRuntimeDistribution(await latestSourceRoot(), { environment, homeDirectory });
-      respond(response, 200, {
-        previous,
-        active: updated,
-        changed: updated.changed,
-        manager_runtime_version: service?.runtime_version || null,
-        manager_restart_required: service?.runtime_version !== updated.id
+      const result = await serializeRuntimeUpdate(async () => {
+        const previous = await activeRuntime({ environment, homeDirectory });
+        const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
+        const updated = await runtimeInstaller(await latestSourceRoot(), { environment, homeDirectory });
+        return {
+          previous,
+          active: updated,
+          changed: updated.changed,
+          manager_runtime_version: service?.runtime_version || null,
+          manager_restart_required: service?.runtime_version !== updated.id
+        };
       });
+      respond(response, 200, result);
       return true;
     }
     if (pathname === '/api/v1/manager/restart' && request.method === 'POST') {

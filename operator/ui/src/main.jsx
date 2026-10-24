@@ -7,6 +7,7 @@ import { readTaskDetailDraft } from './task-detail-draft.js';
 import { bootstrapManagerToken } from './manager-auth.js';
 import { createManagerApiFetch } from './manager-api.js';
 import { managerLifecycleAction } from './manager-lifecycle-action.js';
+import { createManagerInstanceListGate } from './manager-instance-list-gate.js';
 import { createManagerSelectionGate } from './manager-selection-gate.js';
 import { initialManagerFeedback, managerFeedbackReducer } from './manager-feedback.js';
 import { createWorkflowDiff } from './workflow-diff.js';
@@ -715,6 +716,8 @@ function ManagerApp() {
   });
   const selectionGateRef = useRef(null);
   if (!selectionGateRef.current) selectionGateRef.current = createManagerSelectionGate(selectedId);
+  const instanceListGateRef = useRef(null);
+  if (!instanceListGateRef.current) instanceListGateRef.current = createManagerInstanceListGate();
   const workflowRefreshControllerRef = useRef(null);
   const [repositoryPath, setRepositoryPath] = useState('');
   const [runtime, setRuntime] = useState(null);
@@ -741,8 +744,10 @@ function ManagerApp() {
   }, []);
 
   const refreshInstances = useCallback(async () => {
+    const listRevision = instanceListGateRef.current.begin();
     try {
       const body = await readManagerJson(await apiFetch('/api/v1/instances'));
+      if (!instanceListGateRef.current.isCurrent(listRevision)) return;
       setInstances(body.instances);
       const current = selectionGateRef.current.instanceId;
       const next = body.instances.some(instance => instance.id === current) ? current : (body.instances[0]?.id || '');
@@ -753,6 +758,7 @@ function ManagerApp() {
       } catch { /* Selection remains available for this page session. */ }
       dispatchFeedback({ type: 'read-cleared' });
     } catch (requestError) {
+      if (!instanceListGateRef.current.isCurrent(listRevision)) return;
       dispatchFeedback({ type: 'read-error', message: requestError.message || 'Could not load managed Loop instances.' });
     }
   }, [selectInstance]);
@@ -835,6 +841,7 @@ function ManagerApp() {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ repositoryPath: repositoryPath.trim() })
       }));
       const id = result.instance.id;
+      instanceListGateRef.current.invalidate();
       setRepositoryPath('');
       selectInstance(id);
       try { window.localStorage.setItem(MANAGER_SELECTION_KEY, id); } catch { /* Selection remains in React state. */ }
