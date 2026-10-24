@@ -1,11 +1,7 @@
 const STORAGE_KEY = 'leesh-loop.operator.publication-draft.v1';
-const INSTANCE_SELECTION_KEY = 'leesh-loop.manager.selected-instance.v1';
 
-function scopedStorageKey() {
-  try {
-    const instanceId = globalThis.localStorage?.getItem(INSTANCE_SELECTION_KEY);
-    return instanceId ? `${STORAGE_KEY}:${instanceId}` : STORAGE_KEY;
-  } catch { return STORAGE_KEY; }
+function scopedStorageKey(instanceId) {
+  return typeof instanceId === 'string' && instanceId.trim() ? `${STORAGE_KEY}:${instanceId}` : STORAGE_KEY;
 }
 
 function browserStorage() {
@@ -42,27 +38,27 @@ function normalizeDraft(value) {
   };
 }
 
-export function readPublicationDraft(storage) {
+export function readPublicationDraft(instanceId, storage) {
   const target = resolveStorage(storage);
   if (!target) return normalizeDraft(null);
   try {
-    const value = target.getItem(scopedStorageKey());
+    const value = target.getItem(scopedStorageKey(instanceId));
     return value ? normalizeDraft(JSON.parse(value)) : normalizeDraft(null);
   } catch {
     return normalizeDraft(null);
   }
 }
 
-export function writePublicationDraft(value, storage) {
+export function writePublicationDraft(value, instanceId, storage) {
   const target = resolveStorage(storage);
   if (!target) return;
-  try { target.setItem(scopedStorageKey(), JSON.stringify(normalizeDraft(value))); }
+  try { target.setItem(scopedStorageKey(instanceId), JSON.stringify(normalizeDraft(value))); }
   catch { /* Session storage is an optional recovery aid; the live form remains usable. */ }
 }
 
-export function clearPublicationDraft(storage) {
+export function clearPublicationDraft(instanceId, storage) {
   const target = resolveStorage(storage);
   if (!target) return;
-  try { target.removeItem(scopedStorageKey()); }
+  try { target.removeItem(scopedStorageKey(instanceId)); }
   catch { /* Session storage is an optional recovery aid; the live form remains usable. */ }
 }

@@ -137,7 +137,6 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
   let startQueue = Promise.resolve();
   const lifecycleQueues = new Map();
   let registryQueue = Promise.resolve();
-  const workflowQueues = new Map();
 
   function serializeLifecycle(id, operation) {
     const previous = lifecycleQueues.get(id) || Promise.resolve();
@@ -226,15 +225,13 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
       if (request.method === 'PUT' && action === 'workflow') {
         const submitted = await requestJson(request);
         if (submitted?.confirm !== true) throw Object.assign(new Error('Workflow update requires explicit confirmation.'), { status: 400 });
-        const prior = workflowQueues.get(id) || Promise.resolve();
-        const operation = prior.then(async () => applyInstanceWorkflow(id, {
+        const operation = serializeLifecycle(id, async () => (lifecycle.updateWorkflow || applyInstanceWorkflow)(id, {
             expectedCurrent: submitted?.expectedCurrent,
             sourceRoot: await latestSourceRoot(),
-            isRunning: async instanceId => (await loopInstanceStatus(instanceId, { environment, homeDirectory })).status !== 'Stopped',
+            isRunning: lifecycle.isRunning || (async instanceId => (await loopInstanceStatus(instanceId, { environment, homeDirectory })).status !== 'Stopped'),
             environment,
             homeDirectory
           }));
-        workflowQueues.set(id, operation.catch(() => {}));
         const result = await operation;
         respond(response, 200, result);
         return true;

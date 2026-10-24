@@ -271,6 +271,39 @@ test('Manager serializes start and stop requests for the same instance', async t
   assert.equal(stopStarted, true);
 });
 
+test('Manager serializes Workflow replacement with start for the same instance', async t => {
+  const paths = await fixture(t);
+  let resolveUpdate;
+  let signalUpdate;
+  const updateEntered = new Promise(resolve => { signalUpdate = resolve; });
+  let startStarted = false;
+  const manager = await startManagerFixture(t, paths, {
+    lifecycle: {
+      updateWorkflow: id => {
+        signalUpdate();
+        return new Promise(resolve => { resolveUpdate = () => resolve({ id, updated: true, changed: true }); });
+      },
+      start: async id => { startStarted = true; return { id, status: 'Starting' }; }
+    }
+  });
+  const instanceId = '123e4567-e89b-42d3-a456-426614174000';
+
+  const updateRequest = api(manager, `/api/v1/instances/${instanceId}/workflow`, {
+    method: 'PUT', body: { confirm: true, expectedCurrent: 'reviewed workflow' }
+  });
+  await updateEntered;
+  const startRequest = api(manager, `/api/v1/instances/${instanceId}/start`, { method: 'POST' });
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(startStarted, false);
+
+  resolveUpdate();
+  const [updated, started] = await Promise.all([updateRequest, startRequest]);
+  assert.equal(updated.response.status, 200);
+  assert.equal(updated.body.updated, true);
+  assert.equal(started.response.status, 202);
+  assert.equal(startStarted, true);
+});
+
 test('Manager CLI recognizes a previous Runtime through its legacy credential so update can restart it', async t => {
   const paths = await fixture(t);
   const runtime = await installTestRuntime(paths, 'cli-fixture-runtime');
