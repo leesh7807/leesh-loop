@@ -747,7 +747,7 @@ function ManagerApp() {
     const listRevision = instanceListGateRef.current.begin();
     try {
       const body = await readManagerJson(await apiFetch('/api/v1/instances'));
-      if (!instanceListGateRef.current.isCurrent(listRevision)) return;
+      if (!instanceListGateRef.current.accept(listRevision)) return;
       setInstances(body.instances);
       const current = selectionGateRef.current.instanceId;
       const next = body.instances.some(instance => instance.id === current) ? current : (body.instances[0]?.id || '');
@@ -758,7 +758,7 @@ function ManagerApp() {
       } catch { /* Selection remains available for this page session. */ }
       dispatchFeedback({ type: 'read-cleared' });
     } catch (requestError) {
-      if (!instanceListGateRef.current.isCurrent(listRevision)) return;
+      if (!instanceListGateRef.current.accept(listRevision)) return;
       dispatchFeedback({ type: 'read-error', message: requestError.message || 'Could not load managed Loop instances.' });
     }
   }, [selectInstance]);
