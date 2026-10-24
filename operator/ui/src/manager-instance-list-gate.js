@@ -1,16 +1,21 @@
 export function createManagerInstanceListGate() {
-  let revision = 0;
+  let requestSequence = 0;
+  let mutationGeneration = 0;
+  let appliedSequence = 0;
 
   return {
     begin() {
-      revision += 1;
-      return revision;
+      requestSequence += 1;
+      return { requestSequence, mutationGeneration };
     },
     invalidate() {
-      revision += 1;
+      mutationGeneration += 1;
+      appliedSequence = requestSequence;
     },
-    isCurrent(requestRevision) {
-      return requestRevision === revision;
+    accept(request) {
+      if (request?.mutationGeneration !== mutationGeneration || request.requestSequence <= appliedSequence) return false;
+      appliedSequence = request.requestSequence;
+      return true;
     }
   };
 }
