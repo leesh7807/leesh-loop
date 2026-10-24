@@ -840,3 +840,78 @@ test('Workflow updates require a stopped selected instance and preserve the prio
   assert.notEqual(await readFile(workflowPath, 'utf8'), current);
   assert.equal(await readFile(applied.body.backup, 'utf8'), current);
 });
+
+test('Workflow repair is available after a failed launcher exits and remains blocked while a failed runtime is alive', async t => {
+  const paths = await fixture(t);
+  const repositoryRoot = join(paths.directory, 'repositories');
+  const failed = await createLoopInstance(await makeRepository(repositoryRoot, 'failed-workflow-project'), { sourceRoot, ...paths });
+  const activeFailure = await createLoopInstance(await makeRepository(repositoryRoot, 'active-failed-workflow-project'), { sourceRoot, ...paths });
+  const manager = await startManagerFixture(t, paths);
+
+  const failedWorkflowPath = join(failed.data_directory, 'WORKFLOW.md');
+  const failedCurrent = `${await readFile(failedWorkflowPath, 'utf8')}\nKeep this failed-start workflow change.\n`;
+  await writeFile(failedWorkflowPath, failedCurrent);
+  const failedExecutionDirectory = join(managerPaths(paths).loopExecutionRoot, failed.id);
+  await mkdir(failedExecutionDirectory, { recursive: true });
+  await writeFile(join(failedExecutionDirectory, 'execution.json'), `${JSON.stringify({
+    schema_version: 1,
+    id: failed.id,
+    status: 'Starting',
+    launcher_pid: 2147483647,
+    launcher_start_ticks: 'exited-launcher-identity',
+    port: 4181
+  })}\n`);
+
+  const failedList = await api(manager, '/api/v1/instances');
+  const failedStatus = failedList.body.instances.find(value => value.id === failed.id);
+  assert.equal(failedStatus.status, 'Failed');
+  assert.equal(failedStatus.can_update_workflow, true);
+  const repaired = await api(manager, `/api/v1/instances/${failed.id}/workflow`, {
+    method: 'PUT', origin: manager.url,
+    body: { confirm: true, expectedCurrent: failedCurrent }
+  });
+  assert.equal(repaired.response.status, 200);
+  assert.equal(repaired.body.updated, true);
+  assert.equal(await readFile(repaired.body.backup, 'utf8'), failedCurrent);
+
+  const liveRuntime = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  await new Promise((resolveSpawn, rejectSpawn) => {
+    liveRuntime.once('spawn', resolveSpawn);
+    liveRuntime.once('error', rejectSpawn);
+  });
+  t.after(() => {
+    if (liveRuntime.exitCode === null && liveRuntime.signalCode === null) liveRuntime.kill('SIGKILL');
+  });
+  const processStat = readFileSync(`/proc/${liveRuntime.pid}/stat`, 'utf8');
+  const processTicks = processStat.slice(processStat.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
+  const activeExecutionDirectory = join(managerPaths(paths).loopExecutionRoot, activeFailure.id);
+  await mkdir(activeExecutionDirectory, { recursive: true });
+  const activeCurrentPath = join(activeFailure.data_directory, 'WORKFLOW.md');
+  const activeCurrent = `${await readFile(activeCurrentPath, 'utf8')}\nKeep this active failure unchanged.\n`;
+  await writeFile(activeCurrentPath, activeCurrent);
+  await writeFile(join(activeExecutionDirectory, 'execution.json'), `${JSON.stringify({
+    schema_version: 1,
+    id: activeFailure.id,
+    status: 'Starting',
+    launcher_pid: 2147483647,
+    launcher_start_ticks: 'exited-launcher-identity',
+    port: 4182
+  })}\n`);
+  await writeFile(join(activeExecutionDirectory, 'runtime.json'), `${JSON.stringify({
+    status: 'failed',
+    pid: liveRuntime.pid,
+    process_start_ticks: processTicks,
+    detail: 'startup failed while the Loop process remains alive'
+  })}\n`);
+
+  const activeList = await api(manager, '/api/v1/instances');
+  const activeStatus = activeList.body.instances.find(value => value.id === activeFailure.id);
+  assert.equal(activeStatus.status, 'Unconfirmed');
+  assert.equal(activeStatus.can_update_workflow, undefined);
+  const refused = await api(manager, `/api/v1/instances/${activeFailure.id}/workflow`, {
+    method: 'PUT', origin: manager.url,
+    body: { confirm: true, expectedCurrent: activeCurrent }
+  });
+  assert.equal(refused.response.status, 409);
+  assert.equal(await readFile(activeCurrentPath, 'utf8'), activeCurrent);
+});
