@@ -6,6 +6,7 @@ import { groupTasksForOperatorDisplay } from './operator-task-display-order.js';
 import { readTaskDetailDraft } from './task-detail-draft.js';
 import { bootstrapManagerToken } from './manager-auth.js';
 import { createManagerApiFetch } from './manager-api.js';
+import { createWorkflowDiff } from './workflow-diff.js';
 import './style.css';
 
 const REFRESH_INTERVAL_MS = 7500;
@@ -54,6 +55,39 @@ function BlockerSummary({ blockers }) {
           <ul>{remainingBlockers.map(blocker => <li key={blocker.taskId || blocker.id}>{blocker.title} · {blocker.state}</li>)}</ul>
         </details>
       )}
+    </div>
+  );
+}
+
+function WorkflowComparison({ current, candidate }) {
+  const lines = useMemo(() => createWorkflowDiff(current, candidate), [current, candidate]);
+  const added = lines.reduce((count, line) => count + (line.type === 'added' ? 1 : line.type === 'replacement' ? line.added : 0), 0);
+  const removed = lines.reduce((count, line) => count + (line.type === 'removed' ? 1 : line.type === 'replacement' ? line.removed : 0), 0);
+
+  return (
+    <div className="workflow-review">
+      <p className="manager-help">Template changes · {added} added · {removed} removed</p>
+      <div className="workflow-diff" aria-label="Workflow changes">
+        {lines.map((line, index) => line.type === 'gap' ? (
+          <div className="workflow-diff-gap" key={`gap-${index}`}>… {line.count} unchanged {line.count === 1 ? 'line' : 'lines'} hidden …</div>
+        ) : line.type === 'replacement' ? (
+          <div className="workflow-diff-replacement" key={`replacement-${index}`}>{line.removed} lines removed and {line.added} lines added in this large section. Open full Workflow files to review its contents.</div>
+        ) : (
+          <div className={`workflow-diff-line ${line.type}`} key={`${line.type}-${line.oldNumber || ''}-${line.newNumber || ''}-${index}`}>
+            <span className="workflow-diff-number">{line.oldNumber ?? ''}</span>
+            <span className="workflow-diff-number">{line.newNumber ?? ''}</span>
+            <span className="workflow-diff-marker" aria-hidden="true">{line.type === 'added' ? '+' : line.type === 'removed' ? '−' : ' '}</span>
+            <span>{line.text || ' '}</span>
+          </div>
+        ))}
+      </div>
+      <details className="workflow-full-files">
+        <summary>View full Workflow files</summary>
+        <div className="workflow-comparison">
+          <section><h3>Current Workflow</h3><pre>{current}</pre></section>
+          <section><h3>Template</h3><pre>{candidate}</pre></section>
+        </div>
+      </details>
     </div>
   );
 }
@@ -591,7 +625,6 @@ function OperatorApp({ instanceId }) {
 
   function openTask(id) {
     if (window.matchMedia('(max-width: 960px)').matches) setNavigationTarget('detail');
-    else window.scrollTo(0, 0);
     setSelectedTaskId(id);
   }
   function openPublishedTask(publication) {
@@ -603,7 +636,6 @@ function OperatorApp({ instanceId }) {
   }
   function returnToPublication() {
     if (window.matchMedia('(max-width: 960px)').matches) setNavigationTarget('publish');
-    else window.scrollTo(0, 0);
     setSelectedTaskId(null);
   }
   function resetDraft() {
@@ -816,17 +848,6 @@ function ManagerApp() {
     <div className="manager-shell">
       <header className="manager-header">
         <div className="manager-brand"><p className="eyebrow">Leesh Loop</p><h1>Manager</h1></div>
-        <div className="manager-selection">
-          <label htmlFor="managed-instance">Loop Instance</label>
-          <select id="managed-instance" value={selectedId} onChange={event => {
-            const id = event.target.value;
-            setSelectedId(id);
-            try { if (id) window.localStorage.setItem(MANAGER_SELECTION_KEY, id); else window.localStorage.removeItem(MANAGER_SELECTION_KEY); } catch { /* Selection remains in React state. */ }
-          }}>
-            <option value="">Choose a Loop</option>
-            {instances.map(instance => <option value={instance.id} key={instance.id}>{instance.repository_name} · {instance.status}</option>)}
-          </select>
-        </div>
         {selected && (
           <div className="manager-lifecycle">
             <span className={`manager-status status-${selected.status.toLowerCase()}`}>{selected.status}</span>
@@ -839,19 +860,41 @@ function ManagerApp() {
         )}
       </header>
 
+      <section className="manager-instances" aria-labelledby="managed-instances-heading">
+        <div className="manager-instances-heading">
+          <h2 id="managed-instances-heading">Loop instances</h2>
+          <span>{instances.length} {instances.length === 1 ? 'instance' : 'instances'}</span>
+        </div>
+        {instances.length ? (
+          <div className="manager-instance-list">
+            {instances.map(instance => (
+              <button type="button" className={`manager-instance-choice${selectedId === instance.id ? ' selected' : ''}`} key={instance.id}
+                aria-pressed={selectedId === instance.id}
+                onClick={() => {
+                  setSelectedId(instance.id);
+                  try { window.localStorage.setItem(MANAGER_SELECTION_KEY, instance.id); } catch { /* Selection remains in React state. */ }
+                }}>
+                <span className="manager-instance-choice-title">{instance.repository_name}</span>
+                <span className={`manager-status status-${instance.status.toLowerCase()}`}>{instance.status}</span>
+                <span className="manager-instance-choice-path">{instance.repository_root}</span>
+              </button>
+            ))}
+          </div>
+        ) : <p className="manager-empty">No managed Loops yet. Add a Git repository below to create one.</p>}
+      </section>
+
       <section className="manager-console" aria-label="Loop Manager controls">
-        <form className="manager-create" onSubmit={createInstance}>
-          <div>
-            <p className="eyebrow">New instance</p>
-            <h2>Add a Git repository</h2>
-            <p className="manager-help">Use its local repository root. Init checks the Git upstream and keeps settings, Workflow, Task Store, and workspaces in this user's Leesh Loop data.</p>
-          </div>
-          <label htmlFor="repository-path">Repository path</label>
-          <div className="manager-input-row">
-            <input id="repository-path" type="text" value={repositoryPath} onChange={event => setRepositoryPath(event.target.value)} placeholder="/home/you/projects/repository" autoComplete="off" spellCheck="false" disabled={Boolean(busy)} required />
-            <button className="manager-action" type="submit" disabled={Boolean(busy) || !repositoryPath.trim()}>{busy === 'Creating Loop' ? 'Creating…' : 'Create Loop'}</button>
-          </div>
-        </form>
+        <details className="manager-create-details">
+          <summary>Add a Git repository</summary>
+          <form className="manager-create" onSubmit={createInstance}>
+            <p className="manager-help">Use a local repository root. Init checks the Git upstream and keeps settings, Workflow, Task Store, and workspaces in this user's Leesh Loop data.</p>
+            <label htmlFor="repository-path">Repository path</label>
+            <div className="manager-input-row">
+              <input id="repository-path" type="text" value={repositoryPath} onChange={event => setRepositoryPath(event.target.value)} placeholder="/home/you/projects/repository" autoComplete="off" spellCheck="false" disabled={Boolean(busy)} required />
+              <button className="manager-action" type="submit" disabled={Boolean(busy) || !repositoryPath.trim()}>{busy === 'Creating Loop' ? 'Creating…' : 'Create Loop'}</button>
+            </div>
+          </form>
+        </details>
 
         <section className="manager-runtime" aria-label="Central Runtime">
           <div><p className="eyebrow">Shared Runtime</p><h2>{runtime?.active ? `Version ${runtime.active.version}` : 'Runtime unavailable'}</h2><p className="manager-help">New Loop starts use this immutable Runtime distribution. Running Loops keep their selected version.</p>{runtime?.active && runtime.manager_runtime_version !== runtime.active.id && <p className="inline-message" role="status">The Manager uses an older Runtime. Run <code>leesh-loop update</code> to reload it.</p>}</div>
@@ -872,7 +915,7 @@ function ManagerApp() {
               {workflow && (
                 <div className="manager-workflow-content">
                   <p className="manager-help">Review the current Workflow and Runtime template. Apply updates only when the Loop is stopped or its failed state has no active processes. A backup is saved.</p>
-                  {workflow.changed ? <div className="workflow-comparison"><section><h3>Current Workflow</h3><pre>{workflow.current}</pre></section><section><h3>Template</h3><pre>{workflow.candidate}</pre></section></div> : <p className="manager-help">This Workflow matches the current template.</p>}
+                  {workflow.changed ? <WorkflowComparison current={workflow.current} candidate={workflow.candidate} /> : <p className="manager-help">This Workflow matches the current template.</p>}
                   <button type="button" className="manager-action secondary" disabled={Boolean(busy) || !workflow.changed || (selected.status !== 'Stopped' && selected.can_update_workflow !== true)} onClick={() => void updateWorkflow()}>{busy === 'Updating Workflow' ? 'Updating…' : 'Apply Workflow Update'}</button>
                   {workflow.changed && selected.status !== 'Stopped' && (selected.can_update_workflow === true
                     ? <p className="manager-help">This Loop is not running and its recorded processes have exited. You can repair its Workflow before starting it again.</p>
