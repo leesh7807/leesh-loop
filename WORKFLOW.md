@@ -1,9 +1,6 @@
 ---
-# Local Task Store is the task authority; chatgpt-shot remains an external service.
 tracker:
   kind: local
-  # Backlog is a normal non-dispatch state and therefore intentionally stays
-  # outside the active state set below.
   active_states:
     - Ready
     - In Progress
@@ -15,11 +12,8 @@ tracker:
 polling:
   interval_ms: 30000
 workspace:
-  # The Operator must set this to a dedicated absolute directory outside this repository.
   root: $SYMPHONY_WORKSPACE_ROOT
 hooks:
-  # Symphony executes this only for a newly-created workspace. Continuations use
-  # the preserved workspace; Human Review -> Rework is the documented reset exception.
   after_create: |
     : "${SYMPHONY_GITHUB_REPOSITORY_URL:?SYMPHONY_GITHUB_REPOSITORY_URL is required}"
     : "${SYMPHONY_GITHUB_BASE_BRANCH:?SYMPHONY_GITHUB_BASE_BRANCH is required}"
@@ -61,15 +55,15 @@ Accepted Plan:
 
 {% if attempt %}
 
-This is a Symphony continuation or retry. Reconstruct the current State, Repository Plan, Workpad, and workspace before acting. Preserve the workspace except for the explicit Human Review → Rework reset protocol.
+This is a continuation or retry. Reconcile current State, Plan, workspace/Git, Workpad, and comments. Preserve the workspace, applying the Rework reset only when authorized and safe.
 
 {% endif %}
 
-Read `AGENTS.md`, then follow this file as the complete worker execution contract for this repository. Do not require another workflow or template file at runtime.
+Read `AGENTS.md`, then follow this workflow as the worker execution contract.
 
 ## Accepted execution input
 
-Treat the Accepted Plan as immutable, correctly published execution input. Do not add publication preflight, re-prove publication or task-to-Plan binding, or repair malformed publication/integration from a normal worker run; those are Publisher, adapter, or integration defects.
+Use the immutable Accepted Plan as the task's execution input.
 
 Derive the Repository Plan identity from the Accepted Plan H1 `# <date-summary>` and use exactly:
 
@@ -77,154 +71,160 @@ Derive the Repository Plan identity from the Accepted Plan H1 `# <date-summary>`
 docs/plans/active/<date-summary>.md
 ```
 
-Do not search for or guess another Plan. If the H1 cannot provide the identity, record the blocker and use the human-required blocker handoff. In a fresh workspace, create the exact Repository Plan from the Accepted Plan if absent; never overwrite an existing Repository Plan with the Accepted Plan.
+If the Accepted Plan H1 does not identify the Repository Plan, record the blocker and use Human Review. In a fresh workspace, create the Repository Plan from the exact Accepted Plan if absent; preserve an existing Repository Plan.
 
-Use repository evidence and normal engineering judgment to complete the accepted objective. Solve ordinary implementation problems autonomously when needed to deliver it, but do not absorb meaningful work outside it.
+Use repository evidence and engineering judgment to meet the accepted objective. Solve ordinary implementation problems autonomously within its scope.
 
-The Workpad is mutable live execution context. The Repository Plan is a durable contract artifact, not a running log. Update it only when the delivered objective, intent, boundary, accepted requirement, important assumption, constraint, or verification method materially changes. Do not copy routine history, transient failures, command output, or review transcripts into it.
+Keep the Repository Plan as the durable execution contract. Update it when the objective, intent, boundary, accepted requirement, material assumption, constraint, or verification method changes.
 
 ## Workspace and task surface
 
-The `after_create` hook clones the configured repository and installs worker dependencies before the agent starts. Work only in the Symphony-provided workspace. Do not modify `operator/symphony/` unless the Accepted Plan specifically requires it.
+Work in the Symphony-provided workspace. Modify `operator/symphony/` only when required by the Accepted Plan.
 
-The worker-facing review interface is `chatgpt-shot`. Use only `chatgpt-shot submit "<prompt>"` and `chatgpt-shot jobs <job-id>`. Do not start, stop, authenticate, repair, or otherwise manage the external Service.
+Use `chatgpt-shot submit "<prompt>"` and `chatgpt-shot jobs <job-id>` for independent review. Service administration is outside the worker's authority.
 
-Use the Local Task surface for the Accepted Plan, Workpad, State changes, and comments. Write the Workpad in Korean; preserve code, commands, identifiers, paths, API names, and quotations verbatim where accuracy requires it. `local_task_read_workpad` reads the complete canonical Workpad of this bound task; use bound task tools rather than direct SQLite access.
+Use task-bound Local Task tools for Accepted Plan, Workpad, State, and comments. Write Workpad in Korean, preserving identifiers, paths, commands, API names, and quotations where exactness matters. Carry forward relevant Workpad context across work units.
 
-If the task surface or its authentication is unavailable, it cannot record a Workpad entry or mutate its State. Do not invent a fallback mutation channel or claim a same-surface handoff occurred; end with the concrete external-access blocker.
+If task-bound access fails, preserve recoverable workspace changes and report the concrete blocker. Confirm task mutations before reporting success.
 
-## Worker follow-up capabilities
+### Worker follow-up capabilities
 
-The bound worker session exposes:
+* `local_task_publish_plan` publishes a complete Plan as a new `Backlog` task and returns its `identifier` and Local task ID (`page_id`).
+* `local_task_add_blocked_by` adds the published task to this task's `Blocked By` relation, preserving existing blockers.
 
-* `local_task_publish_plan`: publish a complete Plan through the Local Publisher with final State `Backlog`; the Publisher owns canonical representation, Identifier, Plan content, idempotency, atomicity, and validation, and returns canonical `identifier` and Local task ID as `page_id`.
-* `local_task_add_blocked_by`: add a Local task ID to the bound task's `Blocked By` relation while preserving existing blockers.
+Use these task-bound operations for follow-up publication and dependency changes.
 
-These are separate operations. Publication does not mutate the current task relation; Blocked By does not publish or edit Plan content. The current task comes from runtime binding, not worker input. Failures do not authorize worker-side fallback or direct Store mutation.
-
-## Repository state and delivery
+## Lifecycle boundaries
 
 * `Backlog` is non-active, non-terminal, and never dispatchable.
-* `Ready`, `In Progress`, `Rework`, and `Merging` are active. Move `Ready` to `In Progress` before implementation. `Rework` is only human-selected review rejection. `Merging` only authorizes merging the Approved delivery from the preceding Human Review, including conflict resolution within that approval.
-* `Human Review` is the single non-active, non-terminal human pause state. A human may select `In Progress`, `Rework`, or `Merging`. Comments never dispatch or approve. Workers enter Human Review after validated delivery, for a human-required blocker, or when independent review cannot continue; record `reason: review` or `reason: blocker`. Workers never select `Rework` or `Merging`.
-* `Done` and `Cancelled` are terminal. `Done` requires verified merge of the Approved PR onto the configured remote base; implementation, verification, review, or a merge command alone is insufficient.
+* `Ready`, `In Progress`, `Rework`, and `Merging` are active. Move `Ready` to `In Progress` before implementing.
+* `Human Review` is the sole non-active, non-terminal human pause. A human may select `In Progress`, `Rework`, or `Merging`. Workers never choose `Rework` or `Merging`. Comments do not dispatch a task or mutate State.
+* `Rework` rejects the preceding implementation basis. Human selection of `Merging` approves the uniquely identified delivery presented for Human Review.
+* `Done` and `Cancelled` are terminal. Enter `Done` after verifying the approved delivery was incorporated into the configured remote base.
 
-## Reconstruction and Workpad
+## Work continuity, Workpad, and comments
 
-Every dispatch—initial, continuation, retry, or return from Human Review—reads current State and Accepted Plan, resolves the deterministic Repository Plan, reads the canonical Workpad, inspects workspace/Git state, and reconciles current truth. State is lifecycle authority; workspace is repository truth; Workpad is live execution context; Repository Plan is durable execution contract. Reconcile material Workpad/workspace differences from the workspace and do not repeat completed work merely because a worker restarted.
+### Reconstruct current work
 
-If the previous execution yielded to `Blocked By` and the same active task resumes with its preserved workspace, treat it as blocked-work continuation. Fetch the latest configured remote base and rebase the preserved task branch before continuing implementation; resolve conflicts under the same semantic authority boundary as Merging. This resume does not by itself start a new review pass or reinitialize Review Confidence.
+At dispatch, read State and Accepted Plan, identify the Repository Plan, inspect workspace/Git, and consult relevant Workpad and comments. State governs lifecycle; Repository Plan governs execution meaning; workspace/Git establishes repository truth; Workpad preserves work context; comments convey user input. After Rework, the latest `Rework Reset Complete` begins the current Workpad context; previous entries are historical. Reconcile discrepancies against the corresponding authority.
 
-Write concise Workpad entries at meaningful milestones: material approach choice/change, substantial implementation, material finding/constraint, representative validation, review result/disposition/fix, Review Confidence update, blocker, remaining work, Human Review preparation/entry, Review Input consumption, Rework reset, or Merging result. Do not narrate commands or add a fixed format beyond required markers.
+Inspect working tree, branches, commits, PR, and relevant files to determine completed and remaining work. Re-verify uncertain results. Confirm current state before irreversible or destructive operations.
 
-Use only these lifecycle markers:
+### Record meaningful work
+
+Work in coherent, meaningful units. Use Git and workspace artifacts as the source for implementation progress and details; do not duplicate facts recoverable from commits, diffs, or artifacts in Workpad. Use Workpad for concise context not otherwise preserved: material findings, decisions and reasons, user-input interpretation and response, verification outcomes, review state, external outcomes, blockers, and remaining work. Refer to Git commits and workspace artifacts for implementation details, adding enough context for a reader to understand the work. Commit coherent changes at meaningful boundaries with messages describing the result, and push task commits before delivery.
+
+### Comments are a continuing input channel
+
+Read comments at startup, whenever recording a meaningful Workpad entry or creating a Git commit, and before consequential decisions when relevant. When Workpad and commit belong to the same work boundary, one comment check suffices. Consider new comments in the next work unit.
+
+Interpret comments using current user intent, the Accepted Plan, and completed work. Apply clear feedback autonomously within the authorized scope, updating the Repository Plan for material contract changes. Record meaningful responses and their reasons in Workpad, referring to the relevant comments where useful; handle related comments together. If intent conflicts or necessary authorization is unclear, seek a decision through Human Review.
+
+### Blocked continuation and Human Review
+
+Resume `Blocked By` work in the preserved workspace. Before further implementation, fetch the configured remote base and rebase the task branch, resolving conflicts within the accepted scope. Continue the existing unfinished review pass and Review Confidence where applicable.
+
+Use Human Review for a verified delivery, a required human decision, or inability to complete independent review. Before pausing, record a readable summary of what exists, relevant validation and decisions, unfinished work, and the action required. Record the *exact* delivery identity when one exists:
 
 ```text
 Human Review
-cycle: N
 reason: review | blocker
 delivered_pr: <PR URL or number | none>
 delivered_head: <HEAD | none>
-comment_baseline: <comment-id | none>
-
-Human Review Entered
-cycle: N
-
-Review Input
-cycle: N
-mode: continue | rework
-from_comment: <comment-id | none>
-through_comment: <comment-id | none>
-<review input>
-
-Rework Reset Complete
-cycle: N
-origin_base: <resolved-remote-base-commit>
-
-Merging
-cycle: N
-approved_pr: <PR URL or number | none>
-approved_head: <HEAD | none>
-merge_target_head: <HEAD | none>
-attempt: <not-started | merged | recovered | blocker>
-merged_pr: <PR URL or number | none>
-merged_head: <HEAD | none>
-remote_base: <configured-base remote commit | none>
-blocker: <concrete condition | none>
 ```
 
-Prepare each Human Review with the next monotonically increasing cycle, latest comment ID baseline, delivered PR, and delivered HEAD. From a Merging blocker, preserve the cycle's `approved_pr`/`approved_head` as delivered identity; never promote a failed conflict-resolution HEAD. Confirm the Workpad append, transition to `Human Review`, and append `Human Review Entered` when possible. Retry an explicit State-mutation failure with the same prepared cycle. A missing Entered marker may be repaired when State is already Human Review, but it must never override an explicit active State.
+Record the handoff, enter `Human Review`, and verify State. On failure, inspect current State before retrying. Present the delivery PR/HEAD when available. Interpret `Merging` as approval of the uniquely identified handoff. Interpret brief approval comments against the recorded handoff, documenting the understood target in Workpad. A return to `In Progress` preserves valid work and resumes normal comment handling.
 
-At the first `In Progress` or `Rework` after an unconsumed Human Review cycle, reuse an existing `Review Input`; otherwise read provider-ordered comments once, fix `through_comment` to the latest visible comment, and append immutable input for `(comment_baseline, through_comment]`. Use `mode: continue` for `In Progress` and `mode: rework` for `Rework`. If a non-`none` baseline cannot be found despite later comments, surface the ambiguity. Retries reuse the same input. `Merging` consumes no Review Input.
+Human Review → `Rework` rejects the preceding implementation and its working history. Keep the Accepted Plan and current Repository Plan as the task contract. Locate the latest Human Review handoff. If a `Rework Reset Complete` entry follows it, resume the new implementation and Workpad context. Otherwise, inspect Git against that handoff. When a reset is needed and safe, fetch the configured remote base, recreate the implementation branch from that commit, and restore the current Repository Plan to `docs/plans/active/<date-summary>.md`. If Git proves a reset already happened, preserve the resulting work. In either case, record the verified reset before continuing implementation:
 
-`Human Review → In Progress` preserves workspace, branch, Plan, and valid work after reconciliation.
+```text
+Rework Reset Complete
+origin_base: <resolved-remote-base-commit>
+```
 
-`Human Review → Rework` rejects that basis. Materialize `mode: rework`, read the latest Repository Plan, fetch the configured remote base, and if this cycle lacks `Rework Reset Complete`, recreate implementation state and a fresh task branch from the exact fetched base, restore the current Plan to `docs/plans/active/<date-summary>.md`, append the reset marker with `origin_base`, then implement. Do not reset twice for the same cycle.
+Earlier Workpad entries remain historical and do not guide the new implementation. Keep relevant user comments available. If a reset may overwrite new work or its status remains unclear, preserve the workspace and request human direction. Other continuations preserve the workspace.
 
-`Human Review → Merging` preserves delivered workspace, branch, and Plan. Reconstruct the preceding Human Review and establish Approved PR/HEAD from its delivered identity before any mutation.
+## Repository state, delivery, and merging
 
-## GitHub target and merging
+Use `SYMPHONY_GITHUB_REPOSITORY_URL` and `SYMPHONY_GITHUB_BASE_BRANCH` as repository/base authority. If the configured base is initially missing, the Operator may bootstrap it from the repository default branch. All task branches, continuations, PRs, and merges target the configured base.
 
-`SYMPHONY_GITHUB_REPOSITORY_URL` and `SYMPHONY_GITHUB_BASE_BRANCH` are the only repository/base authority. Never infer either from checkout state, a default branch, or fallback.
+Before initial implementation, fetch and resolve the configured remote base; fail safely if unavailable. Branch from that exact commit, commit only task-related changes, push only the task branch, and create the PR with explicit configured base. Never direct-push or direct-merge into the configured base.
 
-Before new implementation, fetch and resolve the configured remote base; if that fails, do not create a task branch. Create the task branch from that exact commit, make only task-related commits, push only that branch, and create the PR with explicit configured base. Never direct-push or direct-merge to the configured base.
+Before delivery, inspect final diff/status, perform applicable repository checks and `git diff --check`, and compare the actual result to Accepted Plan and Repository Plan. Make any necessary durable Plan correction, move the delivered Plan to `docs/plans/completed/`, and read the PR back from GitHub. A valid delivery PR must target the configured base, source the task branch, and identify its exact `delivered_head`. Do not silently substitute another PR or a later HEAD.
 
-Before delivery handoff, inspect final diff/status, run repository-supported checks and `git diff --check`, and compare the actual result with Accepted Plan and Repository Plan. Apply any durable contract correction, move the delivered Plan to `docs/plans/completed/`, and read the PR back from GitHub. A valid delivery PR must target the configured base, source the task branch, and point at exact `delivered_head`; otherwise no valid delivery exists. Preserve that PR identity through review and merging.
+### Human approval of exact delivery
 
-On Merging, require the Approved PR and configured base. Before conflict-resolution mutation, require current PR head to equal Approved HEAD when no `merge_target_head` exists, or the recorded target when it does. If conflict-free, record Approved HEAD as merge target. If conflicted, integrate the latest configured base and resolve autonomously only within the Approved delivery's meaning, externally observable behavior, contract, scope, and Accepted Plan approach. If resolution requires a separate material decision, use Human Review blocker handoff.
+On `Merging`, identify the approved PR/HEAD from the last Human Review handoff, relevant comments, and live PR. Interpret brief approval comments in context and record the understood target in Workpad. Resolve ambiguous or contradictory approval through Human Review. Validate the approved identity at the merge boundary below.
 
-After conflict resolution, rerun applicable validation, `git diff --check`, final Plan comparison, and PR/merge/readback checks. Conflict resolution alone does not reopen independent review. Record the exact resulting HEAD as `merge_target_head`, re-read the PR immediately before merge, and require the same Approved PR, configured base, and exact target HEAD. Use only the normal GitHub PR merge path.
+### Safe merge and recovery
 
-After merge, fetch the configured base and verify the Approved PR's actual merged/source head equals `merge_target_head` and its merge result is present on fetched remote base. Record verified merge identity.
+Require the Approved PR and configured base. Before conflict-resolution mutation, the PR head must equal Approved HEAD if no merge-resolution target exists, or the recorded `merge_target_head` on an interrupted merge attempt. A mismatch is a blocker, not an excuse to choose a different HEAD.
 
-If the Approved PR is already merged, verify the same identity and remote-base presence. If no target was recorded, the merged/source head must equal Approved HEAD before recording it as target. A differing or ambiguous merged identity is a blocker.
+If conflict-free, use Approved HEAD as `merge_target_head`. If conflicted, integrate the latest configured base into the task branch and resolve conflicts autonomously **only** while preserving the approved meaning, observable behavior, contract, scope, and Accepted Plan approach. If resolving a conflict requires a new material decision, request Human Review instead.
 
-After verified merge, delete the Approved PR's remote source branch when it is safe to do so; branch-cleanup failure alone does not block `Done`. Then transition `Merging → Done`.
+After conflict resolution, rerun applicable verification, `git diff --check`, final Plan comparison, and PR/readback checks. Conflict resolution does not automatically reopen independent delivery review. Before merging, record the approved PR/HEAD and exact target HEAD so a retry can recover the intended operation:
 
-A human-required blocker includes missing Approved identity, PR base/head mismatch, unresolved conflict, required decision outside Merging authority, validation failure, GitHub/auth/access failure, ambiguous merge result, merge identity mismatch, absent merge result on fetched base, or configured-base fetch/readback failure. Record concrete condition, repository/validation state, required human action, and remaining work; preserve Approved PR/HEAD as delivered identity; prepare `Human Review` with `reason: blocker`; transition and stop. Never choose an alternate PR, promote an unauthorized later HEAD, perform a repair merge, direct-push the base, or autonomously choose Rework.
+```text
+Merging
+approved_pr: <PR URL or number>
+approved_head: <exact approved HEAD>
+merge_target_head: <exact HEAD to merge>
+```
 
-Operator bootstrap may create a missing configured base from the repository default branch's current remote HEAD, but the default branch is only a bootstrap seed. Workspace creation, task branches, Rework, PRs, Merging, and Done verification always use the configured base. Continuations preserve workspace. Legacy `origin_main`/`main` markers count only when the configured base is exactly `main`.
+Immediately before merging, re-read the PR and configured base and require the same PR, base, and exact target HEAD. Use only the normal GitHub PR merge path. After merge, fetch the configured base and verify that the Approved PR's merged/source head equals `merge_target_head` and its merge result is present in fetched remote base. Record the verified merged identity, for example:
+
+```text
+merged_pr: <PR URL or number>
+merged_head: <actual merged/source HEAD>
+remote_base: <configured-base remote commit | none>
+```
+
+If the PR was already merged on retry, verify the same identities and remote-base inclusion before treating it as success. If no target was recorded, a completed merge is acceptable only if its merged/source head equals Approved HEAD and the remote-base result can be verified. Refer missing, contradictory, or ambiguous merge evidence to Human Review.
+
+After verified merge, delete the Approved PR's remote source branch when safe. A branch-cleanup failure alone does not block `Done`. Then transition `Merging` → `Done` and verify State.
+
+Treat ambiguous authorization, PR/base/head mismatch, unauthorized changes, unresolved conflicts, decisions outside approval, validation or access failure, and uncertain merge outcomes as human-required blockers. Record the evidence, required action, and remaining work, preserving delivery and approval identities; enter `Human Review` with `reason: blocker`.
 
 ## Independent `chatgpt-shot` delivery review
 
 Independent review reduces material uncertainty across four perspectives:
 
 ```text
-Behavior        — actual behavior and observable-result meaning preserve the contract
-Maintainability — the system remains practical to understand, diagnose, change, verify, and recover
-Security        — trust and permission boundaries constrain capability and data flow
-UI/UX           — the actual interface communicates product meaning/workflow clearly and coherently
+Behavior        — execution and observable results preserve the accepted contract
+Maintainability — the result remains understandable, diagnosable, changeable, and verifiable
+Security        — trust, permission, and execution boundaries constrain unintended effects
+Design          — the artifact's relevant design qualities serve its intent and experience
 ```
 
-Use these lenses:
+Each Review Job covers one perspective. The worker owns Review Confidence and handles evidence affecting other perspectives through cross-perspective impact.
+
+Behavior, Maintainability, and Security use these established boundaries:
 
 ```text
 Behavior: Execution semantics / Failure semantics / Outcome semantics
-Maintainability: Responsibility structure / Diagnostic structure / Verification structure
+Maintainability: Responsibility / Diagnostics / Verification
 Security: Trust / Authorization / Capability / Input and execution boundary / Data protection
-UI/UX: Hierarchy / Comprehension / Interaction / Aesthetic quality
 ```
 
-Each Review Job has one primary perspective. A fact may affect others, but the worker handles that through cross-perspective impact rather than a multi-perspective Job.
+For Design, judge how well the artifact's form, organization, and experience serve its intended purpose, choosing the qualities that matter most for the actual result.
 
 ### Confidence and initialization
 
-Each perspective has worker-owned `confidence`: how confident the worker is that more independent review from that perspective is unnecessary. It is not correctness probability, implementation quality, coverage, reviewer confidence, PASS count, or finding count.
+The worker maintains `confidence` for each perspective to assess whether further independent review is warranted.
 
 Use only:
 
 ```yaml
 threshold: 0.90
 initial:
-  Settled:  0.90
+  Settled: 0.90
   Standard: 0.75
-  Focus:    0.60
+  Focus: 0.60
 outcome:
-  clean:          +0.30
-  aesthetic-only: +0.10
-  minor-only:     +0.05
-  material:       -0.10
-  rejected-only:   0
+  clean: +0.30
+  minor-only: +0.05
+  material: -0.10
+  rejected-only: 0
 cross-perspective:
   direct material impact: -0.05
 other:
@@ -235,72 +235,62 @@ range: 0.00..1.00
 precision: 2 decimals
 ```
 
-After implementation and required repository verification, capture exact delivery PR and HEAD and classify all four perspectives:
+After implementing and performing required verification, capture the exact delivery PR and HEAD, and independently classify each perspective:
 
-* `Settled`: material independent review is unlikely to add necessary information.
-* `Standard`: this is a real but bounded review surface.
-* `Focus`: changed surface or potential consequence is broad or important.
+* `Settled`: further material independent review is unlikely to add needed information.
+* `Standard`: the changed area and consequences justify a bounded review.
+* `Focus`: the changed area or potential impact warrants more attention.
 
-Judge from both `change surface` and `failure impact`; do not use a weighted formula or probability model. For UI/UX, use `Settled` only when the delivery has no user-facing UI or UX impact. Low initial confidence alone does not force repeated review: a clean review may settle Standard or Focus in one cycle.
+Choose initial confidence from the changed surface and impact. For Design, consider the artifact's relevant design qualities. A clean review can settle Standard or Focus in one step.
 
-Record:
+Record a current snapshot in Workpad whenever the review state materially changes. If feedback materially changes the delivery during an unfinished review pass, reassess affected perspectives and their confidence based on the changed evidence; do not automatically restart all four. A human-directed return to implementation after a completed Human Review follows the new-pass rule below:
 
 ```yaml
 Review Confidence
 Behavior: <value>
 Maintainability: <value>
 Security: <value>
-UI/UX: <value>
+Design: <value>
 threshold: 0.90
 ```
 
-Record new snapshots when review state meaningfully changes. Previous snapshots remain ordinary Workpad history. Resume from the most recent valid snapshot; never replay historical score events to recompute current state.
+On retry, reconcile the latest Review Confidence snapshot with the delivery and review evidence. Reassess any value lacking reliable support.
 
 ### Selection, binding, and reviewer request
 
-Any perspective below `0.90` is a candidate. Run one Review Job at a time. Select the unresolved perspective that matters most; if similar, select the lower-confidence one. The same perspective may be selected again. Do not add weighted scheduling, dependency graphs, parallel Jobs, or mandatory review counts.
+Any perspective below 0.90 is eligible. Run one perspective review at a time, prioritizing the most consequential unresolved perspective and using lower confidence to break ties. Repeat a perspective when evidence warrants it.
 
-`chatgpt-shot submit` may take up to 3 minutes; use a longer execution timeout. On success stdout is the Job ID. Record before the Job ID:
+Give `chatgpt-shot submit` enough time to return a Job ID. Poll `chatgpt-shot jobs <job-id>` every 30 seconds. An attempt succeeds only when a usable completed result is retrieved within 20 minutes of receiving its Job ID. If submission fails or an attempt ends without a usable result, retry once for the same PR/HEAD/perspective. Do not record attempts or retries separately in Workpad.
 
-```text
-review target: <PR URL>
-review head: <exact HEAD SHA>
-review plan: <repository-relative Accepted Plan path>
-review perspective: <Behavior | Maintainability | Security | UI/UX>
-Job ID: <UUID>
-```
+Provide the Accepted Plan's repository-relative path so the reviewer reads it from the exact reviewed HEAD. Supply concise changed-result context and exact PR/HEAD. The Accepted Plan and repository contracts take precedence over implementation and test evidence. Label reviewer-reported confidence as `Evidence confidence`; the worker owns Review Confidence.
 
-Poll the same Job every 30 seconds while `pending` or `in_progress`; use a completed Job's `result`. Do not duplicate a running request. A failed submission/Job or malformed/unusable evidence changes no confidence and uses the human-required blocker handoff.
-
-The reviewer supplies evidence for one perspective and never adjusts orchestration confidence. Bind every request to exact PR/HEAD and identify the canonical Accepted Plan by its repository-relative path. The reviewer must read that Plan from the exact review HEAD rather than receiving a copied Plan body. Include concise changed-result context, and treat the Accepted Plan/repository contracts as authority over implementation, tests, mocks, fixtures, harnesses, or design rationale. If a finding reports confidence, call it `Evidence confidence`.
-
-Use:
+Use this request:
 
 ```text
 Review PR <PR_URL> at HEAD <HEAD_SHA> from the <PERSPECTIVE> perspective.
 
 Accepted Plan: <REPOSITORY_RELATIVE_PLAN_PATH>
 
-Inspect the exact HEAD and diff. Read the Accepted Plan above from that exact
-HEAD, plus only surrounding repository or rendered evidence needed for this
+Inspect the exact HEAD and diff. Read the Accepted Plan from that exact HEAD,
+plus only surrounding repository or rendered evidence needed for this
 perspective. Treat the Accepted Plan and existing repository contracts as
 authority. Existing implementation, tests, mocks, fixtures, harnesses, and
 design rationale are evidence, not stronger authority.
 
-Assume other perspectives are reviewed separately. Do not broaden this into a
-general multi-perspective review.
+Use any available tools useful for this read-only review, provided they do not
+require user approval. Do not ask the user for approval; if a tool is
+approval-gated or unavailable, continue with other accessible evidence and
+report any material limitation.
+
+Focus exclusively on the specified perspective; other perspectives have their
+own reviews.
 
 <PERSPECTIVE_LENS>
 
-Report only a specific current problem supported by concrete evidence and worth
-changing in this delivery. Do not report alternative design, general best
-practice, style preference, speculative future problem, or a stronger
-requirement than the current contract establishes.
-
-For UI/UX aesthetic quality only, a finding may instead identify a concrete
-rendered improvement worth considering without establishing that the current
-result is defective. Do not enumerate every plausible polish idea or unsupported
-personal preference.
+Report concrete, evidence-supported current problems worth changing in this
+delivery. For Design, report meaningful aesthetic or experiential improvements
+supported by the observed result and sound design judgment. Judge importance
+and severity independently from the artifact, intent, and evidence.
 
 # Verdict
 PASS | FINDINGS
@@ -317,91 +307,62 @@ Perspective lens:
 
 ```text
 Behavior
-Review execution, failure, and outcome semantics. Restrict findings to reachable
-behavior. Do not require direct execution of every external effect when current
-implementation/evidence is sufficient to judge result meaning.
+Review execution, failure, and outcome semantics. Ground findings in reachable
+behavior and the available evidence of observable results.
 
 Maintainability
-Review responsibility, diagnostic, and verification structure. Report only a
-specific demonstrated current cost or risk; not file length, ordinary clean-code
-preference, reuse, future extensibility, or unsupported refactoring preference.
+Review responsibility, diagnostic, and verification structure. Report specific
+demonstrated costs or risks in the delivered result.
 
 Security
 Review trust, authorization, capability, input/execution boundaries, and data
-protection. Require a reachable flow with concrete unintended consequence; do
-not report generic hardening advice.
+protection. Ground findings in reachable flows and concrete unintended effects.
 
-UI/UX
-Review hierarchy, comprehension, interaction, and aesthetic quality using
-rendered/interactive evidence when judging visual result. Design rationale or
-source may explain intent but cannot prove success. Treat aesthetic judgment as
-a first-class part of the review rather than reducing it to checklist compliance
-or generic UI heuristics. Actively surface concrete opportunities for meaningful
-improvement in composition, proportion, visual rhythm, typography, spacing,
-balance, density, visual weight, or overall coherence when supported by rendered
-evidence, even when the current result is not defective. Do not enumerate every
-plausible polish idea. `Mere taste` means unsupported personal preference, not
-reasoned visual judgment. Express uncertainty through Evidence confidence rather
-than suppressing a useful aesthetic finding.
+Design
+Evaluate how well the delivered artifact's form, organization, and experience
+serve its intended purpose. Determine the most relevant design qualities from
+the artifact itself. Judge meaningful problems and improvements through direct
+evidence and design judgment, using the same material/minor standards as other
+perspectives. Examine the rendered or experienced result where applicable.
 ```
 
-### Disposition, resolution, and confidence update
+### Finding disposition and confidence update
 
-Validate every finding independently. Accept material/minor findings only when a concrete current problem is supported by the Accepted Plan, repository contract, or direct product evidence and is worth changing in this delivery. Do not accept extra hardening, unsupported style preference, possible reuse, future extensibility, or arbitrary "could be better" suggestions merely because they are easy.
-
-For UI/UX aesthetic quality, direct rendered evidence may instead support `accepted aesthetic` when the worker judges that a concrete suggestion is reasonably likely to produce a meaningful net visual improvement. The reviewer surfaces the possibility; the worker owns whether it is worth adopting.
-
-Classify:
+Validate every finding independently against the Accepted Plan, applicable repository contract, and actual evidence. For Behavior, Maintainability, and Security require a demonstrated present issue under their existing lenses. For Design, observed, reasoned design improvements qualify when worth implementing. Classify accepted findings by significance, not by perspective. Worker judgment determines material versus minor even for aesthetics:
 
 ```text
-accepted material  — valid actionable new information that materially changes
-                     uncertainty for the reviewed perspective
-accepted minor     — valid actionable current problem worth fixing, but without
-                     material uncertainty
-accepted aesthetic — UI/UX aesthetic evidence supports a meaningful likely
-                     improvement without establishing a required current fix
-rejected           — not established as useful evidence worth acting on here
+accepted material — supported, actionable issue or improvement with material
+                    significance for this delivery/perspective
+accepted minor    — supported, actionable bounded issue or improvement worth
+                    resolving in this delivery, without material significance
+rejected          — not supported, outside accepted scope, too trivial, merely
+                    speculative, or not worth implementing in this delivery
 ```
 
-`minor` is not a bucket for optional improvements. `accepted aesthetic` is limited to UI/UX aesthetic quality; it records a worthwhile visual-improvement judgment rather than a defect classification and does not by itself require a fix.
+The worker independently disposes each reviewer finding using concrete evidence and value within this delivery. Accept a Design improvement when its expected benefit justifies resolving it now, whether or not a functional defect exists.
 
-One Job produces one strongest outcome:
+For each Review Job, apply its strongest outcome:
 
 ```text
 any accepted material → material -0.10
 else any accepted minor → minor-only +0.05
-else any accepted aesthetic → aesthetic-only +0.10
 else findings all rejected → rejected-only 0
 else no findings + usable review → clean +0.30
 ```
 
-Do not sum findings.
+Resolve every accepted material/minor finding before another selection or completion, requiring both a fix and relevant verification. Use the minimum sufficient verification boundary, broader integration/E2E only when necessary for the changed result and contract. A failed verification leaves the finding unresolved. A fix, verification, or HEAD change alone does not change confidence.
 
-Resolve every accepted material/minor finding before the next selection or completion:
-
-```text
-fix applied
-AND
-relevant verification passed
-```
-
-Accepted aesthetic findings do not require resolution. The worker may apply one when the expected improvement justifies the change; otherwise record the disposition and continue.
-
-Use the minimum sufficient verification boundary; broader integration/E2E is required only when the changed behavior or repository contract needs it. Fix and verification do not themselves change confidence. Failed verification means unresolved finding.
-
-Every Job remains bound to the exact PR/HEAD it reviewed. HEAD change itself changes no confidence and does not invalidate all review. After a fix changes HEAD, rerun relevant verification and continue; later Jobs bind to current HEAD.
+A Job is bound to its exact reviewed PR/HEAD. Verify accepted fixes and bind later Jobs to the current HEAD; reassess earlier findings when changed evidence materially affects them.
 
 ### Cross-perspective impact
 
-After resolving an accepted material finding, lower each directly affected secondary perspective by `0.05` only when that finding's concrete fact, root cause, disposition, or resolution materially reopens that perspective's core question. Same code/component, general relatedness, or HEAD change is insufficient. Apply at most once per secondary perspective for that material finding lifecycle.
+After resolving an accepted material finding, lower a secondary perspective by 0.05 only when that finding's concrete fact, cause, disposition, or resolution *materially reopens* the secondary perspective's core question. Mere overlap in code or an ordinary HEAD change does not suffice. Apply at most once per secondary perspective for that finding lifecycle. A confidence change alone never causes a second confidence change; a later independent finding may supply genuinely new evidence.
 
-A confidence decrease is not itself evidence for another decrease. However, a later independent review may produce new material evidence whose own disposition/resolution directly opens another perspective; that is a new finding lifecycle and may apply its own cross-impact.
+### Completion, blockers, and new passes
 
-### Completion, blockers, and new review passes
+Record each completed review once in Workpad with its result, disposition, verification, updated Confidence, and relevant PR/HEAD/Job ID. If both attempts fail, leave confidence unchanged, record one blocker with the failure and required action, and use Human Review.
 
-After each meaningful review milestone, record target/HEAD/perspective/Job, result, disposition, accepted fix/verification, cross-impact, and resulting Review Confidence snapshot. Do not copy the full review transcript into the Repository Plan or build a score-event ledger.
-
-Review completes only when:
+Review is complete only when:
 
 ```text
 all perspective confidence >= 0.90
@@ -411,15 +372,13 @@ AND
 all accepted minor findings are resolved
 ```
 
-Do not require every perspective to run, PASS from every perspective, a fixed reviewer count, identical reviewed HEAD across perspectives, a fixed number of clean reviews, or full rerun after every HEAD change.
+Continue an interrupted review pass using available evidence and confidence snapshots, including after `Blocked By`.
 
-A blocker that interrupts an unfinished review pass preserves the most recent valid Review Confidence; resuming the same delivery continues that pass. The same applies to `Blocked By` continuation.
-
-Once review has completed and the delivery entered Human Review with `reason: review`, any later human-directed return to implementation through `In Progress` or `Rework` starts a new review pass. After consuming Review Input, applying the human feedback/intent, and completing required implementation/verification, classify all four initial confidence values again. `In Progress` preserves workspace/approach; `Rework` additionally uses the reset protocol. Neither rule changes the requirement for new initial classification after completed review.
+Once a finished delivery review entered `Human Review` with `reason: review`, a later human-directed return to implementation (`In Progress` or `Rework`) starts a new review pass. Read comments in the ordinary continuous flow; apply relevant feedback and complete implementation/verification, then reclassify all four initial confidence values. `In Progress` retains the workspace; `Rework` additionally follows the guarded reset.
 
 ## Review and publish a follow-up Plan
 
-When work reveals a follow-up task, write a complete Candidate Plan using `docs/PLAN.md`. Review it through the same `chatgpt-shot` submission/polling/failure mechanics, but Candidate Plan review is not a delivery perspective review and never changes Review Confidence.
+When work reveals a follow-up task, write a complete Candidate Plan using `docs/PLAN.md`. Review it through the existing `chatgpt-shot` submission/polling/failure flow, leaving delivery Review Confidence unchanged.
 
 Use:
 
@@ -451,10 +410,10 @@ Candidate Plan:
 <complete Candidate Plan>
 ```
 
-Incorporate only valid findings. Do not change the Candidate Plan for optional preference or polish. If a valid finding materially changes it, review the revised complete Plan again. Publish only when no valid finding remains.
+Incorporate supported material findings into the Candidate Plan, re-reviewing the complete revised Plan after material changes. Publish when all valid findings are resolved.
 
-Record Candidate Plan identity, Job ID/result, and dispositions in ordinary Workpad context. Do not label a Plan review as PR/HEAD-bound when none was submitted.
+Record Candidate Plan identity, review outcome, disposition, evidence, and published identity in Workpad.
 
-Publish with `local_task_publish_plan`, retain canonical `identifier`/`page_id`, then before `local_task_add_blocked_by` record review disposition, published identity, and that current work is yielding to that blocker. A successful relation update is the execution's last normal lifecycle mutation. If publication succeeds but relation update fails, record the incomplete relation and use blocker handoff.
+Publish through `local_task_publish_plan`, retain canonical `identifier`/`page_id`, and *before* calling `local_task_add_blocked_by`, record publication and why this task will yield to that blocker. A successful blocker relation update is the last normal lifecycle mutation for this execution. If publication succeeds but relation update fails, record the incomplete relation and use Human Review blocker handoff. After resuming, inspect existing task identities and relations; do not publish redundant follow-up tasks based on an incomplete Workpad narrative.
 
-A blocker resume preserves an unfinished delivery review pass. A human-directed implementation continuation after completed `reason: review` Human Review starts a new pass. `Rework` remains the same task's non-terminal rework; before the next PR handoff apply final Plan comparison and move the Plan back to `completed/`.
+A blocked continuation preserves an unfinished delivery review pass. Rework remains a nonterminal continuation of this task and uses final Plan comparison and the move back to `completed/` before the next delivery handoff.
