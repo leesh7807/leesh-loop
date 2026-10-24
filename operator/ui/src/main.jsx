@@ -1052,7 +1052,7 @@ function ManagerApp() {
             {selected.detail && <p className="inline-message failure manager-lifecycle-detail" role="status">{selected.detail}</p>}
             <ManagerFeedback feedback={feedback} target="lifecycle" />
             <InstanceOperationFeedback feedback={selectedScopedLifecycleFeedback} target="lifecycle" />
-            <InstanceOperationFeedback feedback={selectedScopedWorkflowFeedback} target="workflow" />
+            {!workflowOpen && <InstanceOperationFeedback feedback={selectedScopedWorkflowFeedback} target="workflow" />}
           </div>
         )}
         {busyOperationMessage && <p className="inline-message manager-operation-pending" id="manager-operation-pending" role="status">{busyOperationMessage}</p>}
@@ -1137,6 +1137,11 @@ function ManagerApp() {
                     <button type="button" className="manager-action secondary" disabled={Boolean(busy) || !workflow.changed || !workflowEligibility?.canApply} aria-describedby={[workflow.changed && !workflowEligibility?.canApply ? 'workflow-update-disabled-reason' : '', busy ? 'manager-operation-pending' : ''].filter(Boolean).join(' ') || undefined} onClick={() => void updateWorkflow()}>{busyOperation?.label === 'Updating Workflow' && busyOperation.instanceId === selectedId ? 'Updating…' : 'Apply Workflow Update'}</button>
                     {workflow.changed && !workflowEligibility?.canApply && <p className="manager-help" id="workflow-update-disabled-reason">{workflowEligibility?.controlHint || 'This Loop must be stopped before applying the update.'}</p>}
                     <button type="button" className="manager-action secondary" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void refreshWorkflowComparison()}>{busyOperation?.label === 'Refreshing Workflow' && busyOperation.instanceId === selectedId ? 'Refreshing…' : 'Refresh comparison'}</button>
+                    {selectedScopedWorkflowFeedback && (
+                      <div className="workflow-update-feedback">
+                        <InstanceOperationFeedback feedback={selectedScopedWorkflowFeedback} target="workflow" />
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
