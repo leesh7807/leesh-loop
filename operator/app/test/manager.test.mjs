@@ -12,7 +12,7 @@ import test from 'node:test';
 import { createManagerController, ensureManagerService, managerApiToken, managerBrowserBootstrapHtml, managerRequest } from '../manager-service.mjs';
 import { createOperatorUiServer } from '../operator-ui-server.mjs';
 import { hashDistribution } from '../installation-metadata.mjs';
-import { allocatePort, loopInstanceStatus } from '../manager-lifecycle.mjs';
+import { allocatePort, loopInstanceStatus, stopLoopInstance } from '../manager-lifecycle.mjs';
 import { createLoopInstance, listLoopInstances, managerPaths } from '../manager-storage.mjs';
 
 const execFile = promisify(execute);
@@ -51,7 +51,7 @@ async function fixture(t) {
   return { directory, environment, homeDirectory: directory };
 }
 
-async function startManagerFixture(t, paths, { runtimeId } = {}) {
+async function startManagerFixture(t, paths, { runtimeId, lifecycle } = {}) {
   const reservation = createHttpServer();
   await new Promise((resolveListen, rejectListen) => {
     reservation.once('error', rejectListen);
@@ -71,7 +71,8 @@ async function startManagerFixture(t, paths, { runtimeId } = {}) {
     token,
     port,
     environment: paths.environment,
-    homeDirectory: paths.homeDirectory
+    homeDirectory: paths.homeDirectory,
+    lifecycle
   });
   const server = await createOperatorUiServer({ root, managerController, managerToken: token, managerPort: port });
   await new Promise((resolveListen, rejectListen) => {
@@ -82,7 +83,7 @@ async function startManagerFixture(t, paths, { runtimeId } = {}) {
     server.close(resolveClose);
     server.closeAllConnections();
   }));
-  return { port, token, masterToken, url: `http://127.0.0.1:${port}` };
+  return { port, token, masterToken, url: `http://127.0.0.1:${port}`, controller: managerController };
 }
 
 async function installTestRuntime(paths, directoryName = 'fixture-runtime') {
@@ -238,6 +239,38 @@ test('Manager browser bootstrap keeps its credential in the private local bootst
   assert.match(html, /no-referrer/);
 });
 
+test('Manager serializes start and stop requests for the same instance', async t => {
+  const paths = await fixture(t);
+  let resolveStart;
+  let signalStart;
+  const startEntered = new Promise(resolve => { signalStart = resolve; });
+  let stopStarted = false;
+  const manager = await startManagerFixture(t, paths, {
+    lifecycle: {
+      start: id => {
+        signalStart();
+        return new Promise(resolve => { resolveStart = () => resolve({ id, status: 'Starting' }); });
+      },
+      stop: async id => { stopStarted = true; return { id, status: 'Stopped', stopped: true }; }
+    }
+  });
+  const instanceId = '123e4567-e89b-42d3-a456-426614174000';
+
+  const startRequest = api(manager, `/api/v1/instances/${instanceId}/start`, { method: 'POST' });
+  await startEntered;
+  const stopRequest = api(manager, `/api/v1/instances/${instanceId}/stop`, { method: 'POST' });
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(stopStarted, false);
+
+  resolveStart();
+  const [started, stopped] = await Promise.all([startRequest, stopRequest]);
+  assert.equal(started.response.status, 202);
+  assert.equal(started.body.instance.status, 'Starting');
+  assert.equal(stopped.response.status, 200);
+  assert.equal(stopped.body.instance.stopped, true);
+  assert.equal(stopStarted, true);
+});
+
 test('Manager CLI recognizes a previous Runtime through its legacy credential so update can restart it', async t => {
   const paths = await fixture(t);
   const runtime = await installTestRuntime(paths, 'cli-fixture-runtime');
@@ -305,6 +338,37 @@ test('port allocation skips externally occupied ports and reports an exhausted r
   await new Promise(resolveClose => externalPort.close(resolveClose));
 });
 
+test('port allocation releases ports held only by stale execution records', async t => {
+  const paths = await fixture(t);
+  const firstRoot = await makeRepository(join(paths.directory, 'repositories'), 'stale-port-owner');
+  const secondRoot = await makeRepository(join(paths.directory, 'repositories'), 'next-port-user');
+  const first = await createLoopInstance(firstRoot, { sourceRoot, ...paths });
+  await createLoopInstance(secondRoot, { sourceRoot, ...paths });
+  const portProbe = createNetServer();
+  await new Promise((resolveListen, rejectListen) => {
+    portProbe.once('error', rejectListen);
+    portProbe.listen(0, '127.0.0.1', resolveListen);
+  });
+  const port = portProbe.address().port;
+  await new Promise(resolveClose => portProbe.close(resolveClose));
+
+  const managerState = managerPaths(paths);
+  const executionDirectory = join(managerState.loopExecutionRoot, first.id);
+  await mkdir(executionDirectory, { recursive: true });
+  await writeFile(join(executionDirectory, 'execution.json'), `${JSON.stringify({
+    schema_version: 1,
+    id: first.id,
+    status: 'Running',
+    port,
+    runtime_path: join(paths.directory, 'missing-runtime'),
+    runtime_version: 'stale-runtime'
+  })}\n`);
+
+  assert.equal(await allocatePort(managerState, { minPort: port, maxPort: port, ...paths }), port);
+  const reconciled = JSON.parse(await readFile(join(executionDirectory, 'execution.json'), 'utf8'));
+  assert.equal(reconciled.status, 'Failed');
+});
+
 test('Running requires a matching process identity, ownership, dispatch acknowledgement, and runtime API', async t => {
   const paths = await fixture(t);
   const repository = await makeRepository(join(paths.directory, 'repositories'), 'running-project');
@@ -370,6 +434,30 @@ test('a stale Starting record without launcher identity remains Unconfirmed', as
   const observed = await loopInstanceStatus(instance.id, paths);
   assert.equal(observed.status, 'Unconfirmed');
   assert.match(observed.detail, /identity was not recorded/);
+});
+
+test('stop does not report success while a recorded launcher is still starting', async t => {
+  const paths = await fixture(t);
+  const repository = await makeRepository(join(paths.directory, 'repositories'), 'starting-project');
+  const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
+  const managerState = managerPaths(paths);
+  const executionDirectory = join(managerState.loopExecutionRoot, instance.id);
+  await mkdir(executionDirectory, { recursive: true });
+  const processStat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+  const startTicks = processStat.slice(processStat.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
+  const executionPath = join(executionDirectory, 'execution.json');
+  await writeFile(executionPath, `${JSON.stringify({
+    schema_version: 1,
+    id: instance.id,
+    status: 'Starting',
+    launcher_pid: process.pid,
+    launcher_start_ticks: startTicks,
+    started_at: new Date().toISOString(),
+    port: 4199
+  })}\n`);
+
+  await assert.rejects(stopLoopInstance(instance.id, { ...paths, timeoutMs: 20 }), /startup remains Starting/);
+  assert.equal(JSON.parse(await readFile(executionPath, 'utf8')).status, 'Starting');
 });
 
 test('CLI init and list use the same central instance registry as the Manager UI', async t => {
