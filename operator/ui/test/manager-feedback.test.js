@@ -33,3 +33,24 @@ test('feedback for Runtime operations survives a selected Loop change and stays 
   assert.equal(changed.operationErrors.runtime, 'Runtime installation failed.');
   assert.equal(changed.operationErrors.workflow, undefined);
 });
+
+test('a successful Runtime or Workflow read clears only its own read error', () => {
+  let feedback = managerFeedbackReducer(initialManagerFeedback, {
+    type: 'read-error', target: 'runtime', message: 'Could not load the Runtime version.'
+  });
+  feedback = managerFeedbackReducer(feedback, {
+    type: 'read-error', target: 'workflow', message: 'Could not compare the Workflow.'
+  });
+  feedback = managerFeedbackReducer(feedback, {
+    type: 'operation-error', target: 'workflow', message: 'Workflow update failed.'
+  });
+
+  feedback = managerFeedbackReducer(feedback, { type: 'read-cleared', target: 'runtime' });
+  assert.equal(feedback.readErrors.runtime, undefined);
+  assert.equal(feedback.readErrors.workflow, 'Could not compare the Workflow.');
+  assert.equal(feedback.operationErrors.workflow, 'Workflow update failed.');
+
+  feedback = managerFeedbackReducer(feedback, { type: 'read-cleared', target: 'workflow' });
+  assert.equal(feedback.readErrors.workflow, undefined);
+  assert.equal(feedback.operationErrors.workflow, 'Workflow update failed.');
+});

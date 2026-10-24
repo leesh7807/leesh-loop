@@ -778,7 +778,10 @@ function ManagerApp() {
   }, [selectInstance]);
 
   const refreshRuntime = useCallback(async () => {
-    try { setRuntime(await readManagerJson(await apiFetch('/api/v1/runtime'))); }
+    try {
+      setRuntime(await readManagerJson(await apiFetch('/api/v1/runtime')));
+      dispatchFeedback({ type: 'read-cleared', target: 'runtime' });
+    }
     catch (requestError) { dispatchFeedback({ type: 'read-error', target: 'runtime', message: requestError.message || 'Could not load the Runtime version.' }); }
   }, []);
 
@@ -803,7 +806,11 @@ function ManagerApp() {
     let active = true;
     apiFetch(`/api/v1/instances/${encodeURIComponent(selectedId)}/workflow`)
       .then(readManagerJson)
-      .then(body => { if (active) setWorkflow(body); })
+      .then(body => {
+        if (!active) return;
+        setWorkflow(body);
+        dispatchFeedback({ type: 'read-cleared', target: 'workflow' });
+      })
       .catch(requestError => { if (active) dispatchFeedback({ type: 'read-error', target: 'workflow', message: requestError.message || 'Could not compare the Workflow.' }); });
     return () => { active = false; };
   }, [selectedId, workflowOpen]);
