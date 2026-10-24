@@ -1,0 +1,196 @@
+import { execFileSync, spawnSync } from 'node:child_process';
+import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { managerPaths, ensurePrivateDirectory, readJsonFile, writeAtomicJson } from './manager-storage.mjs';
+import { listRuntimeSnapshotFiles, materializeRuntimeSnapshot } from './runtime-manifest.mjs';
+import { hashDistribution, readDistributionFiles } from './installation-metadata.mjs';
+import { prepareNpmDependencies } from './dependency-preparation.mjs';
+
+const thisDirectory = new URL('.', import.meta.url);
+const defaultSourceRoot = resolve(fileURLToPath(new URL('../..', thisDirectory)));
+const digestPattern = /^[a-f0-9]{64}$/;
+
+async function sourceIdentity(sourceRoot) {
+  let root;
+  try { root = await realpath(sourceRoot); }
+  catch { throw new Error(`cannot access Runtime source: ${sourceRoot}`); }
+  const details = await lstat(root);
+  if (details.isSymbolicLink() || !details.isDirectory()) throw new Error('Runtime source must be a real directory');
+  let manifest;
+  try { manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')); }
+  catch { throw new Error('Runtime source package.json is missing or invalid'); }
+  if (typeof manifest.version !== 'string' || !manifest.version) throw new Error('Runtime source has no version');
+  const files = listRuntimeSnapshotFiles(root);
+  if (!files.includes('docs/WORKFLOW_TEMPLATE.md') || !files.includes('operator/app/manager.mjs')) {
+    throw new Error('Runtime snapshot is missing central Manager files');
+  }
+  const entries = await readDistributionFiles(root, files);
+  return { root, version: manifest.version, files, entries, id: hashDistribution(manifest.version, entries) };
+}
+
+function runRuntimeBuild(command, args, cwd, environment, label) {
+  const result = spawnSync(command, args, { cwd, env: environment, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  if (result.error) throw new Error(`${label} failed: ${result.error.message}`);
+  if (result.status !== 0) {
+    const detail = `${result.stdout || ''}\n${result.stderr || ''}`.trim().slice(-4000);
+    throw new Error(`${label} failed${result.signal ? ` (${result.signal})` : ` (exit ${result.status ?? 1})`}${detail ? `: ${detail}` : ''}`);
+  }
+}
+
+async function buildRuntimeDependencies(runtimeRoot, environment = process.env, homeDirectory = homedir()) {
+  prepareNpmDependencies({ loopRoot: runtimeRoot, component: 'operator-ui', environment });
+  prepareNpmDependencies({ loopRoot: runtimeRoot, component: 'local-task-store', environment });
+  const cacheHome = environment.XDG_CACHE_HOME || join(homeDirectory, '.cache');
+  const dataHome = environment.XDG_DATA_HOME || join(homeDirectory, '.local/share');
+  if (!isAbsolute(cacheHome) || !isAbsolute(dataHome)) throw new Error('XDG cache and data directories must be absolute paths');
+  const hexHome = join(cacheHome, 'leesh-loop/hex');
+  const mixHome = join(dataHome, 'leesh-loop/mix');
+  await Promise.all([ensurePrivateDirectory(hexHome), ensurePrivateDirectory(mixHome)]);
+  const symphonyDirectory = join(runtimeRoot, 'operator/symphony');
+  const mixCommand = (...args) => ['exec', '--', 'env', `HEX_HOME=${hexHome}`, `MIX_HOME=${mixHome}`, 'MIX_ENV=dev', 'mix', ...args];
+  runRuntimeBuild('mise', mixCommand('deps.get'), symphonyDirectory, environment, 'Symphony dependency installation');
+  runRuntimeBuild('mise', mixCommand('compile'), symphonyDirectory, environment, 'Symphony Runtime compilation');
+  runRuntimeBuild('npm', ['run', 'build'], join(runtimeRoot, 'operator/ui'), environment, 'Operator UI build');
+}
+
+async function validateInstalledDistribution(path, expectedId) {
+  const details = await lstat(path);
+  if (details.isSymbolicLink() || !details.isDirectory()) throw new Error(`Runtime distribution path is unsafe: ${path}`);
+  const distribution = await readJsonFile(join(path, '.distribution.json'), 'Runtime distribution metadata');
+  if (distribution?.schema_version !== 1 || distribution.id !== expectedId || !digestPattern.test(distribution.id)) {
+    throw new Error(`Runtime distribution metadata is invalid: ${path}`);
+  }
+  if (typeof distribution.version !== 'string' || !Array.isArray(distribution.files) || distribution.files.length === 0 || distribution.path !== path) {
+    throw new Error(`Runtime distribution metadata does not match its path: ${path}`);
+  }
+  const uniqueFiles = new Set();
+  for (const file of distribution.files) {
+    if (typeof file !== 'string' || !file || file.includes('\\') || file.startsWith('/') || file.includes('\0') || file.split('/').some(part => !part || part === '.' || part === '..') || uniqueFiles.has(file)) {
+      throw new Error(`Runtime distribution metadata has an unsafe file list: ${path}`);
+    }
+    uniqueFiles.add(file);
+  }
+  const files = [...distribution.files].sort();
+  if (JSON.stringify(files) !== JSON.stringify(distribution.files)) throw new Error(`Runtime distribution file list is not canonical: ${path}`);
+  const entries = await readDistributionFiles(path, files);
+  if (hashDistribution(distribution.version, entries) !== expectedId) throw new Error(`Runtime distribution contents do not match their immutable identity: ${path}`);
+  return distribution;
+}
+
+export async function activeRuntime(options = {}) {
+  const paths = managerPaths(options);
+  const pointer = await readJsonFile(paths.activeRuntime, 'active Runtime pointer');
+  if (!pointer) return null;
+  if (pointer.schema_version !== 1 || typeof pointer.id !== 'string' || !digestPattern.test(pointer.id)) throw new Error('active Runtime pointer is invalid');
+  const runtimePath = join(paths.runtimeRoot, pointer.id);
+  const details = await validateInstalledDistribution(runtimePath, pointer.id);
+  return { id: pointer.id, version: details.version, path: runtimePath, installed_at: details.installed_at };
+}
+
+export async function recordRuntimeSource(sourceRoot, options = {}) {
+  const paths = managerPaths(options);
+  const source = await sourceIdentity(sourceRoot);
+  await ensurePrivateDirectory(paths.configRoot);
+  await writeAtomicJson(paths.runtimeSource, {
+    schema_version: 1,
+    path: source.root,
+    id: source.id,
+    version: source.version,
+    recorded_at: new Date().toISOString()
+  });
+  return { path: source.root, id: source.id, version: source.version };
+}
+
+export async function currentRuntimeSource(fallbackSource = defaultSourceRoot, options = {}) {
+  const paths = managerPaths(options);
+  const recorded = await readJsonFile(paths.runtimeSource, 'Runtime source record');
+  if (!recorded) return fallbackSource;
+  if (recorded.schema_version !== 1 || typeof recorded.path !== 'string' || !isAbsolute(recorded.path) || !digestPattern.test(recorded.id)) {
+    throw new Error('Runtime source record is invalid');
+  }
+  let sourcePath;
+  try { sourcePath = await realpath(recorded.path); }
+  catch { throw new Error(`recorded Runtime source is unavailable: ${recorded.path}`); }
+  if (sourcePath !== recorded.path) throw new Error('recorded Runtime source path is not canonical');
+  return sourcePath;
+}
+
+export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot, options = {}) {
+  const paths = managerPaths(options);
+  const source = await sourceIdentity(sourceRoot);
+  await Promise.all([ensurePrivateDirectory(paths.runtimeRoot), ensurePrivateDirectory(paths.configRoot)]);
+  const destination = join(paths.runtimeRoot, source.id);
+  let installed = false;
+  try { await lstat(destination); installed = true; }
+  catch (error) { if (error?.code !== 'ENOENT') throw error; }
+  if (installed) {
+    await validateInstalledDistribution(destination, source.id);
+  } else {
+    const stage = join(paths.runtimeRoot, `.stage-${process.pid}-${randomUUID()}`);
+    await mkdir(stage, { mode: 0o700 });
+    try {
+      const materialized = await materializeRuntimeSnapshot(source.root, stage);
+      if (materialized.length !== source.files.length || materialized.some((file, index) => file !== source.files[index])) {
+        throw new Error('Runtime source changed while its versioned snapshot was being installed');
+      }
+      const stagedEntries = await readDistributionFiles(stage, source.files);
+      if (hashDistribution(source.version, stagedEntries) !== source.id) throw new Error('Runtime snapshot did not match its immutable distribution identity');
+      await buildRuntimeDependencies(stage, options.environment ?? process.env, options.homeDirectory ?? homedir());
+      const metadata = { schema_version: 1, id: source.id, version: source.version, path: destination, source_root: source.root, files: source.files, installed_at: new Date().toISOString() };
+      await writeFile(join(stage, '.distribution.json'), `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+      try {
+        await rename(stage, destination);
+      } catch (error) {
+        // CLI startup and another Manager request can race to install the same immutable snapshot.
+        // Reuse the winner only after validating its complete identity and metadata.
+        if (!['EEXIST', 'ENOTEMPTY'].includes(error?.code)) throw error;
+        await validateInstalledDistribution(destination, source.id);
+        await rm(stage, { recursive: true, force: true });
+      }
+    } catch (error) {
+      await rm(stage, { recursive: true, force: true }).catch(() => {});
+      throw error;
+    }
+  }
+  const existing = await activeRuntime(options);
+  await writeAtomicJson(paths.activeRuntime, { schema_version: 1, id: source.id, activated_at: new Date().toISOString() });
+  return { ...(await activeRuntime(options)), changed: existing?.id !== source.id };
+}
+
+export async function resolveRuntimePath(runtimePath, options = {}) {
+  const paths = managerPaths(options);
+  const active = await activeRuntime(options);
+  const candidate = runtimePath ? resolve(runtimePath) : active?.path;
+  if (!candidate || !active) throw new Error('No central Runtime is installed. Run leesh-loop update or initialize an instance first.');
+  const canonical = await realpath(candidate);
+  const relativePath = relative(paths.runtimeRoot, canonical);
+  if (!relativePath || relativePath.startsWith(`..${sep}`) || relativePath === '..' || relativePath.startsWith(sep)) throw new Error('Runtime path is outside the managed distribution directory');
+  const id = basename(canonical);
+  if (!digestPattern.test(id)) throw new Error('Runtime directory identity is invalid');
+  const metadata = await validateInstalledDistribution(canonical, id);
+  return { id, version: metadata.version, path: canonical };
+}
+
+export async function listRuntimeDistributions(options = {}) {
+  const paths = managerPaths(options);
+  await ensurePrivateDirectory(paths.runtimeRoot);
+  const entries = await import('node:fs/promises').then(module => module.readdir(paths.runtimeRoot, { withFileTypes: true }));
+  const runtimes = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !digestPattern.test(entry.name)) continue;
+    const path = join(paths.runtimeRoot, entry.name);
+    try {
+      const record = await validateInstalledDistribution(path, entry.name);
+      runtimes.push({ id: record.id, version: record.version, installed_at: record.installed_at });
+    } catch { /* Invalid version folders are preserved for diagnosis and never activated. */ }
+  }
+  const active = await activeRuntime(options);
+  return runtimes.sort((a, b) => a.installed_at.localeCompare(b.installed_at)).map(runtime => ({ ...runtime, active: runtime.id === active?.id }));
+}
+
+export function runtimeSourceRoot() {
+  return process.env.LEESH_LOOP_RUNTIME_SOURCE || defaultSourceRoot;
+}

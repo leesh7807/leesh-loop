@@ -1,42 +1,29 @@
 import assert from 'node:assert/strict';
 import { execFile as execute } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { configureLocalTaskStoreEnvironment, effective, loadConfig, operatorBootstrapArgs, parseStartArguments, startConfiguration } from '../leesh-loop.mjs';
+import { configureLocalTaskStoreEnvironment, effective, executionStateRoot, initializeInstanceTaskStore, loadConfig, parseStartArguments } from '../leesh-loop.mjs';
+import { localTaskStorePath } from '../local-task-store-runtime.mjs';
 
 const execFile = promisify(execute);
 const root = join(import.meta.dirname, '../../..');
 
-test('start:fast uses the same start command and project config with the existing readiness skip', async () => {
+test('default npm start opens the central Manager and the CLI exposes instance operations', async () => {
   const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-  const normalInvocation = manifest.scripts.start.split(' ');
-  const fastInvocation = manifest.scripts['start:fast'].split(' ');
+  assert.equal(manifest.scripts.start, 'node bin/leesh-loop.mjs open');
+  assert.equal(manifest.scripts['start:fast'], undefined);
+  assert.equal(manifest.scripts.init, 'node bin/leesh-loop.mjs init');
+  assert.equal(manifest.scripts.list, 'node bin/leesh-loop.mjs list');
+  assert.equal(manifest.scripts.update, 'node bin/leesh-loop.mjs update');
 
-  assert.deepEqual(normalInvocation.slice(0, 3), fastInvocation.slice(0, 3));
-  assert.equal(normalInvocation[2], 'start');
-  assert.deepEqual(fastInvocation.slice(3), ['project.toml', '--skip-external-readiness']);
+  const { stdout } = await execFile(process.execPath, [join(root, 'bin/leesh-loop.mjs'), '--help'], { cwd: root });
+  assert.match(stdout, /leesh-loop\s+start <id>/);
+  assert.match(stdout, /leesh-loop\s+stop <id>/);
+  assert.doesNotMatch(stdout, /project\.toml|skip-external-readiness/);
   assert.equal(parseStartArguments([]).configurationPath, join(root, 'project.toml'));
-
-  const normal = parseStartArguments(normalInvocation.slice(3));
-  const fast = parseStartArguments(fastInvocation.slice(3));
-  assert.equal(normal.configurationPath, fast.configurationPath);
-  assert.equal(normal.skipExternalReadiness, false);
-  assert.equal(fast.skipExternalReadiness, true);
-
-  const projectConfig = { workflow_path: '/tmp/workflow.md', skip_external_readiness: false };
-  const normalConfig = startConfiguration(projectConfig, normal);
-  const fastConfig = startConfiguration(projectConfig, fast);
-  const normalIdentity = effective(normalConfig, 'same-runtime', 4100);
-  const fastIdentity = effective(fastConfig, 'same-runtime', 4100);
-  assert.deepEqual({ ...fastIdentity, skip_external_readiness: normalIdentity.skip_external_readiness }, normalIdentity);
-  const normalBootstrapArgs = operatorBootstrapArgs(normalConfig, '/tmp/symphony', 4100);
-  const fastBootstrapArgs = operatorBootstrapArgs(fastConfig, '/tmp/symphony', 4100);
-  assert.deepEqual(normalBootstrapArgs.slice(1, 2), ['--']);
-  assert.deepEqual(fastBootstrapArgs.slice(1, 3), ['--skip-external-readiness', '--']);
-  assert.deepEqual(fastBootstrapArgs.filter(argument => argument !== '--skip-external-readiness'), normalBootstrapArgs);
 });
 
 test('a Project always uses Local Task Store and removes task database credentials from Symphony', async t => {
@@ -70,16 +57,30 @@ test('a Project always uses Local Task Store and removes task database credentia
   assert.equal(localEnvironment.LEESH_LOOP_RUNTIME_ROOT, root);
 });
 
-test('start rejects malformed fast-start arguments before treating an option as a config path', async () => {
+test('central CLI rejects malformed commands without starting a Loop', async () => {
   await assert.rejects(
-    execFile('npm', ['run', 'start:fast', '--', '/tmp/custom-project.toml', 'unexpected'], { cwd: root }),
+    execFile(process.execPath, [join(root, 'bin/leesh-loop.mjs'), 'unknown-command'], { cwd: root }),
     error => {
       assert.equal(error.code, 2);
-      assert.match(error.stderr, /start accepts at most one project configuration path/);
-      assert.doesNotMatch(error.stderr, /missing or invalid project configuration/);
+      assert.match(error.stderr, /leesh-loop init/);
+      assert.match(error.stderr, /leesh-loop start <id>/);
       return true;
     }
   );
+});
+
+test('Manager execution state stays separate from the instance Task Store', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-state-boundary-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const instanceState = join(directory, 'instance', 'state');
+  const executionState = join(directory, 'xdg-state', 'loops', 'instance-id');
+  const config = { state_directory: instanceState };
+
+  assert.equal(executionStateRoot(config, { LEESH_LOOP_EXECUTION_STATE_DIRECTORY: executionState }), executionState);
+  const databasePath = await initializeInstanceTaskStore(config);
+  assert.equal(databasePath, localTaskStorePath(instanceState));
+  assert.equal((await stat(databasePath)).isFile(), true);
+  await assert.rejects(stat(localTaskStorePath(executionState)), error => error.code === 'ENOENT');
 });
 
 test('invalid TOML Project ports fail before start creates runtime state', async t => {

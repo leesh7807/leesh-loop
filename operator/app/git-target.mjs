@@ -1,14 +1,60 @@
 #!/usr/bin/env node
 
-import { execFile as execute } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { execFile as execute, execFileSync } from 'node:child_process';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import { validateGitBranchName } from '../project-config.mjs';
+import { githubRepositoryTransport } from './github-repository-url.mjs';
 
 const execFile = promisify(execute);
 const gitEnvironment = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+
+const runGitSync = (cwd, args) => execFileSync('git', args, {
+  cwd,
+  encoding: 'utf8',
+  stdio: ['ignore', 'pipe', 'pipe'],
+  env: gitEnvironment
+}).trim();
+
+function gitValueSync(cwd, args) {
+  try { return runGitSync(cwd, args); }
+  catch { return null; }
+}
+
+export async function resolveTargetRepository(cwd) {
+  let workingDirectory;
+  try { workingDirectory = await realpath(cwd); }
+  catch { throw new Error(`cannot access target repository directory: ${cwd}`); }
+  const rootValue = gitValueSync(workingDirectory, ['rev-parse', '--show-toplevel']);
+  if (!rootValue) throw new Error('run leesh-loop init from inside a Git repository');
+  const repositoryRoot = await realpath(rootValue);
+  if (repositoryRoot !== workingDirectory) throw new Error(`run leesh-loop init from the target repository root: ${repositoryRoot}`);
+
+  const branch = gitValueSync(repositoryRoot, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
+  if (!branch) throw new Error('the current Git checkout is detached; check out a branch with a configured remote branch, then run init again');
+  const remote = gitValueSync(repositoryRoot, ['config', '--get', `branch.${branch}.remote`]);
+  const mergeRef = gitValueSync(repositoryRoot, ['config', '--get', `branch.${branch}.merge`]);
+  if (!remote || !mergeRef || remote === '.') throw new Error(`current branch '${branch}' has no configured remote branch; configure its Git upstream, then run init again`);
+  if (!mergeRef.startsWith('refs/heads/') || mergeRef.length === 'refs/heads/'.length) {
+    throw new Error(`current branch '${branch}' does not track a normal remote branch (${mergeRef}); update its Git upstream, then run init again`);
+  }
+  if (!gitValueSync(repositoryRoot, ['rev-parse', '--verify', '--quiet', '@{upstream}'])) {
+    throw new Error(`the remote branch tracked by '${branch}' cannot be read; fetch it or repair the Git upstream, then run init again`);
+  }
+  const remoteUrl = gitValueSync(repositoryRoot, ['remote', 'get-url', remote]);
+  if (!remoteUrl) throw new Error(`the Git remote '${remote}' tracked by '${branch}' has no repository URL; configure it, then run init again`);
+  githubRepositoryTransport(remoteUrl);
+  return {
+    repositoryRoot,
+    repositoryName: basename(repositoryRoot),
+    branch,
+    remoteName: remote,
+    remoteUrl,
+    upstreamBranch: mergeRef.slice('refs/heads/'.length)
+  };
+}
 
 function commandError(error) {
   const detail = String(error?.stderr || error?.stdout || error?.message || error).trim();

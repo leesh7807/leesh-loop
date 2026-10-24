@@ -105,18 +105,44 @@ function requireLocalSameOriginMutation(request) {
   }
 }
 
-export async function createOperatorUiServer({ root, config, stateDirectory, taskStore }) {
+export async function createOperatorUiServer({ root, config, stateDirectory, taskStore, managerController, managerToken, managerPort }) {
   const uiDirectory = resolve(root, 'operator/ui/dist');
-  const store = taskStore || await openLoopTaskStore(stateDirectory);
+  const store = taskStore || (!managerController ? await openLoopTaskStore(stateDirectory) : null);
 
   const server = createServer(async (request, response) => {
     const url = new URL(request.url || '/', 'http://127.0.0.1');
     try {
+      if (managerController) {
+        response.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+        response.setHeader('X-Frame-Options', 'DENY');
+      }
+      if (managerController && request.headers.host !== managerController.expectedHost) {
+        throw Object.assign(new Error('Manager requests must use its loopback address.'), { status: 403 });
+      }
+      if (managerController && url.pathname.startsWith('/api/v1/') && !(await managerController.authorize(request))) {
+        throw Object.assign(new Error('Manager authorization failed.'), { status: 403 });
+      }
       if (MUTATING_METHODS.has(request.method) && url.pathname.startsWith('/api/v1/')) {
         requireLocalSameOriginMutation(request);
       }
+      if (managerController && url.pathname.startsWith('/api/v1/') && await managerController.handleRequest(request, response, url)) return;
+      let requestStore = store;
+      let requestConfig = config;
+      if (managerController && url.pathname.startsWith('/api/v1/')) {
+        const isTaskRoute = url.pathname === '/api/v1/config'
+          || url.pathname === '/api/v1/tasks'
+          || url.pathname === '/api/v1/publish'
+          || /^\/api\/v1\/tasks\/[^/]+(?:\/(?:state|blocked-by|comments))?$/.test(url.pathname);
+        if (isTaskRoute) {
+          const instanceId = request.headers['x-leesh-loop-instance-id'];
+          if (typeof instanceId !== 'string' || !instanceId) throw Object.assign(new Error('Select a Loop instance before using the Operator.'), { status: 400 });
+          const context = await managerController.resolveTaskContext(instanceId);
+          requestStore = context.store;
+          requestConfig = context.config;
+        }
+      }
       if (request.method === 'GET' && url.pathname === '/api/v1/config') {
-        const repository = githubRepositoryDetails(config.github_repository_url);
+        const repository = githubRepositoryDetails(requestConfig.github_repository_url);
         sendJson(response, 200, {
           states: WORKFLOW_STATES,
           defaultState: 'Ready',
@@ -127,7 +153,7 @@ export async function createOperatorUiServer({ root, config, stateDirectory, tas
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/v1/tasks') {
-        const tasks = store.listTasks();
+        const tasks = requestStore.listTasks();
         const tasksById = new Map(tasks.map(task => [task.id, task]));
         sendJson(response, 200, { tasks: tasks.map(task => taskView(task, tasksById)) });
         return;
@@ -139,32 +165,32 @@ export async function createOperatorUiServer({ root, config, stateDirectory, tas
         catch { throw Object.assign(new Error('Task ID is malformed.'), { status: 400 }); }
         const operation = taskRoute[2];
         if (request.method === 'GET' && !operation) {
-          const task = readTask(store, taskId);
+          const task = readTask(requestStore, taskId);
           sendJson(response, 200, {
             task,
-            workpad: store.listRecords(taskId, { kind: 'workpad' }),
-            comments: store.listRecords(taskId, { kind: 'comment' })
+            workpad: requestStore.listRecords(taskId, { kind: 'workpad' }),
+            comments: requestStore.listRecords(taskId, { kind: 'comment' })
           });
           return;
         }
         if (request.method === 'PUT' && operation === 'state') {
           const submitted = await requestJson(request);
           const state = requireString(submitted?.state, 'State');
-          const task = store.updateTask(taskId, { state });
+          const task = requestStore.updateTask(taskId, { state });
           sendJson(response, 200, { task });
           return;
         }
         if (request.method === 'PUT' && operation === 'blocked-by') {
           const submitted = await requestJson(request);
           const blockedBy = requireTaskIds(submitted?.blockedBy, 'Blocked By');
-          store.setBlockedBy(taskId, blockedBy);
-          sendJson(response, 200, { task: readTask(store, taskId) });
+          requestStore.setBlockedBy(taskId, blockedBy);
+          sendJson(response, 200, { task: readTask(requestStore, taskId) });
           return;
         }
         if (request.method === 'POST' && operation === 'comments') {
           const submitted = await requestJson(request);
           const content = requireString(submitted?.content, 'Comment');
-          const comment = store.appendComment(taskId, content, 'user');
+          const comment = requestStore.appendComment(taskId, content, 'user');
           sendJson(response, 201, { comment });
           return;
         }
@@ -175,7 +201,7 @@ export async function createOperatorUiServer({ root, config, stateDirectory, tas
         const plan = requireString(submitted?.plan, 'Plan');
         const state = requireString(submitted?.state, 'State');
         const blockedBy = submitted?.blockedBy === undefined ? [] : requireTaskIds(submitted.blockedBy, 'Blocked By');
-        const publication = publishAcceptedPlan(store, plan, { state, blockedBy });
+        const publication = publishAcceptedPlan(requestStore, plan, { state, blockedBy });
         sendJson(response, 201, {
           identifier: publication.identifier,
           page_id: publication.page_id,
@@ -192,7 +218,10 @@ export async function createOperatorUiServer({ root, config, stateDirectory, tas
       const relativePath = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname).replace(/^\/+/, '');
       const filePath = resolve(uiDirectory, relativePath);
       if (filePath !== uiDirectory && !filePath.startsWith(`${uiDirectory}${sep}`)) { response.statusCode = 404; response.end(); return; }
-      const body = await readFile(filePath);
+      let body = await readFile(filePath);
+      if (managerController && basename(filePath) === 'index.html' && managerToken) {
+        body = Buffer.from(body.toString('utf8').replace('content="__LEESH_LOOP_MANAGER_TOKEN__"', `content="${managerToken}"`).replace('content="__LEESH_LOOP_MANAGER_PORT__"', `content="${managerPort}"`));
+      }
       response.statusCode = 200;
       response.setHeader('content-type', MIME_TYPES.get(extname(filePath)) || 'application/octet-stream');
       response.setHeader('cache-control', basename(filePath) === 'index.html' ? 'no-store' : 'public, max-age=31536000, immutable');
@@ -203,7 +232,10 @@ export async function createOperatorUiServer({ root, config, stateDirectory, tas
       else response.destroy(error);
     }
   });
-  server.once('close', () => { if (!taskStore) store.close(); });
+  server.once('close', () => {
+    if (managerController) managerController.closeTaskStores();
+    else if (!taskStore) store.close();
+  });
   return server;
 }
 

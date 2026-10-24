@@ -7,9 +7,21 @@ import { readTaskDetailDraft } from './task-detail-draft.js';
 import './style.css';
 
 const REFRESH_INTERVAL_MS = 7500;
+const MANAGER_SELECTION_KEY = 'leesh-loop.manager.selected-instance.v1';
 const formatTime = value => new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' }).format(value);
 const taskUrl = id => `/api/v1/tasks/${encodeURIComponent(id)}`;
 const taskDraftKey = id => `leesh-loop.operator.task-draft.v1:${id}`;
+
+function apiFetch(input, init = {}) {
+  const headers = new Headers(init.headers || {});
+  const token = document.querySelector('meta[name="leesh-loop-manager-token"]')?.content;
+  if (token && token !== '__LEESH_LOOP_MANAGER_TOKEN__') headers.set('x-leesh-loop-token', token);
+  try {
+    const instanceId = window.localStorage.getItem(MANAGER_SELECTION_KEY);
+    if (instanceId) headers.set('x-leesh-loop-instance-id', instanceId);
+  } catch { /* The selected instance is also reflected in the active page. */ }
+  return fetch(input, { ...init, headers });
+}
 
 async function responseJson(response) {
   const body = await response.json();
@@ -133,7 +145,7 @@ function TaskSurface({ tasks, selectedTaskId, loading, error, refreshedAt, onRet
       {tasks.length > 0 && (
         <div className="task-groups">
           {groups.humanReview.length > 0 && taskGroup('Human Review', groups.humanReview, 'review-work')}
-          {groups.activeWork.length > 0 && taskGroup('In progress', groups.activeWork, 'active-work')}
+          {groups.activeWork.length > 0 && taskGroup('Active work', groups.activeWork, 'active-work')}
           <details className="remaining-tasks">
             <summary><span>Other tasks</span><span className="task-group-count">{otherCount}</span></summary>
             {groups.remainingTasks.length
@@ -165,7 +177,7 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
     writePublicationDraft({ plan, state, selectedBlockers: submittedBlockers });
     onDraftChange({ publishing: true });
     try {
-      const response = await fetch('/api/v1/publish', {
+      const response = await apiFetch('/api/v1/publish', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ plan, state, blockedBy: submittedBlockers.map(task => task.taskId) })
@@ -265,7 +277,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     const requestVersion = detailRefreshQueue.current.begin();
     if (requestVersion === null) return;
     try {
-      const response = await fetch(taskUrl(taskId), { headers: { accept: 'application/json' } });
+      const response = await apiFetch(taskUrl(taskId), { headers: { accept: 'application/json' } });
       const body = await responseJson(response);
       if (!detailRefreshQueue.current.isCurrent(requestVersion)) return;
       const firstRead = !detailLoaded.current;
@@ -329,7 +341,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     setSaving('state');
     setStateFeedback(null);
     try {
-      const response = await fetch(`${taskUrl(taskId)}/state`, {
+      const response = await apiFetch(`${taskUrl(taskId)}/state`, {
         method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ state: stateDraft })
       });
       const body = await responseJson(response);
@@ -356,7 +368,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     setSaving('blockers');
     setBlockerFeedback(null);
     try {
-      const response = await fetch(`${taskUrl(taskId)}/blocked-by`, {
+      const response = await apiFetch(`${taskUrl(taskId)}/blocked-by`, {
         method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blockedBy: blockerDraft })
       });
       const body = await responseJson(response);
@@ -383,7 +395,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
     setSaving('comment');
     setCommentFeedback(null);
     try {
-      const response = await fetch(`${taskUrl(taskId)}/comments`, {
+      const response = await apiFetch(`${taskUrl(taskId)}/comments`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: commentDraft })
       });
       const body = await responseJson(response);
@@ -496,7 +508,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
   );
 }
 
-function App() {
+function OperatorApp() {
   const [config, setConfig] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
@@ -517,7 +529,7 @@ function App() {
     if (requestVersion === null) return;
     if (!hasReadTasks.current) setLoading(true);
     try {
-      const response = await fetch('/api/v1/tasks', { headers: { accept: 'application/json' } });
+      const response = await apiFetch('/api/v1/tasks', { headers: { accept: 'application/json' } });
       const body = await responseJson(response);
       if (!taskListRefreshQueue.current.isCurrent(requestVersion)) {
         taskListRefreshQueue.current.markQueued();
@@ -550,7 +562,7 @@ function App() {
 
   useEffect(() => {
     let active = true;
-    fetch('/api/v1/config').then(responseJson).then(value => { if (active) setConfig(value); }).catch(() => { if (active) setConfig(null); });
+    apiFetch('/api/v1/config').then(responseJson).then(value => { if (active) setConfig(value); }).catch(() => { if (active) setConfig(null); });
     void refresh();
     const timer = window.setInterval(() => { void refresh(); }, REFRESH_INTERVAL_MS);
     return () => { active = false; window.clearInterval(timer); };
@@ -657,4 +669,233 @@ function App() {
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+async function readManagerJson(response) {
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || `Manager request failed (${response.status}).`);
+  return body;
+}
+
+function ManagerApp() {
+  const [instances, setInstances] = useState([]);
+  const [selectedId, setSelectedId] = useState(() => {
+    try { return window.localStorage.getItem(MANAGER_SELECTION_KEY) || ''; }
+    catch { return ''; }
+  });
+  const [repositoryPath, setRepositoryPath] = useState('');
+  const [runtime, setRuntime] = useState(null);
+  const [workflow, setWorkflow] = useState(null);
+  const [logs, setLogs] = useState('');
+  const [workflowOpen, setWorkflowOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const selected = instances.find(instance => instance.id === selectedId) || null;
+
+  const refreshInstances = useCallback(async () => {
+    try {
+      const body = await readManagerJson(await apiFetch('/api/v1/instances'));
+      setInstances(body.instances);
+      setSelectedId(current => {
+        const next = body.instances.some(instance => instance.id === current) ? current : (body.instances[0]?.id || '');
+        try {
+          if (next) window.localStorage.setItem(MANAGER_SELECTION_KEY, next);
+          else window.localStorage.removeItem(MANAGER_SELECTION_KEY);
+        } catch { /* Selection remains available for this page session. */ }
+        return next;
+      });
+      setError('');
+    } catch (requestError) {
+      setError(requestError.message || 'Could not load managed Loop instances.');
+    }
+  }, []);
+
+  const refreshRuntime = useCallback(async () => {
+    try { setRuntime(await readManagerJson(await apiFetch('/api/v1/runtime'))); }
+    catch (requestError) { setError(requestError.message || 'Could not load the Runtime version.'); }
+  }, []);
+
+  useEffect(() => {
+    void refreshInstances();
+    void refreshRuntime();
+    const timer = window.setInterval(() => { void refreshInstances(); }, 4000);
+    return () => window.clearInterval(timer);
+  }, [refreshInstances, refreshRuntime]);
+
+  useEffect(() => {
+    document.title = selected ? `${selected.repository_name} · Leesh Loop` : 'Leesh Loop Manager';
+    setWorkflow(null);
+    setLogs('');
+    setWorkflowOpen(false);
+    setLogsOpen(false);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId || !workflowOpen) return;
+    let active = true;
+    apiFetch(`/api/v1/instances/${encodeURIComponent(selectedId)}/workflow`)
+      .then(readManagerJson)
+      .then(body => { if (active) setWorkflow(body); })
+      .catch(requestError => { if (active) setError(requestError.message || 'Could not compare the Workflow.'); });
+    return () => { active = false; };
+  }, [selectedId, workflowOpen]);
+
+  useEffect(() => {
+    if (!selectedId || !logsOpen) return;
+    let active = true;
+    apiFetch(`/api/v1/instances/${encodeURIComponent(selectedId)}/logs`)
+      .then(readManagerJson)
+      .then(body => { if (active) setLogs(body.logs); })
+      .catch(requestError => { if (active) setLogs(requestError.message || 'Could not read Loop logs.'); });
+    return () => { active = false; };
+  }, [selectedId, logsOpen]);
+
+  async function perform(path, { method = 'POST', body, label } = {}) {
+    setBusy(label || 'Working…');
+    setError('');
+    setNotice('');
+    try {
+      const result = await readManagerJson(await apiFetch(path, {
+        method,
+        ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      }));
+      const restartRequired = path === '/api/v1/runtime/update' && result.manager_restart_required;
+      setNotice(result.instance
+        ? `${result.instance.repository_name || result.instance.id}: ${result.instance.status}.`
+        : restartRequired
+          ? 'Runtime updated. Run leesh-loop update to reload the Manager; running Loops keep their selected Runtime.'
+          : (label === 'Updating Runtime' ? 'Runtime update completed.' : 'Change saved.'));
+      await refreshInstances();
+      await refreshRuntime();
+      return result;
+    } catch (requestError) {
+      setError(requestError.message || 'The Manager could not complete this action.');
+      return null;
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function createInstance(event) {
+    event.preventDefault();
+    if (!repositoryPath.trim()) return;
+    setBusy('Creating Loop');
+    setError('');
+    setNotice('');
+    try {
+      const result = await readManagerJson(await apiFetch('/api/v1/instances', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ repositoryPath: repositoryPath.trim() })
+      }));
+      const id = result.instance.id;
+      setRepositoryPath('');
+      setSelectedId(id);
+      try { window.localStorage.setItem(MANAGER_SELECTION_KEY, id); } catch { /* Selection remains in React state. */ }
+      setNotice(`Created ${result.instance.repository_name}.`);
+      await refreshInstances();
+    } catch (requestError) {
+      setError(requestError.message || 'Could not create the Loop instance.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function updateWorkflow() {
+    if (!workflow?.changed || selected?.status !== 'Stopped') return;
+    const accepted = window.confirm(`Replace the Workflow for ${selected.repository_name}? A backup will be kept in this instance's data.`);
+    if (!accepted) return;
+    const result = await perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/workflow`, {
+      method: 'PUT',
+      body: { confirm: true, expectedCurrent: workflow.current },
+      label: 'Updating Workflow'
+    });
+    if (result) {
+      setWorkflow(null);
+      setWorkflowOpen(false);
+    }
+  }
+
+  return (
+    <div className="manager-shell">
+      <header className="manager-header">
+        <div className="manager-brand"><p className="eyebrow">Leesh Loop</p><h1>Manager</h1></div>
+        <div className="manager-selection">
+          <label htmlFor="managed-instance">Loop Instance</label>
+          <select id="managed-instance" value={selectedId} onChange={event => {
+            const id = event.target.value;
+            setSelectedId(id);
+            try { if (id) window.localStorage.setItem(MANAGER_SELECTION_KEY, id); else window.localStorage.removeItem(MANAGER_SELECTION_KEY); } catch { /* Selection remains in React state. */ }
+          }}>
+            <option value="">Choose a Loop</option>
+            {instances.map(instance => <option value={instance.id} key={instance.id}>{instance.repository_name} · {instance.status}</option>)}
+          </select>
+        </div>
+        {selected && (
+          <div className="manager-lifecycle">
+            <span className={`manager-status status-${selected.status.toLowerCase()}`}>{selected.status}</span>
+            {selected.status === 'Running' || selected.status === 'Starting' || selected.status === 'Stopping' ? (
+              <button type="button" className="manager-action secondary" disabled={Boolean(busy) || selected.status === 'Stopping'} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop' })}>{busy === 'Stopping Loop' ? 'Stopping…' : 'Stop Loop'}</button>
+            ) : (
+              <button type="button" className="manager-action" disabled={Boolean(busy) || selected.status === 'Unconfirmed'} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop' })}>{busy === 'Starting Loop' ? 'Starting…' : 'Start Loop'}</button>
+            )}
+          </div>
+        )}
+      </header>
+
+      <section className="manager-console" aria-label="Loop Manager controls">
+        <form className="manager-create" onSubmit={createInstance}>
+          <div>
+            <p className="eyebrow">New instance</p>
+            <h2>Add a Git repository</h2>
+            <p className="manager-help">Use its local repository root. Init checks the Git upstream and keeps settings, Workflow, Task Store, and workspaces in this user's Leesh Loop data.</p>
+          </div>
+          <label htmlFor="repository-path">Repository path</label>
+          <div className="manager-input-row">
+            <input id="repository-path" type="text" value={repositoryPath} onChange={event => setRepositoryPath(event.target.value)} placeholder="/home/you/projects/repository" autoComplete="off" spellCheck="false" disabled={Boolean(busy)} required />
+            <button className="manager-action" type="submit" disabled={Boolean(busy) || !repositoryPath.trim()}>{busy === 'Creating Loop' ? 'Creating…' : 'Create Loop'}</button>
+          </div>
+        </form>
+
+        <section className="manager-runtime" aria-label="Central Runtime">
+          <div><p className="eyebrow">Shared Runtime</p><h2>{runtime?.active ? `Version ${runtime.active.version}` : 'Runtime unavailable'}</h2><p className="manager-help">New Loop starts use this immutable Runtime distribution. Running Loops keep their selected version.</p>{runtime?.active && runtime.manager_runtime_version !== runtime.active.id && <p className="inline-message" role="status">The Manager uses an older Runtime. Run <code>leesh-loop update</code> to reload it.</p>}</div>
+          <button className="manager-action secondary" type="button" disabled={Boolean(busy)} onClick={() => void perform('/api/v1/runtime/update', { label: 'Updating Runtime' })}>{busy === 'Updating Runtime' ? 'Updating…' : 'Update Runtime'}</button>
+        </section>
+
+        {selected && (
+          <section className="manager-instance-info" aria-label="Selected Loop details">
+            <div><p className="eyebrow">Selected Loop</p><h2>{selected.repository_name}</h2><p className="manager-repository-path">{selected.repository_root}</p></div>
+            <div className="manager-instance-meta"><span>Base branch <strong>{selected.base_branch}</strong></span><span>Internal port <strong>{selected.port || '—'}</strong></span><span>Runtime <strong>{selected.runtime_version?.slice(0, 12) || '—'}</strong></span></div>
+          </section>
+        )}
+
+        {selected && (
+          <div className="manager-folders">
+            <details onToggle={event => setWorkflowOpen(event.currentTarget.open)}>
+              <summary><span>Workflow</span><span>{workflow ? (workflow.changed ? 'Update available' : 'Current') : 'Compare with template'}</span></summary>
+              {workflow && (
+                <div className="manager-workflow-content">
+                  <p className="manager-help">Review the instance's current Workflow and the active Runtime template. Updates apply only to this stopped Loop; a backup is saved.</p>
+                  {workflow.changed ? <div className="workflow-comparison"><section><h3>Current Workflow</h3><pre>{workflow.current}</pre></section><section><h3>Template</h3><pre>{workflow.candidate}</pre></section></div> : <p className="manager-help">This Workflow matches the current template.</p>}
+                  <button type="button" className="manager-action secondary" disabled={Boolean(busy) || !workflow.changed || selected.status !== 'Stopped'} onClick={() => void updateWorkflow()}>{busy === 'Updating Workflow' ? 'Updating…' : 'Apply Workflow Update'}</button>
+                  {workflow.changed && selected.status !== 'Stopped' && <p className="manager-help">Stop this Loop to update its Workflow.</p>}
+                </div>
+              )}
+            </details>
+            <details onToggle={event => setLogsOpen(event.currentTarget.open)}>
+              <summary><span>Loop logs</span><span>View startup and Symphony output</span></summary>
+              {logsOpen && <pre className="manager-logs">{logs || 'Loading logs…'}</pre>}
+            </details>
+          </div>
+        )}
+        {selected?.detail && <p className="inline-message failure" role="status">{selected.detail}</p>}
+        {error && <p className="inline-message failure" role="alert">{error}</p>}
+        {notice && <p className="inline-message" role="status">{notice}</p>}
+        {!selected && instances.length === 0 && <p className="manager-empty">Create an instance from a Git repository to see its tasks and lifecycle here.</p>}
+      </section>
+
+      {selected ? <OperatorApp key={selectedId} /> : null}
+    </div>
+  );
+}
+
+createRoot(document.getElementById('root')).render(<ManagerApp />);
