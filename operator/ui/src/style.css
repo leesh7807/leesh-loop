@@ -164,6 +164,8 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .manager-lifecycle { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .7rem; }
 .manager-lifecycle-target { min-width: 0; max-width: 14rem; overflow-wrap: anywhere; color: #444; font-size: .74rem; font-weight: 650; }
 .manager-lifecycle-pending { color: #626262; font-size: .72rem; }
+.manager-lifecycle-detail, .manager-lifecycle .manager-feedback { flex: 1 0 100%; max-width: 34rem; margin: 0; text-align: right; }
+.manager-feedback { min-width: 0; }
 .manager-task-jump { color: #343434; font-size: .72rem; text-decoration: underline; text-decoration-color: #a8a8a8; text-underline-offset: .2em; white-space: nowrap; }
 .manager-task-jump:hover { text-decoration-color: #111; }
 .manager-status { color: #444; font-size: .74rem; font-weight: 650; }
@@ -200,6 +202,8 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .manager-input-row input { min-width: 0; min-height: 2.55rem; padding: .42rem .65rem; border: 1px solid #a8a8a8; border-radius: .35rem; background: white; font-size: .78rem; }
 .manager-runtime { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid #dcdcdc; }
 .manager-runtime .manager-action { flex: 0 0 auto; }
+.manager-runtime-action { display: grid; justify-items: end; gap: .35rem; min-width: 0; max-width: min(32rem, 46%); }
+.manager-runtime-feedback { width: 100%; }
 .manager-instance-info { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; padding: 1rem 0; border-bottom: 1px solid #dcdcdc; }
 .manager-instance-info > div:first-child { min-width: 0; }
 .manager-repository-path { margin: 0; color: #646464; font-size: .75rem; overflow-wrap: anywhere; }
@@ -215,7 +219,10 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .manager-folders details[open] summary::before { content: '−'; }
 .manager-folders summary span:last-child { margin-left: auto; color: #717171; font-size: .68rem; font-weight: 450; text-align: right; }
 .manager-workflow-content { display: grid; gap: .7rem; padding: .55rem 0 .2rem; }
-.manager-workflow-content > .manager-action { justify-self: start; }
+.workflow-eligibility { margin: 0; }
+.manager-workflow-content > .workflow-update-actions { justify-self: start; }
+.workflow-update-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .75rem; }
+.workflow-update-disabled-reason { max-width: 48ch; margin: 0; }
 .workflow-comparison { display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; }
 .workflow-comparison section { min-width: 0; }
 .workflow-comparison h3 { margin-bottom: .3rem; color: #5d5d5d; font-size: .67rem; letter-spacing: .08em; text-transform: uppercase; }
@@ -271,10 +278,13 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
   .manager-lifecycle { grid-column: 1; justify-content: flex-start; }
   .manager-lifecycle { column-gap: .55rem; row-gap: .45rem; }
   .manager-lifecycle-target { max-width: 9rem; }
+  .manager-lifecycle-detail, .manager-lifecycle .manager-feedback { text-align: left; }
   .manager-console { padding-top: .85rem; }
   .manager-input-row { grid-template-columns: 1fr; }
   .manager-input-row .manager-action { justify-self: start; }
   .manager-runtime { align-items: flex-start; flex-direction: column; }
+  .manager-runtime-action { justify-items: start; max-width: 100%; }
+  .manager-runtime-feedback { max-width: 100%; }
   .manager-instance-meta { display: grid; grid-template-columns: 1fr; gap: .25rem; }
   .workflow-comparison { grid-template-columns: 1fr; }
   .manager-folders summary { align-items: flex-start; flex-wrap: wrap; }
