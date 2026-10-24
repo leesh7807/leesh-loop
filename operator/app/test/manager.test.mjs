@@ -62,7 +62,7 @@ async function fixture(t) {
   return { directory, environment, homeDirectory: directory };
 }
 
-async function startManagerFixture(t, paths, { runtimeId, lifecycle, sourceRoot: managerSourceRoot = sourceRoot, runtimeInstaller } = {}) {
+async function startManagerFixture(t, paths, { runtimeId, lifecycle, sourceRoot: managerSourceRoot = sourceRoot, runtimeInstaller, taskStoreOpener } = {}) {
   const reservation = createHttpServer();
   await new Promise((resolveListen, rejectListen) => {
     reservation.once('error', rejectListen);
@@ -84,7 +84,8 @@ async function startManagerFixture(t, paths, { runtimeId, lifecycle, sourceRoot:
     environment: paths.environment,
     homeDirectory: paths.homeDirectory,
     lifecycle,
-    runtimeInstaller
+    runtimeInstaller,
+    taskStoreOpener
   });
   const server = await createOperatorUiServer({ root, managerController, managerToken: token, managerPort: port });
   await new Promise((resolveListen, rejectListen) => {
@@ -336,6 +337,71 @@ test('managed instances share one Runtime and keep their files and Task Stores i
   assert.ok(!pageText.includes(manager.token));
   assert.equal(page.headers.get('x-frame-options'), 'DENY');
   assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+});
+
+test('Manager log reads return bounded tails and preserve the other log when one is large', async t => {
+  const paths = await fixture(t);
+  const repository = await makeRepository(join(paths.directory, 'repositories'), 'large-manager-log-project');
+  const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
+  const manager = await startManagerFixture(t, paths);
+  const executionDirectory = join(managerPaths(paths).loopExecutionRoot, instance.id);
+  await mkdir(executionDirectory, { recursive: true });
+  await writeFile(join(executionDirectory, 'start-command.log'), Buffer.concat([
+    Buffer.from('PREFIX-MUST-BE-OMITTED\n'),
+    Buffer.alloc(2_500_000, 0x78),
+    Buffer.from('\nLARGE-LOG-TAIL-MARKER')
+  ]));
+  await writeFile(join(executionDirectory, 'symphony-startup.log'), 'SMALL-LOG-REMAINS-VISIBLE');
+
+  const { response, body } = await api(manager, '/api/v1/instances/' + instance.id + '/logs');
+  assert.equal(response.status, 200);
+  assert.ok(body.logs.includes('LARGE-LOG-TAIL-MARKER'));
+  assert.ok(body.logs.includes('SMALL-LOG-REMAINS-VISIBLE'));
+  assert.ok(body.logs.includes('Earlier log output omitted'));
+  assert.ok(!body.logs.includes('PREFIX-MUST-BE-OMITTED'));
+  assert.ok(body.logs.length < 105_000);
+});
+
+test('Manager log read reports one unavailable file and returns the other', async t => {
+  const paths = await fixture(t);
+  const repository = await makeRepository(join(paths.directory, 'repositories'), 'partial-manager-log-project');
+  const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
+  const manager = await startManagerFixture(t, paths);
+  const executionDirectory = join(managerPaths(paths).loopExecutionRoot, instance.id);
+  await mkdir(join(executionDirectory, 'start-command.log'), { recursive: true });
+  await writeFile(join(executionDirectory, 'symphony-startup.log'), 'AVAILABLE-LOG-CONTENT');
+
+  const { response, body } = await api(manager, '/api/v1/instances/' + instance.id + '/logs');
+  assert.equal(response.status, 200);
+  assert.match(body.logs, /start-command\.log[\s\S]*Log unavailable: UNSAFE_FILE/);
+  assert.ok(body.logs.includes('AVAILABLE-LOG-CONTENT'));
+});
+
+test('concurrent first-use config and task reads share and close one Task Store', async t => {
+  const paths = await fixture(t);
+  const repository = await makeRepository(join(paths.directory, 'repositories'), 'concurrent-task-store-project');
+  const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
+  let opens = 0;
+  let closes = 0;
+  const manager = await startManagerFixture(t, paths, {
+    taskStoreOpener: async () => {
+      opens += 1;
+      await new Promise(resolveOpen => setTimeout(resolveOpen, 40));
+      return { listTasks: () => [], close: () => { closes += 1; } };
+    }
+  });
+
+  const [config, tasks] = await Promise.all([
+    api(manager, '/api/v1/config', { instanceId: instance.id }),
+    api(manager, '/api/v1/tasks', { instanceId: instance.id })
+  ]);
+  assert.equal(config.response.status, 200);
+  assert.equal(tasks.response.status, 200);
+  assert.deepEqual(tasks.body.tasks, []);
+  assert.equal(opens, 1);
+  await manager.controller.closeTaskStores();
+  await manager.controller.closeTaskStores();
+  assert.equal(closes, 1);
 });
 
 test('Manager Host validation rejects an unauthorized Host header', async t => {
