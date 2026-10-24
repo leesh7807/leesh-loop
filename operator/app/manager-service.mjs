@@ -149,7 +149,12 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
   }
 
   function lifecycleStatusOptions() {
-    return { environment, homeDirectory, isLifecycleOperationActive: id => lifecycleQueues.has(id) };
+    return {
+      environment,
+      homeDirectory,
+      isLifecycleOperationActive: id => lifecycleQueues.has(id),
+      persistObservedStatus: false
+    };
   }
 
   async function taskContext(id) {
