@@ -18,6 +18,11 @@ export function lifecycleCompletionMessage(action, instance) {
   return `${action} request completed for ${name}.${status}`;
 }
 
+export function workflowOperationFeedbackPlacement(isOpen, hasComparison) {
+  if (!isOpen) return 'header';
+  return hasComparison ? 'actions' : 'panel';
+}
+
 export function instanceOperationFeedbackReducer(state, action) {
   const targetFeedback = { ...(state[action.instanceId] || {}) };
   if (action.type === 'started') delete targetFeedback[action.target];
