@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { initialManagerFeedback, managerFeedbackReducer } from '../src/manager-feedback.js';
+import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, managerFeedbackReducer, managerOperationAnnouncement } from '../src/manager-feedback.js';
 
 test('a successful instance poll clears read errors without dismissing an operation failure', () => {
   let feedback = managerFeedbackReducer(initialManagerFeedback, {
@@ -41,6 +41,40 @@ test('changing the selected Loop clears a prior log-read error', () => {
   const changed = managerFeedbackReducer(failed, { type: 'instance-changed' });
 
   assert.equal(changed.readErrors.logs, undefined);
+});
+
+test('per-instance operation outcomes remain with their initiating Loop', () => {
+  let outcomes = instanceOperationFeedbackReducer(initialInstanceOperationFeedback, {
+    type: 'success', instanceId: 'loop-a', target: 'workflow', message: 'Workflow update completed.'
+  });
+
+  assert.deepEqual(instanceOperationFeedbackFor(outcomes, 'loop-a', 'workflow'), {
+    kind: 'success', message: 'Workflow update completed.'
+  });
+  assert.equal(instanceOperationFeedbackFor(outcomes, 'loop-b', 'workflow'), null);
+
+  outcomes = instanceOperationFeedbackReducer(outcomes, {
+    type: 'error', instanceId: 'loop-a', target: 'lifecycle', message: 'Loop could not start.'
+  });
+  assert.deepEqual(instanceOperationFeedbackFor(outcomes, 'loop-a', 'lifecycle'), {
+    kind: 'failure', message: 'Loop could not start.'
+  });
+  assert.equal(instanceOperationFeedbackFor(outcomes, 'loop-b', 'lifecycle'), null);
+
+  const startedAgain = instanceOperationFeedbackReducer(outcomes, {
+    type: 'started', instanceId: 'loop-a', target: 'workflow'
+  });
+  assert.equal(instanceOperationFeedbackFor(startedAgain, 'loop-a', 'workflow'), null);
+  assert.equal(instanceOperationFeedbackFor(startedAgain, 'loop-a', 'lifecycle').kind, 'failure');
+  assert.equal(instanceOperationFeedbackFor(outcomes, 'loop-a', 'workflow').kind, 'success');
+});
+
+test('a Manager-wide busy notice names its target and says what remains available', () => {
+  assert.equal(
+    managerOperationAnnouncement({ label: 'Updating Workflow', repositoryName: 'payments-api' }),
+    'Updating Workflow for payments-api is in progress. Other Manager actions are temporarily unavailable; instance switching and Task management remain available.'
+  );
+  assert.equal(managerOperationAnnouncement(null), '');
 });
 
 test('a successful Runtime or Workflow read clears only its own read error', () => {

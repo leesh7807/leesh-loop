@@ -4,6 +4,31 @@ export const initialManagerFeedback = {
   notices: {}
 };
 
+export const initialInstanceOperationFeedback = {};
+
+export function managerOperationAnnouncement(operation) {
+  if (!operation?.label) return '';
+  const target = operation.repositoryName ? ` for ${operation.repositoryName}` : '';
+  return `${operation.label}${target} is in progress. Other Manager actions are temporarily unavailable; instance switching and Task management remain available.`;
+}
+
+export function instanceOperationFeedbackReducer(state, action) {
+  const targetFeedback = { ...(state[action.instanceId] || {}) };
+  if (action.type === 'started') delete targetFeedback[action.target];
+  else if (action.type === 'success') targetFeedback[action.target] = { kind: 'success', message: action.message };
+  else if (action.type === 'error') targetFeedback[action.target] = { kind: 'failure', message: action.message };
+  else return state;
+
+  const next = { ...state };
+  if (Object.keys(targetFeedback).length) next[action.instanceId] = targetFeedback;
+  else delete next[action.instanceId];
+  return next;
+}
+
+export function instanceOperationFeedbackFor(state, instanceId, target) {
+  return state[instanceId]?.[target] || null;
+}
+
 function updateMessage(messages, target, message) {
   const next = { ...messages };
   if (message) next[target] = message;

@@ -166,6 +166,7 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .manager-lifecycle-pending { color: #626262; font-size: .72rem; }
 .manager-lifecycle-detail, .manager-lifecycle .manager-feedback { flex: 1 0 100%; max-width: 34rem; margin: 0; text-align: right; }
 .manager-feedback { min-width: 0; }
+.manager-operation-pending { grid-column: 1 / -1; margin: .15rem 0 0; }
 .manager-task-jump { color: #343434; font-size: .72rem; text-decoration: underline; text-decoration-color: #a8a8a8; text-underline-offset: .2em; white-space: nowrap; }
 .manager-task-jump:hover { text-decoration-color: #111; }
 .manager-status { color: #444; font-size: .74rem; font-weight: 650; }
