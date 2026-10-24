@@ -136,7 +136,10 @@ async function confirmRuntimeAbsent(state) {
     if (observed.runtime_id === runtimeId) {
       return { status: 'present', runtime_id: runtimeId, observed_runtime_id: observed.runtime_id };
     }
-    return { status: 'absent', runtime_id: runtimeId, observed_runtime_id: observed.runtime_id };
+    if (Number.isSafeInteger(observed.pid) && observed.pid > 0) {
+      return { status: 'absent', runtime_id: runtimeId, observed_runtime_id: observed.runtime_id };
+    }
+    return { status: 'unconfirmed', runtime_id: runtimeId, error: 'another response on the assigned port has no Loop process identity' };
   } catch (error) {
     if (error?.cause?.code === 'ECONNREFUSED') return { status: 'absent', runtime_id: runtimeId, reason: 'runtime dashboard refused the connection' };
     return { status: 'unconfirmed', runtime_id: runtimeId, error: String(error?.message || error) };
@@ -144,7 +147,16 @@ async function confirmRuntimeAbsent(state) {
 }
 async function stopRuntimeAndClear(config, state) {
   if (!await terminate(state)) {
-    return { status: 'unconfirmed', stopped: false, process_identity_mismatch: true, pid: state?.pid || null };
+    const observedTicks = state?.pid ? processStartTicks(state.pid) : null;
+    const reusedPid = state?.pid && alive(state.pid)
+      && typeof state.process_start_ticks === 'string' && state.process_start_ticks
+      && observedTicks && observedTicks !== state.process_start_ticks;
+    if (!reusedPid) return { status: 'unconfirmed', stopped: false, process_identity_mismatch: true, pid: state?.pid || null };
+    const readback = await confirmRuntimeAbsent(state);
+    if (readback.status !== 'absent') return { ...readback, stopped: false, process_identity_mismatch: true, pid: state.pid };
+    await stopUi(config);
+    await clear(config);
+    return { ...readback, stopped: true, process_identity_mismatch: true, pid: state.pid };
   }
   const readback = await confirmRuntimeAbsent(state);
   if (readback.status !== 'absent') return { ...readback, stopped: false };

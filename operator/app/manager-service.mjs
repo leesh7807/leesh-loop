@@ -401,7 +401,9 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
   try { record = await readJsonFile(paths.managerServiceRecord, 'Manager service record'); }
   catch (error) { throw new Error(`Manager service state is unconfirmed: ${error.message}`); }
   if (record) {
-    const live = processAlive(record.pid) && processStartTicks(record.pid) === record.process_start_ticks;
+    const recordedProcessAlive = processAlive(record.pid);
+    const observedStartTicks = recordedProcessAlive ? processStartTicks(record.pid) : null;
+    const live = recordedProcessAlive && observedStartTicks === record.process_start_ticks;
     if (live) {
       const health = await managerHealth(baseUrl, token);
       if (health?.status === 'Running') {
@@ -427,8 +429,16 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
       }
       throw new Error('Manager process is alive but its HTTP identity cannot be confirmed; refusing to start a second Manager.');
     }
-    if (processAlive(record.pid)) throw new Error('Manager PID identity changed; refusing to control the process.');
-    await unlink(paths.managerServiceRecord).catch(error => { if (error?.code !== 'ENOENT') throw error; });
+    if (recordedProcessAlive) {
+      if (!observedStartTicks || typeof record.process_start_ticks !== 'string' || !record.process_start_ticks || observedStartTicks === record.process_start_ticks) {
+        throw new Error('Manager process identity cannot be confirmed; refusing to control the process.');
+      }
+      // The recorded Manager is gone when start ticks differ. Leave the reused
+      // PID alone; a replacement Manager will atomically write its own record
+      // after binding the configured loopback port.
+    } else {
+      await unlink(paths.managerServiceRecord).catch(error => { if (error?.code !== 'ENOENT') throw error; });
+    }
   } else if (await managerHealth(baseUrl, token) || (legacyToken && await managerHealth(baseUrl, legacyToken))) {
     throw new Error('A Manager responds without a verifiable execution record; refusing to start a second Manager.');
   }

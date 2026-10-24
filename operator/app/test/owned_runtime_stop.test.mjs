@@ -53,7 +53,7 @@ async function runtimeServer(t, runtimeId, { hang = false } = {}) {
   const server = createServer((_request, response) => {
     if (hang) return;
     response.setHeader('content-type', 'application/json');
-    response.end(JSON.stringify({ runtime_id: runtimeId }));
+    response.end(JSON.stringify({ runtime_id: runtimeId, pid: process.pid }));
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -110,6 +110,33 @@ test('conditional runtime stop preserves ownership when the recorded PID identit
   });
   assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'runtime.json'), 'utf8')), runtimeState);
   assert.deepEqual(JSON.parse(await readFile(join(stateDirectory, 'ownership.json'), 'utf8')), ownershipState);
+  assert.equal(child.exitCode, null);
+});
+
+test('conditional runtime stop clears stale state only after a reused PID runtime is confirmed absent', async t => {
+  const { directory, stateDirectory, configPath } = await fixture();
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { child, pid, process_start_ticks } = await startOwnedProcess(t);
+  const probe = createServer();
+  await new Promise((resolve, reject) => {
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', resolve);
+  });
+  const dashboard = `http://127.0.0.1:${probe.address().port}`;
+  await new Promise(resolve => probe.close(resolve));
+  const staleTicks = `${process_start_ticks}-obsolete`;
+  const runtimeState = { runtime_id: 'recorded-run-runtime', pid, process_start_ticks: staleTicks, effective: { dashboard } };
+  const ownershipState = { runtime_id: 'recorded-run-runtime', pid, process_start_ticks: staleTicks };
+  await mkdir(stateDirectory, { recursive: true });
+  await writeFile(join(stateDirectory, 'runtime.json'), JSON.stringify(runtimeState));
+  await writeFile(join(stateDirectory, 'ownership.json'), JSON.stringify(ownershipState));
+
+  const { stdout } = await execFileAsync(process.execPath, [cli, 'stop-owned', configPath, 'recorded-run-runtime'], { timeout: 10_000 });
+
+  assert.deepEqual(JSON.parse(stdout), { stopped: true, runtime_id: 'recorded-run-runtime' });
+  await assert.rejects(readFile(join(stateDirectory, 'runtime.json'), 'utf8'), { code: 'ENOENT' });
+  await assert.rejects(readFile(join(stateDirectory, 'ownership.json'), 'utf8'), { code: 'ENOENT' });
+  assert.equal(processStartTicks(pid), process_start_ticks);
   assert.equal(child.exitCode, null);
 });
 
