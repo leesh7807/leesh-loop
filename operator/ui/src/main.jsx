@@ -7,6 +7,7 @@ import { readTaskDetailDraft } from './task-detail-draft.js';
 import { bootstrapManagerToken } from './manager-auth.js';
 import { createManagerApiFetch } from './manager-api.js';
 import { managerLifecycleAction } from './manager-lifecycle-action.js';
+import { createManagerSelectionGate } from './manager-selection-gate.js';
 import { initialManagerFeedback, managerFeedbackReducer } from './manager-feedback.js';
 import { createWorkflowDiff } from './workflow-diff.js';
 import './style.css';
@@ -712,6 +713,9 @@ function ManagerApp() {
     try { return window.localStorage.getItem(MANAGER_SELECTION_KEY) || ''; }
     catch { return ''; }
   });
+  const selectionGateRef = useRef(null);
+  if (!selectionGateRef.current) selectionGateRef.current = createManagerSelectionGate(selectedId);
+  const workflowRefreshControllerRef = useRef(null);
   const [repositoryPath, setRepositoryPath] = useState('');
   const [runtime, setRuntime] = useState(null);
   const [workflow, setWorkflow] = useState(null);
@@ -728,23 +732,30 @@ function ManagerApp() {
     || selected?.runtime_version?.slice(0, 12)
     || '—';
 
+  const selectInstance = useCallback(instanceId => {
+    const selectionGate = selectionGateRef.current;
+    const changed = selectionGate.instanceId !== instanceId;
+    selectionGate.select(instanceId);
+    if (changed) workflowRefreshControllerRef.current?.abort();
+    setSelectedId(instanceId);
+  }, []);
+
   const refreshInstances = useCallback(async () => {
     try {
       const body = await readManagerJson(await apiFetch('/api/v1/instances'));
       setInstances(body.instances);
-      setSelectedId(current => {
-        const next = body.instances.some(instance => instance.id === current) ? current : (body.instances[0]?.id || '');
-        try {
-          if (next) window.localStorage.setItem(MANAGER_SELECTION_KEY, next);
-          else window.localStorage.removeItem(MANAGER_SELECTION_KEY);
-        } catch { /* Selection remains available for this page session. */ }
-        return next;
-      });
+      const current = selectionGateRef.current.instanceId;
+      const next = body.instances.some(instance => instance.id === current) ? current : (body.instances[0]?.id || '');
+      selectInstance(next);
+      try {
+        if (next) window.localStorage.setItem(MANAGER_SELECTION_KEY, next);
+        else window.localStorage.removeItem(MANAGER_SELECTION_KEY);
+      } catch { /* Selection remains available for this page session. */ }
       dispatchFeedback({ type: 'read-cleared' });
     } catch (requestError) {
       dispatchFeedback({ type: 'read-error', message: requestError.message || 'Could not load managed Loop instances.' });
     }
-  }, []);
+  }, [selectInstance]);
 
   const refreshRuntime = useCallback(async () => {
     try { setRuntime(await readManagerJson(await apiFetch('/api/v1/runtime'))); }
@@ -825,7 +836,7 @@ function ManagerApp() {
       }));
       const id = result.instance.id;
       setRepositoryPath('');
-      setSelectedId(id);
+      selectInstance(id);
       try { window.localStorage.setItem(MANAGER_SELECTION_KEY, id); } catch { /* Selection remains in React state. */ }
       setNotice(`Created ${result.instance.repository_name}.`);
       await refreshInstances();
@@ -852,21 +863,29 @@ function ManagerApp() {
   }
 
   async function refreshWorkflowComparison() {
-    if (!selectedId) return;
-    const comparisonInstanceId = selectedId;
+    const selectionGate = selectionGateRef.current;
+    const requestSelection = selectionGate.capture();
+    const comparisonInstanceId = requestSelection.instanceId;
+    if (!comparisonInstanceId) return;
+    workflowRefreshControllerRef.current?.abort();
+    const controller = new AbortController();
+    workflowRefreshControllerRef.current = controller;
     setBusy('Refreshing Workflow');
     dispatchFeedback({ type: 'operation-started' });
     setNotice('');
     try {
-      const comparison = await readManagerJson(await apiFetch(`/api/v1/instances/${encodeURIComponent(comparisonInstanceId)}/workflow`));
-      if (selectedId !== comparisonInstanceId) return;
+      const comparison = await readManagerJson(await apiFetch(`/api/v1/instances/${encodeURIComponent(comparisonInstanceId)}/workflow`, { signal: controller.signal }));
+      if (!selectionGate.isCurrent(requestSelection)) return;
       setWorkflow(comparison);
       setNotice('Workflow comparison refreshed. Review the candidate before applying.');
     } catch (requestError) {
-      if (selectedId !== comparisonInstanceId) return;
+      if (controller.signal.aborted || !selectionGate.isCurrent(requestSelection)) return;
       dispatchFeedback({ type: 'operation-error', message: requestError.message || 'Could not refresh the Workflow comparison.' });
     } finally {
-      setBusy('');
+      if (workflowRefreshControllerRef.current === controller) {
+        workflowRefreshControllerRef.current = null;
+        setBusy(current => current === 'Refreshing Workflow' ? '' : current);
+      }
     }
   }
 
@@ -905,7 +924,7 @@ function ManagerApp() {
               <button type="button" className={`manager-instance-choice${selectedId === instance.id ? ' selected' : ''}`} key={instance.id}
                 aria-pressed={selectedId === instance.id}
                 onClick={() => {
-                  setSelectedId(instance.id);
+                  selectInstance(instance.id);
                   try { window.localStorage.setItem(MANAGER_SELECTION_KEY, instance.id); } catch { /* Selection remains in React state. */ }
                 }}>
                 <span className="manager-instance-choice-title">{instance.repository_name}</span>
@@ -944,7 +963,7 @@ function ManagerApp() {
 
         {selected && (
           <div className={`manager-folders${workflowOpen ? ' manager-folders-workflow-open' : ''}`}>
-            <details onToggle={event => setWorkflowOpen(event.currentTarget.open)}>
+            <details open={workflowOpen} onToggle={event => setWorkflowOpen(event.currentTarget.open)}>
               <summary><span>Workflow</span><span>{workflow ? (workflow.changed ? 'Update available' : 'Current') : 'Compare with template'}</span></summary>
               {workflow && (
                 <div className="manager-workflow-content">
@@ -958,7 +977,7 @@ function ManagerApp() {
                 </div>
               )}
             </details>
-            <details onToggle={event => setLogsOpen(event.currentTarget.open)}>
+            <details open={logsOpen} onToggle={event => setLogsOpen(event.currentTarget.open)}>
               <summary><span>Loop logs</span><span>View startup and Symphony output</span></summary>
               {logsOpen && <pre className="manager-logs">{logs || 'Loading logs…'}</pre>}
             </details>
