@@ -12,6 +12,7 @@ import { createManagerSelectionGate } from './manager-selection-gate.js';
 import { initialManagerFeedback, managerFeedbackReducer } from './manager-feedback.js';
 import { logsPanelViewState, logsReadFailureState, logsReadStartState, managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from './manager-read-state.js';
 import { workflowUpdateEligibility } from './workflow-update-eligibility.js';
+import { workflowComparisonAfterApply } from './workflow-apply-result.js';
 import { createWorkflowDiff } from './workflow-diff.js';
 import './style.css';
 
@@ -875,7 +876,11 @@ function ManagerApp() {
     return () => { logsReadRequestRef.current += 1; };
   }, [selectedId, logsOpen, refreshLogs]);
 
-  async function perform(path, { method = 'POST', body, label, target = 'manager' } = {}) {
+  async function perform(path, { method = 'POST', body, label, target = 'manager', selectionSnapshot, instanceId } = {}) {
+    const selectionGate = selectionGateRef.current;
+    const operationSelection = selectionSnapshot || (target === 'workflow' || target === 'lifecycle' ? selectionGate.capture() : null);
+    if (operationSelection && instanceId && operationSelection.instanceId !== instanceId) return null;
+    const selectionIsCurrent = () => !operationSelection || selectionGate.isCurrent(operationSelection);
     setBusy(label || 'Working…');
     dispatchFeedback({ type: 'operation-started', target });
     try {
@@ -889,12 +894,12 @@ function ManagerApp() {
         : restartRequired
           ? 'Runtime updated. Run leesh-loop in a terminal to reopen Manager with fresh access. This tab loses access after restart; running Loops keep their selected Runtime.'
           : (label === 'Updating Runtime' ? 'Runtime update completed.' : 'Change saved.');
-      dispatchFeedback({ type: 'operation-success', target, message });
+      if (selectionIsCurrent()) dispatchFeedback({ type: 'operation-success', target, message });
       await refreshInstances();
       await refreshRuntime();
       return result;
     } catch (requestError) {
-      dispatchFeedback({ type: 'operation-error', target, message: requestError.message || 'The Manager could not complete this action.' });
+      if (selectionIsCurrent()) dispatchFeedback({ type: 'operation-error', target, message: requestError.message || 'The Manager could not complete this action.' });
       return null;
     } finally {
       setBusy('');
@@ -926,16 +931,27 @@ function ManagerApp() {
 
   async function updateWorkflow() {
     if (!workflow?.changed || !workflowEligibility?.canApply) return;
+    const selectionGate = selectionGateRef.current;
+    const selectionSnapshot = selectionGate.capture();
+    const instanceId = selectionSnapshot.instanceId;
+    const comparisonAtApply = workflow;
+    if (!instanceId || instanceId !== selectedId) return;
     const accepted = window.confirm(`Replace the Workflow for ${selected.repository_name}? A backup will be kept in this instance's data.`);
     if (!accepted) return;
-    const result = await perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/workflow`, {
+    const result = await perform(`/api/v1/instances/${encodeURIComponent(instanceId)}/workflow`, {
       method: 'PUT',
-      body: { confirm: true, expectedCurrent: workflow.current, expectedCandidateDigest: workflow.candidate_digest },
+      body: { confirm: true, expectedCurrent: comparisonAtApply.current, expectedCandidateDigest: comparisonAtApply.candidate_digest },
       label: 'Updating Workflow',
-      target: 'workflow'
+      target: 'workflow',
+      selectionSnapshot,
+      instanceId
     });
     if (result) {
-      setWorkflow(current => current ? { ...current, current: current.candidate, changed: false } : current);
+      setWorkflow(current => workflowComparisonAfterApply(current, {
+        selectionGate,
+        selectionSnapshot,
+        candidateDigest: comparisonAtApply.candidate_digest
+      }));
     }
   }
 
@@ -983,9 +999,9 @@ function ManagerApp() {
             ) : lifecycleAction === 'stopping' ? (
               <span className="manager-lifecycle-pending" role="status">Stopping…</span>
             ) : lifecycleAction === 'stop' ? (
-              <button type="button" className="manager-action secondary" disabled={Boolean(busy)} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop', target: 'lifecycle' })}>{busy === 'Stopping Loop' ? 'Stopping…' : 'Stop Loop'}</button>
+              <button type="button" className="manager-action secondary" disabled={Boolean(busy)} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop', target: 'lifecycle', instanceId: selectedId })}>{busy === 'Stopping Loop' ? 'Stopping…' : 'Stop Loop'}</button>
             ) : (
-              <button type="button" className="manager-action" disabled={Boolean(busy) || selected.status === 'Unconfirmed'} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop', target: 'lifecycle' })}>{busy === 'Starting Loop' ? 'Starting…' : 'Start Loop'}</button>
+              <button type="button" className="manager-action" disabled={Boolean(busy) || selected.status === 'Unconfirmed'} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop', target: 'lifecycle', instanceId: selectedId })}>{busy === 'Starting Loop' ? 'Starting…' : 'Start Loop'}</button>
             )}
             <a className="manager-task-jump" href="#tasks-heading">View tasks</a>
             {selected.detail && <p className="inline-message failure manager-lifecycle-detail" role="status">{selected.detail}</p>}
