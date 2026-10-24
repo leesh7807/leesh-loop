@@ -174,14 +174,20 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
         const instance = await getLoopInstance(id, { environment, homeDirectory });
         const config = await readProjectConfiguration(instance.project_file, { validateWorkspaceFileSources: true, homeDirectory });
         const store = await taskStoreOpener(config.state_directory);
-        return { instance, config, store };
+        return { instance, config, store, configurationFingerprint: JSON.stringify(config) };
       })();
       taskStores.set(id, context);
       void context.catch(() => {
         if (taskStores.get(id) === context) taskStores.delete(id);
       });
     }
-    return context;
+    return context.then(async initialized => {
+      const currentConfig = await readProjectConfiguration(initialized.instance.project_file, { validateWorkspaceFileSources: true, homeDirectory });
+      if (JSON.stringify(currentConfig) !== initialized.configurationFingerprint) {
+        throw Object.assign(new Error('Instance project.toml changed after its Task Store was opened. Restart the Manager to reload this instance configuration.'), { status: 409 });
+      }
+      return initialized;
+    });
   }
 
   function closeTaskStores() {
