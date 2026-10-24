@@ -1,415 +1,76 @@
 import assert from 'node:assert/strict';
 import { execFile as execute } from 'node:child_process';
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { initLoop } from '../init.mjs';
-import { RUNTIME_SNAPSHOT_PATHS, listRuntimeSnapshotFiles } from '../runtime-manifest.mjs';
-import { githubRepositoryDetails, githubRepositoryTransport } from '../github-repository-url.mjs';
-import { readProjectConfiguration } from '../../project-config.mjs';
+import { createLoopInstance } from '../manager-storage.mjs';
 
 const execFile = promisify(execute);
 const sourceRoot = resolve(import.meta.dirname, '../../..');
-
-async function executable(path, contents) {
-  await writeFile(path, contents);
-  await chmod(path, 0o755);
-}
 
 async function git(cwd, ...args) {
   return execFile('git', args, { cwd, encoding: 'utf8' });
 }
 
-async function makeTarget(t, { upstream = true, remoteUrl = 'https://github.com/example/sample-repository.git' } = {}) {
+async function makeTarget(root, name, { upstream = true } = {}) {
+  const repository = join(root, name);
+  await mkdir(repository, { recursive: true });
+  await git(repository, 'init', '--quiet', '-b', 'main');
+  await git(repository, 'config', 'user.name', 'Init Test');
+  await git(repository, 'config', 'user.email', 'init-test@example.invalid');
+  await writeFile(join(repository, 'README.md'), `# ${name}\n`);
+  await git(repository, 'add', 'README.md');
+  await git(repository, 'commit', '--quiet', '-m', 'initial target');
+  if (upstream) {
+    await git(repository, 'remote', 'add', 'review', `https://github.com/example/${name}.git`);
+    const head = (await git(repository, 'rev-parse', 'HEAD')).stdout.trim();
+    await git(repository, 'update-ref', 'refs/remotes/review/releases/2026/init', head);
+    await git(repository, 'config', 'branch.main.remote', 'review');
+    await git(repository, 'config', 'branch.main.merge', 'refs/heads/releases/2026/init');
+  }
+  return repository;
+}
+
+test('init creates only the managed instance data and preserves the target Git repository', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-init-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const targetRoot = join(directory, 'sample-repository');
-  await mkdir(targetRoot);
-  await git(targetRoot, 'init', '--quiet', '-b', 'feature/init-target');
-  await git(targetRoot, 'config', 'user.name', 'Init Test');
-  await git(targetRoot, 'config', 'user.email', 'init-test@example.invalid');
-  await writeFile(join(targetRoot, 'README.md'), '# Target\n');
-  await git(targetRoot, 'add', 'README.md');
-  await git(targetRoot, 'commit', '--quiet', '-m', 'initial target');
-  if (upstream) {
-    await git(targetRoot, 'remote', 'add', 'review', remoteUrl);
-    const head = (await git(targetRoot, 'rev-parse', 'HEAD')).stdout.trim();
-    await git(targetRoot, 'update-ref', 'refs/remotes/review/releases/2026/init', head);
-    await git(targetRoot, 'config', 'branch.feature/init-target.remote', 'review');
-    await git(targetRoot, 'config', 'branch.feature/init-target.merge', 'refs/heads/releases/2026/init');
-  }
-  return { directory, targetRoot, destination: join(directory, 'sample-repository-loop') };
-}
-
-async function makeBrokenSource(t) {
-  const root = await mkdtemp(join(tmpdir(), 'leesh-loop-broken-source-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  await git(root, 'init', '--quiet');
-  await git(root, 'config', 'user.name', 'Init Test');
-  await git(root, 'config', 'user.email', 'init-test@example.invalid');
-  for (const entry of RUNTIME_SNAPSHOT_PATHS) {
-    if (entry.endsWith('/')) {
-      const file = join(root, `${entry}fixture.txt`);
-      await mkdir(join(file, '..'), { recursive: true });
-      await writeFile(file, 'fixture\n');
-    } else {
-      const file = join(root, entry);
-      await mkdir(join(file, '..'), { recursive: true });
-      if (entry === 'operator/app/leesh-loop.mjs') await symlink('missing-source-target', file);
-      else await writeFile(file, 'fixture\n');
-    }
-  }
-  await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'leesh-loop', version: '0.1.0', private: true, bin: { 'leesh-loop': 'bin/leesh-loop.mjs' } }));
-  await writeFile(join(root, 'package-lock.json'), JSON.stringify({ name: 'leesh-loop', version: '0.1.0', lockfileVersion: 3, requires: true, packages: { '': { name: 'leesh-loop', version: '0.1.0' } } }));
-  await mkdir(join(root, 'docs'), { recursive: true });
-  await writeFile(join(root, 'docs/WORKFLOW_TEMPLATE.md'), '# Reusable template\n');
-  await git(root, 'add', '-A');
-  return root;
-}
-
-async function walk(root, relative = '') {
-  const directory = join(root, relative);
-  const entries = await (await import('node:fs/promises')).readdir(directory, { withFileTypes: true });
-  const result = [];
-  for (const entry of entries) {
-    const child = relative ? `${relative}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) result.push(...await walk(root, child));
-    else result.push(child);
-  }
-  return result.sort();
-}
-
-test('init uses only the current branch configured upstream and creates an independent Loop snapshot', async t => {
-  const target = await makeTarget(t);
-  const before = (await git(target.targetRoot, 'status', '--porcelain')).stdout;
-  const result = await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
-  const projectPath = join(target.destination, 'project.toml');
-  const projectText = await readFile(projectPath, 'utf8');
-  const project = await readProjectConfiguration(projectPath);
-  const loopRuntime = await readFile(join(target.destination, 'operator/app/leesh-loop.mjs'), 'utf8');
-  const generatedPackage = JSON.parse(await readFile(join(target.destination, 'package.json'), 'utf8'));
-  const generatedLock = JSON.parse(await readFile(join(target.destination, 'package-lock.json'), 'utf8'));
-  const installation = JSON.parse(await readFile(join(target.destination, '.leesh-loop/installation.json'), 'utf8'));
-  const workflow = await readFile(join(target.destination, 'WORKFLOW.md'), 'utf8');
-  const template = (await readFile(join(sourceRoot, 'docs/WORKFLOW_TEMPLATE.md'), 'utf8')).trim();
-  const templateStart = workflow.indexOf(template);
-  assert.notEqual(templateStart, -1, 'generated workflow must include the trimmed reusable template');
-  const bootstrap = workflow.slice(0, templateStart).trimEnd();
-  const files = await walk(target.destination);
-  const manifestFiles = listRuntimeSnapshotFiles(sourceRoot);
-
-  assert.equal(result.target.remoteName, 'review');
-  assert.equal(result.target.remoteUrl, 'https://github.com/example/sample-repository.git');
-  assert.equal(result.target.upstreamBranch, 'releases/2026/init');
-  assert.equal(project.github_repository_url, result.target.remoteUrl);
-  assert.equal(project.github_base_branch, 'releases/2026/init');
-  assert.equal(project.codex_model, 'gpt-6-luna');
-  assert.equal(project.codex_reasoning_effort, 'xhigh');
-  assert.equal(project.workflow_path, join(target.destination, 'WORKFLOW.md'));
-  assert.equal(project.symphony_workspace_root, join(target.destination, '.runtime/workspaces'));
-  assert.equal(project.state_directory, join(target.destination, '.runtime/state'));
-  assert.equal(generatedPackage.scripts.start, 'node operator/app/prepare-runtime.mjs && node operator/app/leesh-loop.mjs start project.toml');
-  assert.equal(generatedPackage.scripts.stop, 'node operator/app/leesh-loop.mjs stop project.toml');
-  assert.equal(generatedLock.name, generatedPackage.name);
-  assert.equal(generatedLock.version, generatedPackage.version);
-  assert.equal(generatedLock.packages[''].name, generatedPackage.name);
-  assert.equal(generatedLock.packages[''].version, generatedPackage.version);
-  assert.equal(installation.schemaVersion, 1);
-  assert.ok(installation.installationId);
-  assert.deepEqual(installation.runtime.managedFiles, manifestFiles);
-  assert.deepEqual(installation.workflow.managedFiles, ['WORKFLOW.md']);
-  assert.match(generatedPackage.scripts.start, /operator\/app\/prepare-runtime\.mjs/);
-  assert.deepEqual(Object.keys(generatedPackage.scripts).sort(), ['publish-local-plan', 'start', 'stop']);
-  assert.equal(result.workflowPath, join(target.destination, 'WORKFLOW.md'));
-  assert.match(result.completionOutput, /Local Task Store:/);
-  assert.match(result.completionOutput, /no Task database credentials are required/);
-  assert.match(result.completionOutput, /docs\/WORKFLOW_TEMPLATE\.md/);
-  assert.match(result.completionOutput, /npm start/);
-  assert.doesNotMatch(result.completionOutput, /npm (?:install|ci)|mix deps\.get/);
-  assert.match(bootstrap, /^---\ntracker:\n  kind: local/m);
-  assert.doesNotMatch(bootstrap, /kind: notion|LEESH_LOOP_NOTION_DATABASE_URL|NOTION_TOKEN/);
-  assert.match(bootstrap, /root: \$SYMPHONY_WORKSPACE_ROOT/);
-  assert.match(bootstrap, /git clone --branch "\$SYMPHONY_GITHUB_BASE_BRANCH" "\$SYMPHONY_GITHUB_REPOSITORY_URL"/);
-  const cloneIndex = bootstrap.indexOf('git clone --branch "$SYMPHONY_GITHUB_BASE_BRANCH" "$SYMPHONY_GITHUB_REPOSITORY_URL" .');
-  const materializerIndex = bootstrap.indexOf('node "$LEESH_LOOP_RUNTIME_ROOT/operator/app/workspace-files.mjs" "$PWD"');
-  assert.ok(cloneIndex >= 0, 'generated after_create must clone the configured repository');
-  assert.ok(materializerIndex > cloneIndex, 'generated after_create must invoke the existing materializer after cloning');
-  assert.match(loopRuntime, /environment\.LEESH_LOOP_RUNTIME_ROOT = runtimeRoot/);
-  assert.match(bootstrap, /env PATH="\$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:\$PATH"/);
-  assert.ok(!files.some(file => file.startsWith('operator/notion_publisher/')));
-  assert.ok(files.includes('operator/ui/package-lock.json'));
-  assert.ok(files.includes('operator/symphony/mix.lock'));
-  assert.ok(files.includes('operator/symphony/mise.toml'));
-  assert.ok(files.includes('operator/external/chatgpt-shot/chatgpt-shot'));
-  assert.ok(files.includes('operator/app/prepare-runtime.mjs'));
-  assert.ok(files.includes('operator/app/local-task-store-runtime.mjs'));
-  assert.ok(files.includes('operator/local_task_store/package-lock.json'));
-  assert.ok(files.includes('operator/local_task_store/src/local-task-store.mjs'));
-  assert.ok((await stat(join(target.destination, 'operator/app/operator-bootstrap'))).mode & 0o111);
-  assert.equal(
-    await readFile(join(target.destination, 'operator/app/operator-bootstrap'), 'utf8'),
-    await readFile(join(sourceRoot, 'operator/app/operator-bootstrap'), 'utf8')
-  );
-  const prepareRuntime = await readFile(join(target.destination, 'operator/app/prepare-runtime.mjs'), 'utf8');
-  assert.match(prepareRuntime, /mise.*mix.*deps\.get/);
-  assert.match(projectText, /UI port\. Default: 4310/);
-  assert.match(projectText, /Symphony runtime port\. Default: 4100/);
-  assert.match(projectText, /workspace_files = \[\]/);
-  assert.match(projectText, /Relative paths use this project\.toml directory/);
-  assert.match(projectText, /Absolute paths and ~\/ paths are also supported/);
-  assert.match(projectText, /Git tracking does not matter/);
-  assert.match(projectText, /workspace root under its basename/);
-  assert.match(projectText, /same basename are rejected/);
-  assert.match(projectText, /Directories and globs are not supported/);
-  assert.match(projectText, /# Target Git repository and base branch for this Loop\.\ngithub_repository_url = .+\ngithub_base_branch = .+/);
-  assert.match(projectText, /# Worker contract file\. Relative paths use this project\.toml directory\.\nworkflow_path = .+/);
-  assert.match(projectText, /# Optional Codex worker overrides\. Remove either value to use that Codex default\.\ncodex_model = .+\ncodex_reasoning_effort = .+/);
-  assert.ok(projectText.indexOf('# Target Git repository') < projectText.indexOf('# Extra regular files'));
-  assert.ok(projectText.indexOf('# Extra regular files') < projectText.indexOf('# Optional Codex'));
-  assert.match(projectText, /open_project_surfaces = false/);
-  assert.match(projectText, /startup_timeout_ms = 1800000/);
-  assert.doesNotMatch(projectText, /NOTION_TOKEN|LEESH_LOOP_NOTION_DATABASE_URL/);
-  assert.equal(files.includes('operator/project.json'), false);
-  assert.equal(manifestFiles.includes('project.toml'), false, 'project.toml is generated at the Loop root, outside the runtime snapshot manifest');
-  for (const file of files) assert.ok(!(await lstat(join(target.destination, file))).isSymbolicLink(), `${file} must be materialized, not linked`);
-  const generatedInputs = [generatedPackage, project, workflow, prepareRuntime].map(value => typeof value === 'string' ? value : JSON.stringify(value)).join('\n');
-  assert.equal(generatedInputs.includes(sourceRoot), false);
-  assert.ok(!files.some(file => file.includes('/test/') || file.startsWith('docs/')));
-  assert.ok(!files.some(file => file.endsWith('node_modules') || file.includes('/node_modules/')));
-  assert.ok(!files.some(file => file === '.env'));
-  assert.deepEqual(files.filter(file => !['.env.example', 'WORKFLOW.md', 'project.toml', '.leesh-loop/installation.json'].includes(file)), manifestFiles);
-  assert.equal((await git(target.targetRoot, 'status', '--porcelain')).stdout, before);
-});
-
-test('generated after_create resolves its materializer independently of a custom workspace root', async t => {
-  const target = await makeTarget(t);
-  await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
-  const workflow = await readFile(join(target.destination, 'WORKFLOW.md'), 'utf8');
-  const template = (await readFile(join(sourceRoot, 'docs/WORKFLOW_TEMPLATE.md'), 'utf8')).trim();
-  const bootstrap = workflow.slice(0, workflow.indexOf(template)).trimEnd();
-  const materializerCommand = bootstrap.split('\n').map(line => line.trim()).find(line => line.startsWith('node "$LEESH_LOOP_RUNTIME_ROOT/operator/app/workspace-files.mjs"'));
-  assert.ok(materializerCommand, 'generated after_create must use the runtime-root materializer path');
-
-  const customWorkspaceRoot = join(target.directory, 'custom-workspaces');
-  const workspace = join(customWorkspaceRoot, 'new-worker');
-  const source = join(target.directory, 'custom-settings.json');
-  await mkdir(workspace, { recursive: true });
-  await writeFile(source, '{"workspace":"custom-root"}\n');
-  await execFile('sh', ['-ec', materializerCommand], {
-    cwd: workspace,
-    env: {
-      ...process.env,
-      LEESH_LOOP_RUNTIME_ROOT: target.destination,
-      LEESH_LOOP_WORKSPACE_FILES: JSON.stringify([source]),
-      SYMPHONY_WORKSPACE_ROOT: customWorkspaceRoot
-    }
-  });
-  assert.equal(await readFile(join(workspace, 'custom-settings.json'), 'utf8'), '{"workspace":"custom-root"}\n');
-});
-
-test('an initialized independent Loop uses its bundled worker interface on fast start', async t => {
-  const target = await makeTarget(t);
-  await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
-  const bin = join(target.directory, 'bin');
-  const workerInterface = join(target.directory, 'cache', 'chatgpt-shot', 'worker-interface');
-  const log = join(target.directory, 'commands.log');
-  const workspace = join(target.directory, 'workspaces');
-  await mkdir(bin);
-  const nodeWrapper = `#!/bin/sh\nexec "${process.execPath}" "$@"\n`;
-  await executable(join(bin, 'node'), nodeWrapper);
-  await executable(join(bin, 'git'), `#!/bin/sh
-case "$1" in
-  check-ref-format) exit 0 ;;
-  ls-remote)
-    case "$*" in
-      *'refs/heads/releases/2026/init'*) printf '0123456789012345678901234567890123456789 refs/heads/releases/2026/init\\n' ;;
-      *' HEAD'*) printf '0123456789012345678901234567890123456789 HEAD\\n' ;;
-      *) exit 0 ;;
-    esac
-    ;;
-  *) exit 0 ;;
-esac
-`);
-  await executable(join(bin, 'gh'), '#!/bin/sh\nexit 0\n');
-  await executable(join(bin, 'curl'), '#!/bin/sh\nexit 0\n');
-  await executable(join(bin, 'chatgpt-shot'), `#!/bin/sh
-printf 'fallback\\n' >> "$INIT_TEST_LOG"
-exit 91
-`);
-  const child = join(target.directory, 'child');
-  await executable(child, `#!/bin/sh
-set -eu
-PATH="$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:$PATH"
-export PATH
-printf '%s\\n' "$(command -v chatgpt-shot)" > "$INIT_TEST_LOG"
-chatgpt-shot submit 'independent Loop review'
-`);
-
-  const env = {
-    ...process.env,
-    PATH: `${bin}:/usr/bin:/bin`,
-    HOME: join(target.directory, 'home'),
-    XDG_CONFIG_HOME: join(target.directory, 'config'),
-    XDG_DATA_HOME: join(target.directory, 'data'),
-    XDG_CACHE_HOME: join(target.directory, 'cache'),
-    INIT_TEST_LOG: log,
-    SYMPHONY_OPERATOR_STARTUP_STATUS_FILE: join(target.directory, 'startup-status'),
-    SYMPHONY_WORKSPACE_ROOT: workspace,
-    SYMPHONY_GITHUB_REPOSITORY_URL: 'git@github.com:example/sample-repository.git',
-    SYMPHONY_GITHUB_BASE_BRANCH: 'releases/2026/init'
+  const targetRoot = await makeTarget(directory, 'sample-repository');
+  const before = (await git(targetRoot, 'status', '--porcelain')).stdout;
+  const xdg = {
+    XDG_DATA_HOME: join(directory, 'data'),
+    XDG_STATE_HOME: join(directory, 'state'),
+    XDG_CONFIG_HOME: join(directory, 'config')
   };
-  delete env.SYMPHONY_OPERATOR_INTERFACE_ROOT;
-  delete env.CHATGPT_SHOT_WORKER_DISCOVERY_PATH;
-  delete env.CHATGPT_SHOT_WORKER_INTERFACE_ROOT;
-  delete env.SYMPHONY_OPERATOR_READINESS_FILE;
-  const generatedBootstrap = join(target.destination, 'operator/app/operator-bootstrap');
-  await assert.rejects(
-    execFile('sh', [generatedBootstrap, '--skip-external-readiness', '--', child], { env }),
-    error => /BROWSER_UNAVAILABLE: No prepared chatgpt-shot Service discovery/.test(String(error.stderr))
-  );
 
-  assert.equal(await readFile(log, 'utf8'), `${join(workerInterface, 'chatgpt-shot')}\n`);
-  assert.equal(
-    await readFile(join(workerInterface, 'chatgpt-shot'), 'utf8'),
-    await readFile(join(target.destination, 'operator/external/chatgpt-shot/chatgpt-shot'), 'utf8')
-  );
+  const instance = await createLoopInstance(targetRoot, { sourceRoot, environment: { ...process.env, ...xdg }, homeDirectory: directory });
+  const files = await readdir(instance.data_directory);
+  const project = await readFile(join(instance.data_directory, 'project.toml'), 'utf8');
+  const workflow = await readFile(join(instance.data_directory, 'WORKFLOW.md'), 'utf8');
+  assert.equal(instance.repository_root, targetRoot);
+  assert.equal(instance.base_branch, 'releases/2026/init');
+  assert.ok(files.includes('project.toml'));
+  assert.ok(files.includes('WORKFLOW.md'));
+  assert.ok(!files.includes('operator'));
+  assert.ok(!files.includes('.env.example'));
+  assert.match(project, /github_repository_url = "https:\/\/github.com\/example\/sample-repository\.git"/);
+  assert.doesNotMatch(project, /(?:ui_port|symphony_port)\s*=/);
+  assert.match(workflow, /^---\ntracker:\n  kind: local/m);
+  assert.equal((await git(targetRoot, 'status', '--porcelain')).stdout, before);
+  await assert.rejects(createLoopInstance(targetRoot, { sourceRoot, environment: { ...process.env, ...xdg }, homeDirectory: directory }), /already managed/);
 });
 
-test('the generated Operator configuration loads without Task database settings', async t => {
-  const target = await makeTarget(t);
-  await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
-  const generatedOperatorPath = pathToFileURL(join(target.destination, 'operator/app/leesh-loop.mjs')).href;
-  const { loadConfig } = await import(generatedOperatorPath);
-  const projectPath = join(target.destination, 'project.toml');
-  const config = await loadConfig(projectPath, { validateWorkspaceFileSources: false });
-  assert.equal(config.state_directory, join(target.destination, '.runtime/state'));
-  assert.equal(Object.hasOwn(config, 'task_store'), false);
-  assert.equal(Object.hasOwn(config, 'notion_database_url'), false);
-  assert.equal(await readFile(join(target.destination, '.env.example'), 'utf8').then(value => /NOTION_TOKEN|LEESH_LOOP_NOTION_DATABASE_URL/.test(value)), false);
-  await assert.rejects(lstat(join(target.destination, '.env')), error => error.code === 'ENOENT');
-});
-
-test('init fails without a resolvable configured upstream and leaves no destination', async t => {
-  const target = await makeTarget(t, { upstream: false });
-  await assert.rejects(
-    initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} }),
-    /current branch 'feature\/init-target' has no configured remote branch/
-  );
-  await assert.rejects(lstat(target.destination), error => error.code === 'ENOENT');
-  assert.equal((await git(target.targetRoot, 'status', '--porcelain')).stdout, '');
-});
-
-test('destination collision fails without changing existing content or type', async t => {
-  const target = await makeTarget(t);
-  await mkdir(target.destination);
-  await writeFile(join(target.destination, 'operator-owned.txt'), 'keep\n');
-  const before = await walk(target.destination);
-  await assert.rejects(
-    initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} }),
-    /Loop folder already exists, so init left it unchanged/
-  );
-  assert.deepEqual(await walk(target.destination), before);
-  assert.equal(await readFile(join(target.destination, 'operator-owned.txt'), 'utf8'), 'keep\n');
-});
-
-test('file and symlink destination collisions are rejected without following or changing them', async t => {
-  const fileTarget = await makeTarget(t);
-  await writeFile(fileTarget.destination, 'keep file\n');
-  await assert.rejects(initLoop({ cwd: fileTarget.targetRoot, sourceRoot, environment: {} }), /Loop folder already exists/);
-  assert.equal(await readFile(fileTarget.destination, 'utf8'), 'keep file\n');
-
-  const symlinkTarget = await makeTarget(t);
-  const protectedFile = join(symlinkTarget.directory, 'protected-data.txt');
-  await writeFile(protectedFile, 'keep target\n');
-  await symlink(protectedFile, symlinkTarget.destination);
-  await assert.rejects(initLoop({ cwd: symlinkTarget.targetRoot, sourceRoot, environment: {} }), /Loop folder already exists/);
-  assert.equal((await lstat(symlinkTarget.destination)).isSymbolicLink(), true);
-  assert.equal(await readFile(protectedFile, 'utf8'), 'keep target\n');
-});
-
-test('failure after destination creation removes the partial Loop so init can be retried', async t => {
-  const target = await makeTarget(t);
-  const brokenSource = await makeBrokenSource(t);
-  await assert.rejects(
-    initLoop({ cwd: target.targetRoot, sourceRoot: brokenSource, environment: {} }),
-    /runtime snapshot source is not a regular file: operator\/app\/leesh-loop\.mjs/
-  );
-  await assert.rejects(lstat(target.destination), error => error.code === 'ENOENT');
-  assert.equal((await git(target.targetRoot, 'status', '--porcelain')).stdout, '');
-
-  await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
-  assert.equal((await readProjectConfiguration(join(target.destination, 'project.toml'))).github_base_branch, 'releases/2026/init');
-});
-
-test('runtime snapshot selection is a tracked whitelist and preserves executable entry points', async t => {
-  const files = listRuntimeSnapshotFiles(sourceRoot);
-  assert.ok(files.includes('operator/app/operator-bootstrap'));
-  assert.ok(files.includes('operator/app/run-symphony'));
-  assert.ok(!files.some(file => file.startsWith('operator/app/test/')));
-  assert.ok(!files.some(file => file.startsWith('operator/symphony/test/')));
-  assert.ok(!files.some(file => file.startsWith('docs/plans/')));
-});
-
-test('one GitHub repository URL policy accepts the supported HTTPS and SSH transports', () => {
-  for (const [url, transport] of [
-    ['https://github.com/example/repository.git', 'https'],
-    ['git@github.com:example/repository.git', 'ssh'],
-    ['ssh://git@github.com/example/repository.git', 'ssh']
-  ]) {
-    assert.equal(githubRepositoryTransport(url), transport);
-    assert.deepEqual(githubRepositoryDetails(url), {
-      transport,
-      owner: 'example',
-      repository: 'repository',
-      identity: 'example/repository',
-      name: 'repository',
-      browserRepositoryUrl: 'https://github.com/example/repository'
-    });
-  }
-  assert.throws(() => githubRepositoryTransport('https://user:token@github.com/example/repository.git'), /contains credentials/);
-  assert.throws(() => githubRepositoryTransport('https://gitlab.com/example/repository.git'), /requires a GitHub repository/);
-  assert.throws(() => githubRepositoryTransport('https://github.com/example/repository/tree/main'), /does not identify a GitHub repository/);
-  assert.throws(() => githubRepositoryTransport('git@github.com:example/repository/tree/main'), /requires an HTTPS or SSH GitHub upstream URL/);
-  assert.throws(() => githubRepositoryTransport('ssh://git@github.com/example/repo?tab=code'), /does not identify a GitHub repository/);
-  assert.throws(() => githubRepositoryTransport('git@github.com:example'), /requires an HTTPS or SSH GitHub upstream URL/);
-});
-
-test('init preserves HTTPS and SSH clone URLs while the generated Loop resolves one repository identity', async t => {
-  for (const remoteUrl of [
-    'https://github.com/example/sample-repository.git',
-    'git@github.com:example/sample-repository.git',
-    'ssh://git@github.com/example/sample-repository.git'
-  ]) {
-    await t.test(remoteUrl, async t => {
-      const target = await makeTarget(t, { remoteUrl });
-      const before = (await git(target.targetRoot, 'status', '--porcelain')).stdout;
-      await initLoop({ cwd: target.targetRoot, sourceRoot, environment: {} });
-      const project = await readProjectConfiguration(join(target.destination, 'project.toml'));
-      const generatedServerUrl = pathToFileURL(join(target.destination, 'operator/app/operator-ui-server.mjs')).href;
-      const { createOperatorUiServer } = await import(generatedServerUrl);
-      const server = await createOperatorUiServer({
-        root: target.destination,
-        config: { ...project, ui_port: 4310, symphony_port: 4100 },
-        stateDirectory: join(target.destination, '.runtime/state')
-      });
-      server.listen(0, '127.0.0.1');
-      await new Promise((resolveListen, rejectListen) => { server.once('listening', resolveListen); server.once('error', rejectListen); });
-      t.after(() => new Promise(resolveClose => { server.closeAllConnections(); server.close(resolveClose); }));
-
-      const response = await fetch(`http://127.0.0.1:${server.address().port}/api/v1/config`);
-      const config = await response.json();
-      assert.equal(response.status, 200);
-      assert.equal(project.github_repository_url, remoteUrl);
-      assert.equal(project.github_base_branch, 'releases/2026/init');
-      assert.equal(config.githubRepositoryIdentity, 'example/sample-repository');
-      assert.equal(config.githubRepositoryName, 'sample-repository');
-      assert.equal(config.githubBrowserRepositoryUrl, 'https://github.com/example/sample-repository');
-      assert.equal(Object.hasOwn(config, 'githubRepositoryUrl'), false, 'the UI read model must not expose the clone URL as a browser destination');
-      assert.equal(Object.hasOwn(config, 'notionTasksUrl'), false);
-      assert.equal((await git(target.targetRoot, 'status', '--porcelain')).stdout, before);
-    });
-  }
+test('init rejects repositories without a configured upstream before creating an instance', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-init-no-upstream-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const targetRoot = await makeTarget(directory, 'private-project', { upstream: false });
+  const environment = {
+    ...process.env,
+    XDG_DATA_HOME: join(directory, 'data'),
+    XDG_STATE_HOME: join(directory, 'state'),
+    XDG_CONFIG_HOME: join(directory, 'config')
+  };
+  await assert.rejects(createLoopInstance(targetRoot, { sourceRoot, environment, homeDirectory: directory }), /no configured remote branch/);
+  assert.deepEqual(await readdir(join(directory, 'data/leesh-loop/instances')).catch(error => error.code === 'ENOENT' ? [] : Promise.reject(error)), []);
 });

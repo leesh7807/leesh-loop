@@ -1,62 +1,50 @@
 #!/usr/bin/env node
-import { realpathSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initLoop } from '../operator/app/init.mjs';
-import { updateLoop } from '../operator/app/update.mjs';
-import { listLoopInstances, registerLoop, resolveLoopInstance } from '../operator/app/instance-registry.mjs';
+import { installRuntimeDistribution } from '../operator/app/runtime-distribution.mjs';
+import { managerPaths, readJsonFile } from '../operator/app/manager-storage.mjs';
+import { ensureManagerService, managerRequest } from '../operator/app/manager-service.mjs';
 
+const cliPath = realpathSync(fileURLToPath(import.meta.url));
+const distributionRoot = resolve(dirname(cliPath), '..');
+let sourceRoot = distributionRoot;
+try {
+  const distribution = JSON.parse(readFileSync(resolve(distributionRoot, '.distribution.json'), 'utf8'));
+  if (typeof distribution.source_root === 'string' && existsSync(distribution.source_root)) sourceRoot = realpathSync(distribution.source_root);
+} catch { /* A source checkout is used directly when no central distribution metadata exists. */ }
 const usage = [
   'Usage:',
-  '  leesh-loop init             Create a Loop from the target repository root',
-  '  leesh-loop update           Update runtime files from the installed distribution',
-  '  leesh-loop update --workflow Replace only the generated WORKFLOW.md',
-  '  leesh-loop list             List registered Loop instances',
-  '  leesh-loop start <instance> Start a registered Loop',
-  '  leesh-loop stop <instance>  Stop a registered Loop'
+  '  leesh-loop                 Open the central Manager UI',
+  '  leesh-loop init            Create a managed Loop for this Git repository',
+  '  leesh-loop update          Install and activate the central Runtime',
+  '  leesh-loop list            List managed Loop instances',
+  '  leesh-loop start <id>      Start one managed Loop instance',
+  '  leesh-loop stop <id>       Stop one managed Loop instance'
 ].join('\n');
 
 function printInstances(instances) {
   if (instances.length === 0) {
-    console.log('No Loop instances are registered.');
+    console.log('No managed Loop instances are registered.');
     return;
   }
-  const rows = instances.map(value => [value.id, value.name, value.status, value.path]);
-  const headers = ['ID', 'NAME', 'STATUS', 'PATH'];
-  const widths = headers.map((header, index) => Math.max(header.length, ...rows.map(row => row[index].length)));
+  const rows = instances.map(value => [value.id, value.repository_name, value.status, value.repository_root]);
+  const headers = ['ID', 'REPOSITORY', 'STATUS', 'PATH'];
+  const widths = headers.map((header, index) => Math.max(header.length, ...rows.map(row => String(row[index]).length)));
   console.log(headers.map((value, index) => value.padEnd(widths[index])).join('  '));
-  for (const row of rows) console.log(row.map((value, index) => value.padEnd(widths[index])).join('  '));
-  for (const value of instances) {
-    if (value.detail) console.error(`leesh-loop: ${value.id}: ${value.detail}`);
-  }
+  for (const row of rows) console.log(row.map((value, index) => String(value).padEnd(widths[index])).join('  '));
+  for (const value of instances) if (value.detail) console.error(`leesh-loop: ${value.id}: ${value.detail}`);
 }
 
-async function registerCompletedOperation(result, action) {
-  try {
-    const instance = await registerLoop({ cwd: result.destination || process.cwd() });
-    console.log(`Global instance: ${instance.name} (${instance.id})`);
-    return true;
-  } catch (error) {
-    const completed = action === 'init'
-      ? `init completed and created ${result.destination}`
-      : `${action} completed successfully`;
-    console.error(`leesh-loop: ${completed}, but global registration failed: ${error.message}`);
-    process.exitCode = 1;
-    return false;
+async function waitForManagerExit(record) {
+  if (!record) return;
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try { process.kill(record.pid, 0); }
+    catch (error) { if (error?.code === 'ESRCH') return; }
+    await new Promise(resolveSleep => setTimeout(resolveSleep, 100));
   }
-}
-
-async function runNpm(action, instance) {
-  const selected = await resolveLoopInstance(instance);
-  const result = spawnSync('npm', [action], { cwd: selected.path, stdio: 'inherit' });
-  if (result.error) throw new Error(`could not run npm ${action} in ${selected.path}: ${result.error.message}`);
-  if (result.signal) {
-    console.error(`leesh-loop: npm ${action} for ${selected.id} ended from signal ${result.signal}`);
-    process.exitCode = 1;
-    return;
-  }
-  if (result.status !== 0) process.exitCode = result.status ?? 1;
+  throw new Error('Manager restart was requested but its process did not exit.');
 }
 
 async function main() {
@@ -65,28 +53,52 @@ async function main() {
     console.log(usage);
     return;
   }
-  if (command === 'init' && args.length === 0) {
-    const cliPath = realpathSync(fileURLToPath(import.meta.url));
-    const sourceRoot = resolve(dirname(cliPath), '..');
-    const result = await initLoop({ cwd: process.cwd(), sourceRoot });
-    console.log(result.completionOutput);
-    await registerCompletedOperation(result, 'init');
+  const selectedCommand = command || 'open';
+  if (selectedCommand === 'open' && args.length === 0) {
+    const manager = await ensureManagerService({ sourceRoot, openBrowser: true });
+    console.log(`Leesh Loop Manager: ${manager.url}`);
     return;
   }
-  if (command === 'update' && (args.length === 0 || (args.length === 1 && args[0] === '--workflow'))) {
-    const cliPath = realpathSync(fileURLToPath(import.meta.url));
-    const sourceRoot = resolve(dirname(cliPath), '..');
-    const result = await updateLoop({ cwd: process.cwd(), sourceRoot, workflowOnly: args[0] === '--workflow' });
-    console.log(`Leesh Loop ${result.area} update applied (${result.distributionId}).`);
-    await registerCompletedOperation({}, `update${args[0] === '--workflow' ? ' --workflow' : ''}`);
+  if (selectedCommand === 'init' && args.length === 0) {
+    const manager = await ensureManagerService({ sourceRoot });
+    const result = await managerRequest(manager, '/api/v1/instances', { method: 'POST', body: { repositoryPath: process.cwd() } });
+    console.log(`Leesh Loop instance created: ${result.instance.repository_name} (${result.instance.id})`);
+    console.log(`Repository: ${result.instance.repository_root}`);
+    console.log(`Manager: ${manager.url}`);
     return;
   }
-  if (command === 'list' && args.length === 0) {
-    printInstances(await listLoopInstances());
+  if (selectedCommand === 'list' && args.length === 0) {
+    const manager = await ensureManagerService({ sourceRoot });
+    const result = await managerRequest(manager, '/api/v1/instances');
+    printInstances(result.instances);
     return;
   }
-  if ((command === 'start' || command === 'stop') && args.length === 1 && !args[0].startsWith('-')) {
-    await runNpm(command, args[0]);
+  if (selectedCommand === 'start' && args.length === 1) {
+    const manager = await ensureManagerService({ sourceRoot });
+    const result = await managerRequest(manager, `/api/v1/instances/${encodeURIComponent(args[0])}/start`, { method: 'POST' });
+    console.log(`Loop ${result.instance.id}: ${result.instance.status}${result.instance.port ? ` on port ${result.instance.port}` : ''}`);
+    return;
+  }
+  if (selectedCommand === 'stop' && args.length === 1) {
+    const manager = await ensureManagerService({ sourceRoot });
+    const result = await managerRequest(manager, `/api/v1/instances/${encodeURIComponent(args[0])}/stop`, { method: 'POST' });
+    console.log(`Loop ${result.instance.id}: ${result.instance.status}`);
+    return;
+  }
+  if (selectedCommand === 'update' && args.length === 0) {
+    const updated = await installRuntimeDistribution(sourceRoot);
+    let manager = await ensureManagerService({ sourceRoot });
+    if (manager.alreadyRunning) {
+      const paths = managerPaths();
+      const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
+      if (service?.runtime_version !== updated.id) {
+        await managerRequest(manager, '/api/v1/manager/restart', { method: 'POST' });
+        await waitForManagerExit(service);
+        manager = await ensureManagerService({ sourceRoot });
+      }
+    }
+    console.log(`Central Runtime ${updated.version} (${updated.id}) is active.`);
+    console.log(`Manager: ${manager.url}`);
     return;
   }
   console.error(usage);
@@ -94,6 +106,6 @@ async function main() {
 }
 
 main().catch(error => {
-  console.error(`leesh-loop: ${error instanceof Error ? error.message : String(error)}`);
+  console.error(`leesh-loop: ${error.message}`);
   process.exitCode = 1;
 });

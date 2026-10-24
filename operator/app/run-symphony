@@ -3,6 +3,14 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 repository_root=$(CDPATH= cd -- "$script_dir/../.." && pwd -P)
+data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
+cache_home=${XDG_CACHE_HOME:-"$HOME/.cache"}
+
+case "$data_home" in /*) ;; *) echo "XDG_DATA_HOME must be an absolute path" >&2; exit 64 ;; esac
+case "$cache_home" in /*) ;; *) echo "XDG_CACHE_HOME must be an absolute path" >&2; exit 64 ;; esac
 
 cd "$repository_root/operator/symphony"
-exec mise exec -- mix run --no-start -e 'SymphonyElixir.CLI.main(System.argv())' -- "$@"
+exec mise exec -- env \
+  "MIX_HOME=$data_home/leesh-loop/mix" \
+  "HEX_HOME=$cache_home/leesh-loop/hex" \
+  mix run --no-start -e 'SymphonyElixir.CLI.main(System.argv())' -- "$@"
