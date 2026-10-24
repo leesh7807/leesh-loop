@@ -126,6 +126,7 @@ import { unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 const directory = process.env.LEESH_LOOP_EXECUTION_STATE_DIRECTORY;
 const state = JSON.parse(readFileSync(join(directory, 'runtime.json'), 'utf8'));
+if (process.argv[2] !== 'stop-owned-managed' || process.argv[3] !== directory.split('/').at(-1) || process.argv[4] !== state.runtime_id) throw new Error('Manager did not use identity-bound managed stop');
 const processStat = readFileSync('/proc/' + state.pid + '/stat', 'utf8');
 const currentTicks = processStat.slice(processStat.lastIndexOf(')') + 1).trim().split(/\\s+/)[19];
 if (currentTicks !== state.process_start_ticks) throw new Error('test Runtime process identity mismatch');
@@ -416,6 +417,20 @@ test('Manager Task Store and Loop start reject a state path owned by another ins
   const secondTasks = await api(manager, '/api/v1/tasks', { instanceId: second.id });
   assert.equal(secondTasks.response.status, 200);
   assert.deepEqual(openedStores, [join(first.data_directory, 'state'), join(second.data_directory, 'state')]);
+});
+
+test('Manager Loop start rejects a workspace root owned by another instance', async t => {
+  const paths = await fixture(t);
+  const repositories = join(paths.directory, 'repositories');
+  const first = await createLoopInstance(await makeRepository(repositories, 'workspace-owner-first'), { sourceRoot, ...paths });
+  const second = await createLoopInstance(await makeRepository(repositories, 'workspace-owner-second'), { sourceRoot, ...paths });
+  const projectFile = join(first.data_directory, 'project.toml');
+  const project = await readFile(projectFile, 'utf8');
+  const workspaceRoot = /^symphony_workspace_root = "([^"]+)"$/m.exec(project);
+  assert.ok(workspaceRoot);
+  await writeFile(projectFile, project.replace(workspaceRoot[0], 'symphony_workspace_root = "' + join(second.data_directory, 'workspaces') + '"'));
+
+  await assert.rejects(startLoopInstance(first.id, paths), /symphony_workspace_root must match its managed per-instance workspace directory/);
 });
 
 test('Manager rejects stale Task Store configuration until it restarts', async t => {
@@ -1522,6 +1537,23 @@ test('Workflow review and apply follow a custom instance-owned workflow_path', a
   const rejected = await api(manager, '/api/v1/instances/' + instance.id + '/workflow');
   assert.equal(rejected.response.status, 409);
   assert.match(rejected.body.error, /workflow_path must point to a regular file inside its managed data directory/);
+
+  const projectWithOutsideWorkflow = await readFile(projectFile, 'utf8');
+  await writeFile(projectFile, projectWithOutsideWorkflow.replace(/^workflow_path = .+$/m, 'workflow_path = "project.toml"'));
+  const projectBefore = await readFile(projectFile);
+  const reservedProject = await api(manager, '/api/v1/instances/' + instance.id + '/workflow');
+  assert.equal(reservedProject.response.status, 409);
+  assert.match(reservedProject.body.error, /dedicated Markdown file/);
+  assert.deepEqual(await readFile(projectFile), projectBefore);
+
+  const databasePath = join(instance.data_directory, 'state', 'local-task-store', 'local-task-store.sqlite');
+  const databaseBefore = await readFile(databasePath);
+  const projectWithReservedDatabase = await readFile(projectFile, 'utf8');
+  await writeFile(projectFile, projectWithReservedDatabase.replace(/^workflow_path = .+$/m, 'workflow_path = "state/local-task-store/local-task-store.sqlite"'));
+  const reservedDatabase = await api(manager, '/api/v1/instances/' + instance.id + '/workflow');
+  assert.equal(reservedDatabase.response.status, 409);
+  assert.match(reservedDatabase.body.error, /dedicated Markdown file/);
+  assert.deepEqual(await readFile(databasePath), databaseBefore);
 });
 
 test('Workflow updates require a stopped selected instance and preserve the prior file', async t => {
