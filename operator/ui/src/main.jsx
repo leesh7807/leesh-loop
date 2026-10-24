@@ -151,15 +151,15 @@ function TaskSurface({ tasks, selectedTaskId, loading, error, refreshedAt, onRet
   );
 }
 
-function PublicationSurface({ config, plan, state, selectedBlockers, publishing, onDraftChange, onReset, onPublished, apiFetch }) {
+function PublicationSurface({ config, instanceId, plan, state, selectedBlockers, publishing, onDraftChange, onReset, onPublished, apiFetch }) {
   const [result, setResult] = useState(null);
   const submitInFlight = useRef(false);
 
   useEffect(() => {
     const current = { plan, state, selectedBlockers };
-    if (result?.kind === 'success') clearPublicationDraft();
-    else writePublicationDraft(current);
-  }, [plan, state, selectedBlockers, result]);
+    if (result?.kind === 'success') clearPublicationDraft(instanceId);
+    else writePublicationDraft(current, instanceId);
+  }, [instanceId, plan, state, selectedBlockers, result]);
 
   async function submit(event) {
     event.preventDefault();
@@ -167,7 +167,7 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
     submitInFlight.current = true;
     setResult(null);
     const submittedBlockers = [...selectedBlockers];
-    writePublicationDraft({ plan, state, selectedBlockers: submittedBlockers });
+    writePublicationDraft({ plan, state, selectedBlockers: submittedBlockers }, instanceId);
     onDraftChange({ publishing: true });
     try {
       const response = await apiFetch('/api/v1/publish', {
@@ -177,7 +177,7 @@ function PublicationSurface({ config, plan, state, selectedBlockers, publishing,
       });
       const body = await responseJson(response);
       setResult({ kind: 'success', ...body, blockers: submittedBlockers });
-      clearPublicationDraft();
+      clearPublicationDraft(instanceId);
       onPublished(body);
     } catch (error) {
       setResult({ kind: 'failure', message: error.message || 'Publishing failed.' });
@@ -508,7 +508,7 @@ function OperatorApp({ instanceId }) {
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [navigationTarget, setNavigationTarget] = useState(null);
   const [publicationReceipt, setPublicationReceipt] = useState(null);
-  const [draft, setDraft] = useState(() => readPublicationDraft());
+  const [draft, setDraft] = useState(() => readPublicationDraft(instanceId));
   const [publishing, setPublishing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -608,7 +608,7 @@ function OperatorApp({ instanceId }) {
   }
   function resetDraft() {
     const emptyDraft = { plan: '', state: config?.defaultState || 'Ready', selectedBlockers: [] };
-    clearPublicationDraft();
+    clearPublicationDraft(instanceId);
     setDraft(emptyDraft);
   }
   function handleTaskChanged(task) {
@@ -646,6 +646,7 @@ function OperatorApp({ instanceId }) {
         ) : (
           <PublicationSurface
             config={{ ...config, tasks }}
+            instanceId={instanceId}
             plan={publishDraft.plan}
             state={publishDraft.state}
             selectedBlockers={publishDraft.selectedBlockers}
