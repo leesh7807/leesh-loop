@@ -914,7 +914,7 @@ function ManagerApp() {
         )}
 
         {selected && (
-          <div className="manager-folders">
+          <div className={`manager-folders${workflowOpen ? ' manager-folders-workflow-open' : ''}`}>
             <details onToggle={event => setWorkflowOpen(event.currentTarget.open)}>
               <summary><span>Workflow</span><span>{workflow ? (workflow.changed ? 'Update available' : 'Current') : 'Compare with template'}</span></summary>
               {workflow && (
