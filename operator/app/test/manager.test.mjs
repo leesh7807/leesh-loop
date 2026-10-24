@@ -119,28 +119,13 @@ async function installTestRuntime(paths, directoryName = 'fixture-runtime') {
 
 async function installStopTestRuntime(paths) {
   const managedPaths = managerPaths(paths);
-  const version = '0.1.1';
+  const version = '0.1.0';
   const filename = 'operator/app/leesh-loop.mjs';
-  const contents = Buffer.from(`import { readFileSync } from 'node:fs';
-import { unlink } from 'node:fs/promises';
-import { join } from 'node:path';
-const directory = process.env.LEESH_LOOP_EXECUTION_STATE_DIRECTORY;
-const state = JSON.parse(readFileSync(join(directory, 'runtime.json'), 'utf8'));
-if (process.argv[2] !== 'stop-owned-managed' || process.argv[3] !== directory.split('/').at(-1) || process.argv[4] !== state.runtime_id) throw new Error('Manager did not use identity-bound managed stop');
-const processStat = readFileSync('/proc/' + state.pid + '/stat', 'utf8');
-const currentTicks = processStat.slice(processStat.lastIndexOf(')') + 1).trim().split(/\\s+/)[19];
-if (currentTicks !== state.process_start_ticks) throw new Error('test Runtime process identity mismatch');
-process.kill(state.pid, 'SIGTERM');
-for (let attempt = 0; attempt < 120; attempt += 1) {
-  try { process.kill(state.pid, 0); } catch (error) { if (error.code === 'ESRCH') break; throw error; }
-  await new Promise(resolve => setTimeout(resolve, 25));
+  const contents = Buffer.from(`const supported = ['start', 'stop', 'stop-owned', 'serve', 'serve-prepared'];
+if (!supported.includes(process.argv[2])) {
+  console.error('This pinned Runtime predates managed-stop support.');
+  process.exitCode = 2;
 }
-try { process.kill(state.pid, 0); throw new Error('test Runtime process did not stop'); }
-catch (error) { if (error.code !== 'ESRCH') throw error; }
-for (const name of ['runtime.json', 'ownership.json', 'dispatch-authorization.json', 'dispatch-acknowledgement.json', 'startup-status']) {
-  await unlink(join(directory, name)).catch(error => { if (error.code !== 'ENOENT') throw error; });
-}
-console.log(JSON.stringify({ stopped: true }));
 `);
   const id = hashDistribution(version, [[filename, contents, 0o644]]);
   const runtimePath = join(managedPaths.runtimeRoot, id);
@@ -1150,7 +1135,7 @@ test('instance discovery isolates malformed dashboards and unavailable Runtime d
   assert.equal(instances.find(value => value.id === stoppedInstance.id).status, 'Stopped');
 });
 
-test('an orphaned unready runtime after its startup launcher exits can be stopped safely', async t => {
+test('Manager stops an orphaned runtime through its current CLI when the pinned Runtime predates managed stop', async t => {
   const paths = await fixture(t);
   const repository = await makeRepository(join(paths.directory, 'repositories'), 'orphan-project');
   const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
@@ -1177,7 +1162,7 @@ test('an orphaned unready runtime after its startup launcher exits can be stoppe
   const processStartTicks = processStat.slice(processStat.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
   const ownershipPath = join(executionDirectory, 'ownership.json');
   const acknowledgementPath = join(executionDirectory, 'dispatch-acknowledgement.json');
-  const runtimeId = 'orphan-runtime-1';
+  const runtimeId = '123e4567-e89b-42d3-a456-426614174000';
   await writeFile(ownershipPath, `${JSON.stringify({ project_root: runtime.path, runtime_id: runtimeId, pid: ownedProcess.pid, process_start_ticks: processStartTicks })}\n`);
   await writeFile(acknowledgementPath, `${JSON.stringify({ runtime_id: 'not-ready', pid: ownedProcess.pid, dispatch_capable: false })}\n`);
   await writeFile(join(executionDirectory, 'runtime.json'), `${JSON.stringify({

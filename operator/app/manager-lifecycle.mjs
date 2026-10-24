@@ -3,8 +3,9 @@ import { createServer } from 'node:net';
 import { constants, readFileSync } from 'node:fs';
 import { lstat, open, readFile, unlink } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readJsonFile, validateManagedInstanceConfiguration, writeAtomicJson } from './manager-storage.mjs';
 import { resolveRuntimePath } from './runtime-distribution.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
@@ -12,6 +13,7 @@ import { validateWorkspaceFiles } from './workspace-files.mjs';
 
 const execFile = promisify(execFileCallback);
 const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
+const managerRuntimeRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const executionRecordPath = (paths, id) => join(paths.loopExecutionRoot, id, 'execution.json');
 const runtimeStatePath = (paths, id) => join(paths.loopExecutionRoot, id, 'runtime.json');
 const launcherLogPath = (paths, id) => join(paths.loopExecutionRoot, id, 'start-command.log');
@@ -444,11 +446,14 @@ async function invokeLoopCommand({ runtimePath, instance, command, args = [], ti
   const executionDirectory = join(managerPaths({ environment }).loopExecutionRoot, instance.id);
   const env = { ...environment, LEESH_LOOP_EXECUTION_STATE_DIRECTORY: executionDirectory, LEESH_LOOP_MANAGER_MANAGED: 'true' };
   try {
+    // A Loop keeps its pinned Runtime across updates; lifecycle control must use
+    // the Manager's current CLI so older immutable distributions remain stoppable.
+    const commandRuntimeRoot = command === 'stop-owned-managed' ? managerRuntimeRoot : runtimePath.path;
     const cliArguments = command === 'stop-owned-managed'
-      ? [join(runtimePath.path, 'operator/app/leesh-loop.mjs'), command, instance.id, ...args]
-      : [join(runtimePath.path, 'operator/app/leesh-loop.mjs'), command, instance.project_file, ...args];
+      ? [join(commandRuntimeRoot, 'operator/app/leesh-loop.mjs'), command, instance.id, ...args]
+      : [join(commandRuntimeRoot, 'operator/app/leesh-loop.mjs'), command, instance.project_file, ...args];
     const result = await execFile(process.execPath, cliArguments, {
-      cwd: runtimePath.path,
+      cwd: commandRuntimeRoot,
       env,
       timeout,
       maxBuffer: 1024 * 1024
