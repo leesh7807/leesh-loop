@@ -5,14 +5,14 @@ import { constants, readFileSync } from 'node:fs';
 import { lstat, open, readFile, truncate, unlink } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readJsonFile, writeAtomicJson } from './manager-storage.mjs';
+import { managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readJsonFile, writeAtomic, writeAtomicJson } from './manager-storage.mjs';
 import { applyInstanceWorkflow, readInstanceWorkflow } from './manager-storage.mjs';
 import { discoverRunningLoops, loopInstanceStatus, readLoopLogs, startLoopInstance, stopLoopInstance } from './manager-lifecycle.mjs';
 import { activeRuntime, currentRuntimeSource, installRuntimeDistribution, listRuntimeDistributions, recordRuntimeSource } from './runtime-distribution.mjs';
 import { openLoopTaskStore } from './local-task-store-runtime.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
 import { createOperatorUiServer } from './operator-ui-server.mjs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -66,10 +66,10 @@ function requireInstanceId(value) {
 async function ensureManagerToken(paths) {
   await ensurePrivateDirectory(paths.managerStateRoot);
   try {
-    const details = await lstat(paths.managerToken);
-    if (details.isSymbolicLink() || !details.isFile()) throw new Error('Manager token path must be a regular file');
-    if ((details.mode & 0o077) !== 0) throw new Error('Manager token file permissions must be restricted to the current user');
-    const token = (await readFile(paths.managerToken, 'utf8')).trim();
+    const details = await lstat(paths.managerApiMaster);
+    if (details.isSymbolicLink() || !details.isFile()) throw new Error('Manager API master path must be a regular file');
+    if ((details.mode & 0o077) !== 0) throw new Error('Manager API master permissions must be restricted to the current user');
+    const token = (await readFile(paths.managerApiMaster, 'utf8')).trim();
     if (!/^[a-f0-9]{64}$/.test(token)) throw new Error('Manager token is invalid');
     return token;
   } catch (error) {
@@ -77,14 +77,28 @@ async function ensureManagerToken(paths) {
   }
   const token = randomBytes(32).toString('hex');
   let file;
-  try { file = await open(paths.managerToken, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600); }
+  try { file = await open(paths.managerApiMaster, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600); }
   catch (error) {
     if (error?.code !== 'EEXIST') throw error;
-    return (await readFile(paths.managerToken, 'utf8')).trim();
+    return (await readFile(paths.managerApiMaster, 'utf8')).trim();
   }
   try { await file.writeFile(`${token}\n`); await file.sync(); }
   finally { await file.close(); }
   return token;
+}
+
+async function legacyManagerToken(paths) {
+  try {
+    const details = await lstat(paths.managerToken);
+    if (details.isSymbolicLink() || !details.isFile()) throw new Error('Legacy Manager token path must be a regular file');
+    if ((details.mode & 0o077) !== 0) throw new Error('Legacy Manager token permissions must be restricted to the current user');
+    const token = (await readFile(paths.managerToken, 'utf8')).trim();
+    if (!/^[a-f0-9]{64}$/.test(token)) throw new Error('Legacy Manager token is invalid');
+    return token;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
 }
 
 export function managerApiToken(masterToken, runtimeId) {
@@ -314,23 +328,15 @@ async function managerHealth(baseUrl, token) {
   } catch { return null; }
 }
 
-async function clientToken(paths) {
-  const details = await lstat(paths.managerToken);
-  if (details.isSymbolicLink() || !details.isFile()) throw new Error('Manager token file is unsafe');
-  if ((details.mode & 0o077) !== 0) throw new Error('Manager token file permissions must be restricted to the current user');
-  const token = (await readFile(paths.managerToken, 'utf8')).trim();
-  if (!/^[a-f0-9]{64}$/.test(token)) throw new Error('Manager token is invalid');
-  return token;
-}
-
-export function managerBrowserUrl(baseUrl, token) {
+export function managerBrowserBootstrapHtml(baseUrl, token) {
   const browserUrl = new URL(baseUrl);
   browserUrl.hash = new URLSearchParams({ 'manager-token': token }).toString();
-  return browserUrl.toString();
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; base-uri 'none'"></head><body><script>location.replace(${JSON.stringify(browserUrl.toString())});</script></body></html>`;
 }
 
-function openManagerBrowser(baseUrl, token, environment) {
-  const browser = spawn(environment.LEESH_LOOP_BROWSER_COMMAND || 'xdg-open', [managerBrowserUrl(baseUrl, token)], { detached: true, stdio: 'ignore' });
+async function openManagerBrowser(baseUrl, token, environment, paths) {
+  await writeAtomic(paths.managerBrowserBootstrap, managerBrowserBootstrapHtml(baseUrl, token), 0o600);
+  const browser = spawn(environment.LEESH_LOOP_BROWSER_COMMAND || 'xdg-open', [pathToFileURL(paths.managerBrowserBootstrap).toString()], { detached: true, stdio: 'ignore' });
   browser.once('error', () => {});
   browser.unref();
 }
@@ -344,12 +350,8 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
   let active = await activeRuntime(options);
   if (!active) active = await installRuntimeDistribution(source, options);
   await ensurePrivateDirectory(paths.managerStateRoot);
-  let masterToken;
-  try { masterToken = await clientToken(paths); }
-  catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
-    masterToken = await ensureManagerToken(paths);
-  }
+  const masterToken = await ensureManagerToken(paths);
+  const legacyToken = await legacyManagerToken(paths);
   const token = managerApiToken(masterToken, active.id);
   const baseUrl = `http://127.0.0.1:${config.port}`;
   let record;
@@ -360,13 +362,19 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
     if (live) {
       const health = await managerHealth(baseUrl, token);
       if (health?.status === 'Running') {
-        if (openBrowser) openManagerBrowser(baseUrl, token, environment);
+        if (openBrowser) await openManagerBrowser(baseUrl, token, environment, paths);
         return { url: baseUrl, token, port: config.port, runtime: active, alreadyRunning: true };
       }
-      if (record.runtime_version !== active.id && (await managerHealth(baseUrl, masterToken))?.status === 'Running') {
+      let compatiblePrevious = null;
+      if (record.runtime_version && record.runtime_version !== active.id) {
+        const previousVersionToken = managerApiToken(masterToken, record.runtime_version);
+        if ((await managerHealth(baseUrl, previousVersionToken))?.status === 'Running') compatiblePrevious = previousVersionToken;
+        else if (legacyToken && (await managerHealth(baseUrl, legacyToken))?.status === 'Running') compatiblePrevious = legacyToken;
+      }
+      if (compatiblePrevious) {
         return {
           url: baseUrl,
-          token: masterToken,
+          token: compatiblePrevious,
           port: config.port,
           runtime: active,
           managerRuntimeVersion: record.runtime_version,
@@ -378,7 +386,7 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
     }
     if (processAlive(record.pid)) throw new Error('Manager PID identity changed; refusing to control the process.');
     await unlink(paths.managerServiceRecord).catch(error => { if (error?.code !== 'ENOENT') throw error; });
-  } else if (await managerHealth(baseUrl, token) || await managerHealth(baseUrl, masterToken)) {
+  } else if (await managerHealth(baseUrl, token) || (legacyToken && await managerHealth(baseUrl, legacyToken))) {
     throw new Error('A Manager responds without a verifiable execution record; refusing to start a second Manager.');
   }
   await ensurePrivateDirectory(paths.managerStateRoot);
@@ -411,7 +419,7 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
   }
   const health = await managerHealth(baseUrl, token);
   if (!health) throw new Error(`Manager service did not become ready at ${baseUrl}.`);
-  if (openBrowser) openManagerBrowser(baseUrl, token, environment);
+  if (openBrowser) await openManagerBrowser(baseUrl, token, environment, paths);
   return { url: baseUrl, token, port: config.port, runtime: active, alreadyRunning: false };
 }
 
