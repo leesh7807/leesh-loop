@@ -273,7 +273,7 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 }
 
 @media (max-width: 560px) {
-  .manager-header, .manager-console { width: min(100% - 1.4rem, 100%); }
+  .manager-header, .manager-instances, .manager-console { width: min(100% - 1.4rem, 100%); }
   .manager-header { grid-template-columns: 1fr; gap: .8rem; padding-top: .85rem; }
   .manager-brand h1 { font-size: 1.35rem; }
   .manager-lifecycle { grid-column: 1; justify-content: flex-start; }
