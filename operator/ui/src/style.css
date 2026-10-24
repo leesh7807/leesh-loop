@@ -163,6 +163,7 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .manager-brand h1 { font-size: 1.45rem; }
 .manager-lifecycle { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .7rem; }
 .manager-lifecycle-target { min-width: 0; max-width: 14rem; overflow-wrap: anywhere; color: #444; font-size: .74rem; font-weight: 650; }
+.manager-lifecycle-pending { color: #626262; font-size: .72rem; }
 .manager-task-jump { color: #343434; font-size: .72rem; text-decoration: underline; text-decoration-color: #a8a8a8; text-underline-offset: .2em; white-space: nowrap; }
 .manager-task-jump:hover { text-decoration-color: #111; }
 .manager-status { color: #444; font-size: .74rem; font-weight: 650; }

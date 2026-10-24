@@ -63,6 +63,10 @@ const tasks = [
   }
 ];
 
+function hasStartingStatus(request) {
+  return (request.headers.cookie || '').split(';').some(value => value.trim() === 'manager-demo-status=starting');
+}
+
 function respond(response, status, body, headers = {}) {
   response.writeHead(status, {
     'cache-control': 'no-store',
@@ -77,7 +81,12 @@ const server = createServer(async (request, response) => {
   const pathname = decodeURIComponent(url.pathname);
 
   if (request.method !== 'GET') return respond(response, 405, { error: 'This fixture is read-only.' });
-  if (pathname === '/api/v1/instances') return respond(response, 200, { instances });
+  if (pathname === '/api/v1/instances') {
+    const visibleInstances = hasStartingStatus(request)
+      ? instances.map(instance => instance.id === 'demo-payments' ? { ...instance, status: 'Starting' } : instance)
+      : instances;
+    return respond(response, 200, { instances: visibleInstances });
+  }
   if (pathname === '/api/v1/runtime') {
     return respond(response, 200, { active: activeRuntime, distributions: [activeRuntime, priorRuntime], manager_runtime_version: activeRuntime.id });
   }
@@ -122,7 +131,11 @@ const server = createServer(async (request, response) => {
       : extname(requestedPath) === '.css' ? 'text/css; charset=utf-8'
         : extname(requestedPath) === '.svg' ? 'image/svg+xml'
           : 'text/html; charset=utf-8';
-    response.writeHead(200, { 'cache-control': 'no-store', 'content-type': contentType });
+    const headers = { 'cache-control': 'no-store', 'content-type': contentType };
+    if (requestedPath === resolve(uiRoot, 'index.html')) {
+      headers['set-cookie'] = `manager-demo-status=${url.searchParams.get('status') === 'starting' ? 'starting' : 'running'}; Path=/; SameSite=Strict; HttpOnly`;
+    }
+    response.writeHead(200, headers);
     response.end(body);
   } catch {
     respond(response, 404, { error: 'Built UI asset not found. Build operator/ui first.' });
