@@ -10,7 +10,7 @@ import { managerLifecycleAction } from './manager-lifecycle-action.js';
 import { createManagerInstanceListGate } from './manager-instance-list-gate.js';
 import { createManagerSelectionGate } from './manager-selection-gate.js';
 import { initialManagerFeedback, managerFeedbackReducer } from './manager-feedback.js';
-import { managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from './manager-read-state.js';
+import { logsPanelViewState, logsReadFailureState, logsReadStartState, managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from './manager-read-state.js';
 import { workflowUpdateEligibility } from './workflow-update-eligibility.js';
 import { createWorkflowDiff } from './workflow-diff.js';
 import './style.css';
@@ -741,12 +741,14 @@ function ManagerApp() {
   const instanceListGateRef = useRef(null);
   if (!instanceListGateRef.current) instanceListGateRef.current = createManagerInstanceListGate();
   const workflowRefreshControllerRef = useRef(null);
+  const logsReadRequestRef = useRef(0);
   const [repositoryPath, setRepositoryPath] = useState('');
   const [runtime, setRuntime] = useState(null);
   const [runtimeReadState, setRuntimeReadState] = useState('loading');
   const [workflow, setWorkflow] = useState(null);
   const [workflowReadState, setWorkflowReadState] = useState('idle');
   const [logs, setLogs] = useState('');
+  const [logsReadState, setLogsReadState] = useState('idle');
   const [workflowOpen, setWorkflowOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [busy, setBusy] = useState('');
@@ -757,6 +759,7 @@ function ManagerApp() {
   const inventoryViewState = managerInventoryViewState(instanceReadState, instances.length);
   const runtimeViewState = sharedRuntimeViewState(runtimeReadState, runtime);
   const workflowPanelState = workflowComparisonViewState(workflowReadState, Boolean(workflow), workflowOpen);
+  const logsPanelState = logsPanelViewState(logsReadState, logsOpen);
   const workflowEligibility = selected ? workflowUpdateEligibility(selected) : null;
   const selectedRuntimeVersion = runtime?.distributions?.find(distribution => distribution.id === selected?.runtime_version)?.version
     || selected?.runtime_version?.slice(0, 12)
@@ -804,6 +807,28 @@ function ManagerApp() {
     }
   }, []);
 
+  const refreshLogs = useCallback(async () => {
+    const selectionGate = selectionGateRef.current;
+    const requestSelection = selectionGate.capture();
+    const instanceId = requestSelection.instanceId;
+    if (!instanceId) return;
+    const requestId = ++logsReadRequestRef.current;
+    const isCurrentRequest = () => requestId === logsReadRequestRef.current && selectionGate.isCurrent(requestSelection);
+    setLogsReadState(current => logsReadStartState(current));
+    dispatchFeedback({ type: 'read-cleared', target: 'logs' });
+    try {
+      const body = await readManagerJson(await apiFetch(`/api/v1/instances/${encodeURIComponent(instanceId)}/logs`));
+      if (!isCurrentRequest()) return;
+      setLogs(body.logs);
+      setLogsReadState('loaded');
+      dispatchFeedback({ type: 'read-cleared', target: 'logs' });
+    } catch (requestError) {
+      if (!isCurrentRequest()) return;
+      setLogsReadState(current => logsReadFailureState(current));
+      dispatchFeedback({ type: 'read-error', target: 'logs', message: requestError.message || 'Could not read Loop logs.' });
+    }
+  }, []);
+
   useEffect(() => {
     void refreshInstances();
     void refreshRuntime();
@@ -816,6 +841,8 @@ function ManagerApp() {
     setWorkflow(null);
     setWorkflowReadState('idle');
     setLogs('');
+    setLogsReadState('idle');
+    logsReadRequestRef.current += 1;
     setWorkflowOpen(false);
     setLogsOpen(false);
     dispatchFeedback({ type: 'instance-changed' });
@@ -844,13 +871,9 @@ function ManagerApp() {
 
   useEffect(() => {
     if (!selectedId || !logsOpen) return;
-    let active = true;
-    apiFetch(`/api/v1/instances/${encodeURIComponent(selectedId)}/logs`)
-      .then(readManagerJson)
-      .then(body => { if (active) setLogs(body.logs); })
-      .catch(requestError => { if (active) setLogs(requestError.message || 'Could not read Loop logs.'); });
-    return () => { active = false; };
-  }, [selectedId, logsOpen]);
+    void refreshLogs();
+    return () => { logsReadRequestRef.current += 1; };
+  }, [selectedId, logsOpen, refreshLogs]);
 
   async function perform(path, { method = 'POST', body, label, target = 'manager' } = {}) {
     setBusy(label || 'Working…');
@@ -1056,7 +1079,16 @@ function ManagerApp() {
             </details>
             <details open={logsOpen} onToggle={event => setLogsOpen(event.currentTarget.open)}>
               <summary><span>Loop logs</span><span>View startup and Symphony output</span></summary>
-              {logsOpen && <pre className="manager-logs">{logs || 'Loading logs…'}</pre>}
+              {logsOpen && <ManagerFeedback feedback={feedback} target="logs" />}
+              {logsOpen && logsPanelState === 'loading' && <p className="manager-help workflow-read-state" role="status">Loading Loop logs…</p>}
+              {logsOpen && logsPanelState === 'refreshing' && <p className="manager-help workflow-read-state" role="status">Refreshing logs; showing the last successful response until it completes.</p>}
+              {logsOpen && logsPanelState === 'stale-error' && <p className="manager-help workflow-read-state" role="status">Showing the last successful log response.</p>}
+              {logsOpen && (logsPanelState === 'loaded' || logsPanelState === 'error' || logsPanelState === 'stale-error') && (
+                <div className="manager-logs-actions">
+                  <button type="button" className="manager-action secondary" onClick={() => void refreshLogs()}>{logsPanelState === 'loaded' ? 'Refresh logs' : 'Retry logs'}</button>
+                </div>
+              )}
+              {logsOpen && ['loaded', 'refreshing', 'stale-error'].includes(logsPanelState) && <pre className="manager-logs">{logs || 'No Loop logs are available yet.'}</pre>}
             </details>
           </div>
         )}

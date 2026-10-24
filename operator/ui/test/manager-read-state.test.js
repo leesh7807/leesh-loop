@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from '../src/manager-read-state.js';
+import { logsPanelViewState, logsReadFailureState, logsReadStartState, managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from '../src/manager-read-state.js';
 
 test('the Manager distinguishes an unread or failed inventory from a confirmed empty inventory', () => {
   assert.equal(managerInventoryViewState('loading', 0), 'loading');
@@ -33,4 +33,14 @@ test('an open Workflow comparison exposes pending and failed reads for recovery'
   assert.equal(workflowComparisonViewState('idle', false, true), 'loading');
   assert.equal(workflowComparisonViewState('error', false, true), 'error');
   assert.equal(workflowComparisonViewState('loaded', true, true), 'ready');
+});
+
+test('log refreshes distinguish first-read failures from stale successful output', () => {
+  assert.equal(logsPanelViewState('idle', false), 'closed');
+  assert.equal(logsPanelViewState('idle', true), 'loading');
+  assert.equal(logsReadStartState('idle'), 'loading');
+  assert.equal(logsReadFailureState('loading'), 'error');
+  assert.equal(logsReadStartState('loaded'), 'refreshing');
+  assert.equal(logsReadFailureState('refreshing'), 'stale-error');
+  assert.equal(logsPanelViewState('stale-error', true), 'stale-error');
 });
