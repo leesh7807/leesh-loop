@@ -224,6 +224,8 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .workflow-eligibility { margin: 0; }
 .manager-workflow-content > .workflow-update-actions { justify-self: start; }
 .workflow-update-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .75rem; }
+.workflow-update-feedback { flex: 1 0 100%; min-width: 0; }
+.workflow-update-feedback .manager-feedback { margin: 0; }
 .workflow-update-disabled-reason { max-width: 48ch; margin: 0; }
 .workflow-comparison { display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; }
 .workflow-comparison section { min-width: 0; }
