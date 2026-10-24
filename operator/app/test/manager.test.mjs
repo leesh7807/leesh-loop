@@ -822,6 +822,17 @@ test('CLI init and list use the same central instance registry as the Manager UI
   assert.ok(openAttempt.error.stderr.includes(pathToFileURL(managedPaths.managerBrowserBootstrap).toString()));
   assert.equal((await api(manager, '/api/v1/manager')).response.status, 200);
 
+  const failingBrowserCommand = join(paths.directory, 'failing-browser.mjs');
+  await writeFile(failingBrowserCommand, '#!/usr/bin/env node\nprocess.exit(23);\n', { mode: 0o700 });
+  await chmod(failingBrowserCommand, 0o700);
+  paths.environment.LEESH_LOOP_BROWSER_COMMAND = failingBrowserCommand;
+  const failedDispatch = await execFile(process.execPath, [cli], { cwd: paths.directory, env: paths.environment, encoding: 'utf8', timeout: 10_000 })
+    .then(result => ({ result }), error => ({ error }));
+  assert.equal(failedDispatch.error?.code, 1);
+  assert.match(failedDispatch.error.stderr, /exited unsuccessfully with status 23/);
+  assert.ok(failedDispatch.error.stderr.includes(pathToFileURL(managedPaths.managerBrowserBootstrap).toString()));
+  assert.equal((await api(manager, '/api/v1/manager')).response.status, 200);
+
   const uiList = await api(manager, '/api/v1/instances');
   assert.deepEqual(uiList.body.instances.map(instance => instance.repository_root), [repository]);
 });
