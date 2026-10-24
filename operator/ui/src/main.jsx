@@ -10,6 +10,7 @@ import { managerLifecycleAction } from './manager-lifecycle-action.js';
 import { createManagerInstanceListGate } from './manager-instance-list-gate.js';
 import { createManagerSelectionGate } from './manager-selection-gate.js';
 import { initialManagerFeedback, managerFeedbackReducer } from './manager-feedback.js';
+import { managerInventoryViewState, operatorConfigViewState, readFailureState } from './manager-read-state.js';
 import { workflowUpdateEligibility } from './workflow-update-eligibility.js';
 import { createWorkflowDiff } from './workflow-diff.js';
 import './style.css';
@@ -557,6 +558,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
 function OperatorApp({ instanceId }) {
   const instanceApiFetch = useMemo(() => createManagerApiFetch({ token: managerToken, instanceId }), [instanceId]);
   const [config, setConfig] = useState(null);
+  const [configReadState, setConfigReadState] = useState('loading');
   const [tasks, setTasks] = useState([]);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [navigationTarget, setNavigationTarget] = useState(null);
@@ -609,7 +611,10 @@ function OperatorApp({ instanceId }) {
 
   useEffect(() => {
     let active = true;
-    instanceApiFetch('/api/v1/config').then(responseJson).then(value => { if (active) setConfig(value); }).catch(() => { if (active) setConfig(null); });
+    instanceApiFetch('/api/v1/config')
+      .then(responseJson)
+      .then(value => { if (active) { setConfig(value); setConfigReadState('loaded'); } })
+      .catch(() => { if (active) { setConfig(null); setConfigReadState('error'); } });
     void refresh();
     const timer = window.setInterval(() => { void refresh(); }, REFRESH_INTERVAL_MS);
     return () => { active = false; window.clearInterval(timer); };
@@ -670,7 +675,9 @@ function OperatorApp({ instanceId }) {
     }) } : value));
   }
 
-  if (!config) return <main className="page-shell"><p className="inline-message failure" role="alert">The Operator configuration could not be loaded. Refresh the page to retry.</p></main>;
+  const configViewState = operatorConfigViewState(configReadState, config);
+  if (configViewState === 'loading') return <main className="page-shell"><p className="manager-empty" role="status">Loading Operator configuration…</p></main>;
+  if (configViewState === 'error') return <main className="page-shell"><p className="inline-message failure" role="alert">The Operator configuration could not be loaded. Refresh the page to retry.</p></main>;
   const publishDraft = { plan, state: state || config.defaultState, selectedBlockers };
 
   return (
@@ -742,8 +749,10 @@ function ManagerApp() {
   const [logsOpen, setLogsOpen] = useState(false);
   const [busy, setBusy] = useState('');
   const [feedback, dispatchFeedback] = useReducer(managerFeedbackReducer, initialManagerFeedback);
+  const [instanceReadState, setInstanceReadState] = useState('loading');
 
   const selected = instances.find(instance => instance.id === selectedId) || null;
+  const inventoryViewState = managerInventoryViewState(instanceReadState, instances.length);
   const workflowEligibility = selected ? workflowUpdateEligibility(selected) : null;
   const selectedRuntimeVersion = runtime?.distributions?.find(distribution => distribution.id === selected?.runtime_version)?.version
     || selected?.runtime_version?.slice(0, 12)
@@ -763,6 +772,7 @@ function ManagerApp() {
       const body = await readManagerJson(await apiFetch('/api/v1/instances'));
       if (!instanceListGateRef.current.accept(listRevision)) return;
       setInstances(body.instances);
+      setInstanceReadState('loaded');
       const current = selectionGateRef.current.instanceId;
       const next = body.instances.some(instance => instance.id === current) ? current : (body.instances[0]?.id || '');
       selectInstance(next);
@@ -773,6 +783,7 @@ function ManagerApp() {
       dispatchFeedback({ type: 'read-cleared', target: 'instances' });
     } catch (requestError) {
       if (!instanceListGateRef.current.accept(listRevision)) return;
+      setInstanceReadState(readFailureState);
       dispatchFeedback({ type: 'read-error', target: 'instances', message: requestError.message || 'Could not load managed Loop instances.' });
     }
   }, [selectInstance]);
@@ -944,9 +955,11 @@ function ManagerApp() {
       <section className="manager-instances" aria-labelledby="managed-instances-heading">
         <div className="manager-instances-heading">
           <h2 id="managed-instances-heading">Loop instances</h2>
-          <span>{instances.length} {instances.length === 1 ? 'instance' : 'instances'}</span>
+          <span>{inventoryViewState === 'list' || inventoryViewState === 'empty'
+            ? `${instances.length} ${instances.length === 1 ? 'instance' : 'instances'}`
+            : inventoryViewState === 'loading' ? 'Loading…' : 'Unavailable'}</span>
         </div>
-        {instances.length ? (
+        {inventoryViewState === 'list' ? (
           <div className="manager-instance-list">
             {instances.map(instance => (
               <button type="button" className={`manager-instance-choice${selectedId === instance.id ? ' selected' : ''}`} key={instance.id}
@@ -961,7 +974,11 @@ function ManagerApp() {
               </button>
             ))}
           </div>
-        ) : <p className="manager-empty">No managed Loops yet. Add a Git repository below to create one.</p>}
+        ) : inventoryViewState === 'loading'
+          ? <p className="manager-empty" role="status">Loading managed Loops…</p>
+          : inventoryViewState === 'empty'
+            ? <p className="manager-empty">No managed Loops yet. Add a Git repository below to create one.</p>
+            : null}
         <ManagerFeedback feedback={feedback} target="instances" />
       </section>
 
@@ -1018,7 +1035,7 @@ function ManagerApp() {
             </details>
           </div>
         )}
-        {!selected && instances.length === 0 && <p className="manager-empty">Create an instance from a Git repository to see its tasks and lifecycle here.</p>}
+        {!selected && inventoryViewState === 'empty' && <p className="manager-empty">Create an instance from a Git repository to see its tasks and lifecycle here.</p>}
       </section>
 
       {selected ? <OperatorApp key={selectedId} instanceId={selectedId} /> : null}
