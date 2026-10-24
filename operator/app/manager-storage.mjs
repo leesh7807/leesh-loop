@@ -2,7 +2,7 @@ import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, resolve, sep } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolveTargetRepository } from './git-target.mjs';
 import { generatedWorkflow } from './workflow-template.mjs';
 import { stringifyProjectConfiguration } from '../project-config.mjs';
@@ -195,15 +195,23 @@ export async function readInstanceWorkflow(id, { sourceRoot, ...options } = {}) 
   const instance = await getLoopInstance(id, options);
   const current = await readFile(instance.workflow_file, 'utf8');
   const candidate = generatedWorkflow(await readFile(join(sourceRoot, 'docs/WORKFLOW_TEMPLATE.md'), 'utf8'));
-  return { current, candidate, changed: current !== candidate };
+  const candidateDigest = createHash('sha256').update(candidate, 'utf8').digest('hex');
+  return { current, candidate, candidate_digest: candidateDigest, changed: current !== candidate };
 }
 
-export async function applyInstanceWorkflow(id, { expectedCurrent, sourceRoot, isRunning, ...options } = {}) {
+export async function applyInstanceWorkflow(id, { expectedCurrent, expectedCandidateDigest, sourceRoot, isRunning, ...options } = {}) {
   const instance = await getLoopInstance(id, options);
   if (await isRunning(id)) throw Object.assign(new Error('Stop this Loop before updating its Workflow.'), { status: 409 });
   const current = await readFile(instance.workflow_file, 'utf8');
   if (typeof expectedCurrent !== 'string' || current !== expectedCurrent) throw Object.assign(new Error('Workflow changed since it was reviewed. Refresh the comparison before applying.'), { status: 409 });
   const candidate = generatedWorkflow(await readFile(join(sourceRoot, 'docs/WORKFLOW_TEMPLATE.md'), 'utf8'));
+  if (typeof expectedCandidateDigest !== 'string' || !/^[0-9a-f]{64}$/.test(expectedCandidateDigest)) {
+    throw Object.assign(new Error('Workflow comparison digest is missing or invalid. Refresh the comparison before applying.'), { status: 400 });
+  }
+  const candidateDigest = createHash('sha256').update(candidate, 'utf8').digest('hex');
+  if (candidateDigest !== expectedCandidateDigest) {
+    throw Object.assign(new Error('Workflow template changed since it was reviewed. Refresh the comparison before applying.'), { status: 409 });
+  }
   if (current === candidate) return { updated: false, changed: false };
   const backupDirectory = join(instance.data_directory, 'workflow-backups');
   await ensurePrivateDirectory(backupDirectory);
