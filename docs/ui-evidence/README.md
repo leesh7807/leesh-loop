@@ -2,7 +2,7 @@
 
 ## Central Manager design evidence
 
-These captures show the production Operator UI bundle rendered from PR #120's UI source at commit `eb26c1321b7c2eca5fdff853901d02757c03e19b`. The local fixture in `capture-manager-demo.mjs` supplies synthetic, read-only instance, Runtime, Workflow, and Task responses; no Manager Service, real repository, or Task Store was used. Treat the displayed names, paths, statuses, port, Runtime version, and tasks as illustrative data. These images support visual review only; they do not verify lifecycle behavior or live service integration.
+These captures show the production Operator UI bundle rendered from PR #120's UI source at commit `0be36e34b130e901be617c5007bdc49c904ecb81`. The local fixture in `capture-manager-demo.mjs` supplies synthetic, read-only instance, Runtime, Workflow, and Task responses; no Manager Service, real repository, or Task Store was used. Treat the displayed names, paths, statuses, port, Runtime version, and tasks as illustrative data. These images support visual review only; they do not verify lifecycle behavior or live service integration.
 
 - Desktop overview at 1440×1200: two instance statuses, shared Runtime version 2026.10.24, selected Loop Runtime version 2026.10.18, selected repository beside its lifecycle action, and the task queue.
 
