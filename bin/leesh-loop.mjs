@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { installRuntimeDistribution } from '../operator/app/runtime-distribution.mjs';
+import { installRuntimeDistribution, managerMustRestartForRuntime } from '../operator/app/runtime-distribution.mjs';
 import { managerPaths, readJsonFile } from '../operator/app/manager-storage.mjs';
 import { ensureManagerService, managerRequest } from '../operator/app/manager-service.mjs';
 
@@ -105,11 +105,13 @@ async function main() {
   if (selectedCommand === 'update' && args.length === 0) {
     const updated = await installRuntimeDistribution(sourceRoot);
     if (updated.recovered_from_invalid_active) console.log('Recovered from an invalid active Runtime selection using the validated source checkout.');
+    if (updated.previous_active_error) console.log(`Previous active Runtime validation: ${updated.previous_active_error}`);
+    if (updated.preserved_runtime_path) console.log(`Damaged Runtime preserved at ${updated.preserved_runtime_path}.`);
     let manager = await ensureReadyManager();
     if (manager.alreadyRunning) {
       const paths = managerPaths();
       const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
-      if (service?.runtime_version !== updated.id) {
+      if (managerMustRestartForRuntime(service?.runtime_version, updated)) {
         await managerRequest(manager, '/api/v1/manager/restart', { method: 'POST' });
         await waitForManagerExit(service);
         manager = await ensureManagerService({ sourceRoot });

@@ -7,7 +7,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { applyInstanceWorkflow, managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readInstanceWorkflow, readJsonFile, unregisterLoopInstance, validateManagedInstanceStateDirectory, writeAtomic, writeAtomicJson } from './manager-storage.mjs';
 import { discoverRunningLoops, loopInstanceStatus, readLoopLogs, startLoopInstance, stopLoopInstance } from './manager-lifecycle.mjs';
-import { activeRuntime, currentRuntimeSource, inspectRuntimeSource, installRuntimeDistribution, installRuntimeDistributionInWorker, listRuntimeDistributions, recordRuntimeSource } from './runtime-distribution.mjs';
+import { activeRuntime, currentRuntimeSource, inspectRuntimeSource, installRuntimeDistribution, installRuntimeDistributionInWorker, listRuntimeDistributions, managerMustRestartForRuntime, recordRuntimeSource, runtimeDiagnostic } from './runtime-distribution.mjs';
 import { openLoopTaskStore } from './local-task-store-runtime.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
 import { createOperatorUiServer } from './operator-ui-server.mjs';
@@ -380,27 +380,49 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
       throw Object.assign(new Error('Method not allowed.'), { status: 405 });
     }
     if (pathname === '/api/v1/runtime' && request.method === 'GET') {
-      const active = await activeRuntime({ environment, homeDirectory });
+      let active = null;
+      let activeError = null;
+      try { active = await activeRuntime({ environment, homeDirectory }); }
+      catch (error) { activeError = runtimeDiagnostic(error); }
       const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
       const source = await latestSourceRoot().then(sourceRootPath => inspectRuntimeSource(sourceRootPath)).catch(error => ({ error: error.message }));
-      respond(response, 200, { active, source, distributions: await listRuntimeDistributions({ environment, homeDirectory }), manager_runtime_version: service?.runtime_version || null });
+      const managerRestartRequired = service?.manager_restart_required === true || (active ? service?.runtime_version !== active.id : false);
+      respond(response, 200, {
+        active,
+        active_error: activeError,
+        source,
+        distributions: await listRuntimeDistributions({ environment, homeDirectory }),
+        manager_runtime_version: service?.runtime_version || null,
+        manager_restart_required: managerRestartRequired
+      });
       return true;
     }
     if (pathname === '/api/v1/runtime/update' && request.method === 'POST') {
       const result = await serializeRuntimeUpdate(async () => {
         let previous = null;
         let previousRuntimeInvalid = false;
+        let previousRuntimeError = null;
         try { previous = await activeRuntime({ environment, homeDirectory }); }
-        catch { previousRuntimeInvalid = true; }
+        catch (error) {
+          previousRuntimeInvalid = true;
+          previousRuntimeError = runtimeDiagnostic(error);
+        }
         const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
         const updated = await runtimeInstaller(await latestSourceRoot(), { environment, homeDirectory });
+        const managerRestartRequired = service?.manager_restart_required === true || managerMustRestartForRuntime(service?.runtime_version, updated);
+        if (managerRestartRequired && service) {
+          await writeAtomicJson(paths.managerServiceRecord, { ...service, manager_restart_required: true });
+        }
         return {
           previous,
           active: updated,
           changed: updated.changed,
           recovered_from_invalid_active: previousRuntimeInvalid || updated.recovered_from_invalid_active === true,
+          active_runtime_error: previousRuntimeError || updated.previous_active_error || null,
+          repaired_distribution: updated.repaired_distribution === true,
+          preserved_runtime_path: updated.preserved_runtime_path || null,
           manager_runtime_version: service?.runtime_version || null,
-          manager_restart_required: service?.runtime_version !== updated.id
+          manager_restart_required: managerRestartRequired
         };
       });
       respond(response, 200, result);
@@ -542,7 +564,15 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
       const health = await managerHealth(baseUrl, token);
       if (health?.status === 'Running') {
         const browserResult = openBrowser ? await openManagerBrowser(baseUrl, token, environment, paths) : null;
-        return { url: baseUrl, token, port: config.port, runtime: active, alreadyRunning: true, ...browserLaunchDetails(browserResult, paths) };
+        return {
+          url: baseUrl,
+          token,
+          port: config.port,
+          runtime: active,
+          managerRestartRequired: record.manager_restart_required === true,
+          alreadyRunning: true,
+          ...browserLaunchDetails(browserResult, paths)
+        };
       }
       let compatiblePrevious = null;
       if (record.runtime_version && record.runtime_version !== active.id) {

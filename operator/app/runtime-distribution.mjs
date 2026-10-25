@@ -111,6 +111,11 @@ export async function activeRuntime(options = {}) {
   return { id: pointer.id, version: details.version, path: runtimePath, installed_at: details.installed_at };
 }
 
+export function runtimeDiagnostic(error) {
+  const detail = error?.message || String(error);
+  return detail.length <= 400 ? detail : `${detail.slice(0, 397)}…`;
+}
+
 async function publishRuntimeStage(stage, destination, expectedId) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     let current;
@@ -119,7 +124,7 @@ async function publishRuntimeStage(stage, destination, expectedId) {
       if (error?.code !== 'ENOENT') throw error;
       try {
         await rename(stage, destination);
-        return false;
+        return { repaired: false, preservedPath: null };
       } catch (renameError) {
         if (['EEXIST', 'ENOTEMPTY'].includes(renameError?.code)) continue;
         throw renameError;
@@ -134,7 +139,7 @@ async function publishRuntimeStage(stage, destination, expectedId) {
     } catch { /* Replace only a real directory whose content fails validation. */ }
     if (currentIsValid) {
       await rm(stage, { recursive: true, force: true });
-      return false;
+      return { repaired: false, preservedPath: null };
     }
 
     const preservedPath = join(dirname(destination), `.damaged-${expectedId}-${randomUUID()}`);
@@ -146,13 +151,13 @@ async function publishRuntimeStage(stage, destination, expectedId) {
 
     try {
       await rename(stage, destination);
-      return true;
+      return { repaired: true, preservedPath };
     } catch (error) {
       if (['EEXIST', 'ENOTEMPTY'].includes(error?.code)) {
         try {
           await validateInstalledDistribution(destination, expectedId);
           await rm(stage, { recursive: true, force: true });
-          return true;
+          return { repaired: true, preservedPath };
         } catch { /* A concurrent invalid destination remains a hard failure. */ }
       }
       try { await rename(preservedPath, destination); }
@@ -163,6 +168,10 @@ async function publishRuntimeStage(stage, destination, expectedId) {
     }
   }
   throw new Error(`Runtime distribution changed repeatedly during installation: ${destination}`);
+}
+
+export function managerMustRestartForRuntime(managerRuntimeVersion, updatedRuntime) {
+  return managerRuntimeVersion !== updatedRuntime.id || updatedRuntime.repaired_distribution === true;
 }
 
 export async function recordRuntimeSource(sourceRoot, options = {}) {
@@ -198,8 +207,12 @@ export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot,
   const source = await sourceIdentity(sourceRoot);
   let previousActive = null;
   let recoveredFromInvalidActive = false;
+  let previousActiveError = null;
   try { previousActive = await activeRuntime(options); }
-  catch { recoveredFromInvalidActive = true; }
+  catch (error) {
+    recoveredFromInvalidActive = true;
+    previousActiveError = runtimeDiagnostic(error);
+  }
   await Promise.all([ensurePrivateDirectory(paths.runtimeRoot), ensurePrivateDirectory(paths.configRoot)]);
   const destination = join(paths.runtimeRoot, source.id);
   let destinationIsValid = false;
@@ -210,7 +223,7 @@ export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot,
     const details = await lstat(destination).catch(error => error?.code === 'ENOENT' ? null : Promise.reject(error));
     if (details && (details.isSymbolicLink() || !details.isDirectory())) throw new Error(`Runtime distribution path is unsafe: ${destination}`);
   }
-  let repairedDistribution = false;
+  let repair = { repaired: false, preservedPath: null };
   if (!destinationIsValid) {
     const stage = join(paths.runtimeRoot, `.stage-${process.pid}-${randomUUID()}`);
     await mkdir(stage, { mode: 0o700 });
@@ -226,7 +239,7 @@ export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot,
       await writeFile(join(stage, '.distribution.json'), `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
       // A broken immutable directory is retained under a diagnostic name before
       // a fully validated replacement can reclaim its content-addressed path.
-      repairedDistribution = await publishRuntimeStage(stage, destination, source.id);
+      repair = await publishRuntimeStage(stage, destination, source.id);
     } catch (error) {
       await rm(stage, { recursive: true, force: true }).catch(() => {});
       throw error;
@@ -235,9 +248,11 @@ export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot,
   await writeAtomicJson(paths.activeRuntime, { schema_version: 1, id: source.id, activated_at: new Date().toISOString() });
   return {
     ...(await activeRuntime(options)),
-    changed: recoveredFromInvalidActive || repairedDistribution || previousActive?.id !== source.id,
+    changed: recoveredFromInvalidActive || repair.repaired || previousActive?.id !== source.id,
     recovered_from_invalid_active: recoveredFromInvalidActive,
-    repaired_distribution: repairedDistribution
+    previous_active_error: previousActiveError,
+    repaired_distribution: repair.repaired,
+    preserved_runtime_path: repair.preservedPath
   };
 }
 
@@ -304,7 +319,9 @@ export async function listRuntimeDistributions(options = {}) {
       runtimes.push({ id: record.id, version: record.version, installed_at: record.installed_at });
     } catch { /* Invalid version folders are preserved for diagnosis and never activated. */ }
   }
-  const active = await activeRuntime(options);
+  let active = null;
+  try { active = await activeRuntime(options); }
+  catch { /* Invalid active selection must not hide other valid Runtime facts. */ }
   return runtimes.sort((a, b) => a.installed_at.localeCompare(b.installed_at)).map(runtime => ({ ...runtime, active: runtime.id === active?.id }));
 }
 

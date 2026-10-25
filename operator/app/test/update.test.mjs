@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { activeRuntime, installRuntimeDistribution, listRuntimeDistributions } from '../runtime-distribution.mjs';
+import { activeRuntime, installRuntimeDistribution, listRuntimeDistributions, managerMustRestartForRuntime, runtimeDiagnostic } from '../runtime-distribution.mjs';
 import { listRuntimeSnapshotFiles, materializeRuntimeSnapshot } from '../runtime-manifest.mjs';
 
 const execFile = promisify(execute);
@@ -49,6 +49,7 @@ test('Runtime installs once into the central version store and a failed update p
   const runtimeRoot = join(directory, 'data/leesh-loop/runtimes');
   const damagedDistribution = (await readdir(runtimeRoot)).find(name => name.startsWith(`.damaged-${first.id}-`));
   assert.ok(damagedDistribution, 'the invalid immutable distribution is preserved for diagnosis');
+  assert.equal(recovered.preserved_runtime_path, join(runtimeRoot, damagedDistribution));
   assert.match(await readFile(join(runtimeRoot, damagedDistribution, 'operator/app/manager.mjs'), 'utf8'), /tampered/);
 
   const activeBeforeFailure = await readFile(activeFile, 'utf8');
@@ -74,4 +75,17 @@ test('Runtime installs once into the central version store and a failed update p
   assert.equal((await activeRuntime({ environment, homeDirectory: directory })).id, first.id);
   const distributions = await listRuntimeDistributions({ environment, homeDirectory: directory });
   assert.deepEqual(distributions.map(value => value.id), [first.id]);
+});
+
+test('Manager restart is required when a damaged Runtime is repaired under the same identity', () => {
+  const runtime = { id: 'a'.repeat(64), repaired_distribution: true };
+  assert.equal(managerMustRestartForRuntime(runtime.id, runtime), true);
+  assert.equal(managerMustRestartForRuntime('previous-runtime', runtime), true);
+  assert.equal(managerMustRestartForRuntime(runtime.id, { id: runtime.id, repaired_distribution: false }), false);
+});
+
+test('Runtime diagnostics are bounded before they reach the UI or CLI', () => {
+  const detail = runtimeDiagnostic(new Error('x'.repeat(800)));
+  assert.equal(detail.length, 398);
+  assert.ok(detail.endsWith('…'));
 });

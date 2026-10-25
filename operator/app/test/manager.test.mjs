@@ -395,6 +395,73 @@ test('Manager Runtime update can select a validated Runtime when the active dist
   assert.equal(await readFile(join(invalidRuntime.path, 'runtime-fixture.mjs'), 'utf8'), 'corrupt active contents');
 });
 
+test('Manager Runtime status keeps valid alternatives visible when the active distribution is invalid', async t => {
+  const paths = await fixture(t);
+  const invalidRuntime = await installTestRuntime(paths, 'invalid-active-runtime');
+  const validAlternative = await installTestRuntime(paths, 'valid-alternative-runtime');
+  const activeFile = managerPaths(paths).activeRuntime;
+  await writeFile(join(invalidRuntime.path, 'runtime-fixture.mjs'), 'corrupt active contents');
+  await writeFile(activeFile, `${JSON.stringify({ schema_version: 1, id: invalidRuntime.id })}\n`);
+
+  const manager = await startManagerFixture(t, paths);
+  const runtime = await api(manager, '/api/v1/runtime');
+
+  assert.equal(runtime.response.status, 200);
+  assert.equal(runtime.body.active, null);
+  assert.match(runtime.body.active_error, /contents do not match/);
+  assert.ok(runtime.body.distributions.some(value => value.id === validAlternative.id));
+  assert.ok(runtime.body.distributions.every(value => value.active === false));
+});
+
+test('same-ID Runtime repair requires and records a Manager restart', async t => {
+  const paths = await fixture(t);
+  const runtime = await installTestRuntime(paths, 'same-id-runtime-repair');
+  const managedPaths = managerPaths(paths);
+  const preservedRuntimePath = join(managedPaths.runtimeRoot, `.damaged-${runtime.id}-repair-fixture`);
+  await mkdir(managedPaths.managerStateRoot, { recursive: true });
+  const manager = await startManagerFixture(t, paths, {
+    runtimeId: runtime.id,
+    runtimeInstaller: async () => ({
+      ...runtime,
+      changed: true,
+      recovered_from_invalid_active: true,
+      previous_active_error: 'Runtime distribution contents do not match their immutable identity.',
+      repaired_distribution: true,
+      preserved_runtime_path: preservedRuntimePath
+    })
+  });
+  await writeFile(managedPaths.managerApiMaster, `${'a'.repeat(64)}\n`, { mode: 0o600 });
+  await writeFile(managedPaths.managerConfiguration, `${JSON.stringify({ schema_version: 1, port: manager.port, symphony_port_min: 4200, symphony_port_max: 4209 })}\n`, { mode: 0o600 });
+  await writeFile(managedPaths.managerServiceRecord, `${JSON.stringify({
+    schema_version: 1,
+    pid: process.pid,
+    process_start_ticks: processStartTicks(process.pid),
+    host: '127.0.0.1',
+    port: manager.port,
+    runtime_path: runtime.path,
+    runtime_version: runtime.id
+  })}\n`, { mode: 0o600 });
+
+  const recovered = await api(manager, '/api/v1/runtime/update', { method: 'POST', origin: manager.url });
+  assert.equal(recovered.response.status, 200);
+  assert.equal(recovered.body.active.id, runtime.id);
+  assert.equal(recovered.body.manager_runtime_version, runtime.id);
+  assert.equal(recovered.body.manager_restart_required, true);
+  assert.equal(recovered.body.repaired_distribution, true);
+  assert.equal(recovered.body.preserved_runtime_path, preservedRuntimePath);
+  assert.match(recovered.body.active_runtime_error, /immutable identity/);
+
+  const service = JSON.parse(await readFile(managedPaths.managerServiceRecord, 'utf8'));
+  assert.equal(service.runtime_version, runtime.id);
+  assert.equal(service.manager_restart_required, true);
+  const readback = await api(manager, '/api/v1/runtime');
+  assert.equal(readback.body.manager_restart_required, true);
+
+  const reopen = await ensureManagerService({ sourceRoot, environment: paths.environment, homeDirectory: paths.homeDirectory });
+  assert.equal(reopen.alreadyRunning, true);
+  assert.equal(reopen.managerRestartRequired, true);
+});
+
 test('Manager unregisters a Stopped or confirmed process-absent Failed instance and preserves its repository and Task Store', async t => {
   const paths = await fixture(t);
   const repositoryRoot = join(paths.directory, 'repositories');

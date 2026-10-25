@@ -25,6 +25,7 @@ test('the Shared Runtime distinguishes pending, failed, installed, and missing r
   assert.equal(sharedRuntimeViewState('loading', null), 'loading');
   assert.equal(sharedRuntimeViewState('error', null), 'error');
   assert.equal(sharedRuntimeViewState('loaded', { active: { version: '2026.10.24' } }), 'ready');
+  assert.equal(sharedRuntimeViewState('loaded', { active: null, active_error: 'Runtime hash mismatch' }), 'invalid');
   assert.equal(sharedRuntimeViewState('loaded', { active: null }), 'missing');
 });
 

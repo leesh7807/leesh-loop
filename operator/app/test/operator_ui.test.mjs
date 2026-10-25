@@ -247,6 +247,7 @@ test('rendered UI source keeps Task actions, manager hierarchy, state cues, and 
   assert.match(source, /aria-label="Manager Runtime controls">\{runtimePanel\}<\/div>/);
   assert.match(source, /\{runtimePanel\}/);
   assert.match(source, /Active for new starts/);
+  assert.match(source, /Other validated Runtime distributions/);
   assert.doesNotMatch(source, /Notion|Symphony Dashboard|notionTasksUrl/);
   assert.match(styles, /@media \(max-width: 960px\)/);
   assert.match(styles, /\.state-toolbar \{ position: sticky/);

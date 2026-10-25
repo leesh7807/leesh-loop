@@ -44,6 +44,14 @@ After that fix, the isolated Manager was restarted from a source snapshot matchi
 - Local E2E was attempted twice and failed during Symphony startup before Worker dispatch. Run `aded4033-5e97-441f-959b-9f597ecd748b` timed out while compiling `date_time_parser`; retry `f0caaffc-5647-4038-a8a4-23ffbce69348` reported the Mix build lock held by process 92 and timed out waiting for the state API. Logs remain under `/tmp/leesh-loop-local-e2e-ZuRUT0/` and `/tmp/leesh-loop-local-e2e-wIOzOf/`.
 - Screenshots were visually inspected in Chrome during the task but are not stored here; the evidence is the direct interaction record and API/filesystem/SQLite observations above.
 
+## Damaged Runtime diagnostics and same-ID restart
+
+Maintainability review Job `a4fdd044-2602-4009-907e-554b164646ef` found that repairing a distribution under its existing ID did not require a running Manager restart, and that invalid-active diagnostics hid otherwise valid Runtime status and omitted the quarantined path. Both findings were addressed in the current implementation.
+
+The installer now returns the bounded prior validation error and actual `.damaged-*` path. Manager Runtime status reports an invalid active selection separately from source and valid installed distributions; the UI presents the repair action, available valid alternatives, and a distinct “Active Runtime needs repair” state. After same-ID repair, the Manager service record retains a restart-required flag despite matching Runtime IDs, and `leesh-loop` restart discovery reads it. The completion feedback explains that the Manager must reopen to load the repaired files and shows the preserved path and validation detail.
+
+The Manager API integration test verifies same-ID repair, persisted service-record state, GET readback, and `ensureManagerService` restart discovery; the Runtime installer test verifies the preserved damaged bytes and returned path. These are test-verified outcomes. The UI fixture in [`manager-runtime-repair-synthetic.md`](manager-runtime-repair-synthetic.md) is synthetic, based on the current JSX and API/test contracts. No final browser interaction or separately spawned OS Manager restart was observed after this fix. The earlier direct isolated CLI recovery observation remains useful evidence for the recovery entry point but does not establish this new same-ID restart scenario.
+
 ## Reviewability Preparation follow-up
 
 The independent Reviewability Preparation for PR #121 at `9a760f4d3730cd24ba07180f1bb386f147e64808` returned `FINDINGS` (Job `fdedbda2-0423-432c-8466-8e105e9eb743`). The reviewer identified three evidence gaps: no preserved visual representation of the final desktop/narrow Manager hierarchy and abnormal state; no changed-Runtime handoff state sequence; and no self-managed source/recovery example. These are reviewability findings, not claims that the implementation is incorrect.

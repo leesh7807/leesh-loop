@@ -1068,12 +1068,14 @@ function ManagerApp() {
           ? 'Loading Runtime…'
           : runtimeViewState === 'ready'
             ? `Active for new starts · ${activeRuntimeVersion}`
-            : runtimeViewState === 'missing' ? 'Runtime not installed' : 'Runtime unavailable'}</h2>
+            : runtimeViewState === 'missing' ? 'Runtime not installed' : runtimeViewState === 'invalid' ? 'Active Runtime needs repair' : 'Runtime unavailable'}</h2>
         <p className="manager-help">Updating installs the Runtime from this checkout for future Loop starts. Running Loops keep their pinned Runtime, and Workflow files are changed only by the separate Workflow action below.</p>
         {runtime?.source?.path && <p className="manager-runtime-source">Source checkout <strong>v{runtime.source.version}</strong> · <code title={runtime.source.id}>{runtime.source.id.slice(0, 12)}</code><span>{runtime.source.path}</span></p>}
         {runtime?.source?.error && <p className="inline-message failure" role="status">Runtime source checkout is unavailable: {runtime.source.error}</p>}
+        {runtime?.active_error && <p className="inline-message failure" role="status">The active Runtime could not be validated: {runtime.active_error} Install source Runtime to repair it.</p>}
+        {runtime?.active_error && <p className="manager-help">Other validated Runtime distributions: {runtime.distributions?.length ? runtime.distributions.map(value => runtimeLabel(value.id, runtime.distributions)).join(', ') : 'none available'}.</p>}
         <p className="manager-runtime-versions">Manager service <strong title={runtime?.manager_runtime_version || undefined}>{managerRuntimeVersion}</strong><span>·</span> selected Loop <strong title={selected?.runtime_version || undefined}>{selected ? selectedRuntimeVersion : 'None'}</strong></p>
-        {runtime?.active && runtime.manager_runtime_version !== runtime.active.id && <p className="inline-message" role="status">New starts use Runtime {activeRuntimeVersion}; Manager still uses Runtime {managerRuntimeVersion}. Run <code>leesh-loop</code> to reopen Manager on the active Runtime. Running Loops continue on their selected versions.</p>}
+        {runtime?.active && (runtime.manager_restart_required || runtime.manager_runtime_version !== runtime.active.id) && <p className="inline-message" role="status">New starts use Runtime {activeRuntimeVersion}; Manager still requires a restart to load the active Runtime. Run <code>leesh-loop</code> to reopen Manager. Running Loops continue on their selected versions.</p>}
       </div>
       <div className="manager-runtime-action">
         <button className="manager-action secondary" type="button" disabled={Boolean(busy) || runtimeReadState === 'loading'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform('/api/v1/runtime/update', { label: 'Updating Runtime', operation: 'update-runtime', target: 'runtime' })}>{busy === 'Updating Runtime' ? 'Installing…' : 'Install source Runtime'}</button>

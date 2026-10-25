@@ -15,6 +15,7 @@ export function operatorConfigViewState(readState, config) {
 export function sharedRuntimeViewState(readState, runtime) {
   if (readState === 'loading') return 'loading';
   if (readState === 'error') return 'error';
+  if (runtime?.active_error) return 'invalid';
   return runtime?.active ? 'ready' : 'missing';
 }
 
