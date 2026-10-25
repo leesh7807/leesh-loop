@@ -14,7 +14,7 @@ import { createOperatorUiServer } from '../operator-ui-server.mjs';
 import { hashDistribution } from '../installation-metadata.mjs';
 import { allocatePort, discoverRunningLoops, loopInstanceStatus, startLoopInstance, stopLoopInstance } from '../manager-lifecycle.mjs';
 import { createLoopInstance, listLoopInstances, managerPaths } from '../manager-storage.mjs';
-import { activeRuntime, installRuntimeDistributionInWorker } from '../runtime-distribution.mjs';
+import { activeRuntime, installRuntimeDistributionInWorker, writeRuntimeRecoveryRecord } from '../runtime-distribution.mjs';
 import { openLoopTaskStore } from '../local-task-store-runtime.mjs';
 
 const execFile = promisify(execute);
@@ -413,22 +413,34 @@ test('Manager Runtime status keeps valid alternatives visible when the active di
   assert.ok(runtime.body.distributions.every(value => value.active === false));
 });
 
-test('same-ID Runtime repair requires and records a Manager restart', async t => {
+test('same-ID Runtime recovery retry preserves its quarantined path and Manager restart requirement', async t => {
   const paths = await fixture(t);
   const runtime = await installTestRuntime(paths, 'same-id-runtime-repair');
   const managedPaths = managerPaths(paths);
   const preservedRuntimePath = join(managedPaths.runtimeRoot, `.damaged-${runtime.id}-repair-fixture`);
+  await mkdir(preservedRuntimePath, { recursive: true });
+  await writeFile(join(preservedRuntimePath, 'runtime-fixture.mjs'), 'corrupt prior distribution');
+  await writeFile(managedPaths.activeRuntime, `${JSON.stringify({ schema_version: 1, id: 'f'.repeat(64) })}\n`, { mode: 0o600 });
+  await writeRuntimeRecoveryRecord({
+    runtime_id: runtime.id,
+    status: 'activation-pending',
+    validation_error: 'Runtime distribution contents do not match their immutable identity.',
+    preserved_runtime_path: preservedRuntimePath
+  }, paths);
   await mkdir(managedPaths.managerStateRoot, { recursive: true });
   const manager = await startManagerFixture(t, paths, {
     runtimeId: runtime.id,
-    runtimeInstaller: async () => ({
-      ...runtime,
-      changed: true,
-      recovered_from_invalid_active: true,
-      previous_active_error: 'Runtime distribution contents do not match their immutable identity.',
-      repaired_distribution: true,
-      preserved_runtime_path: preservedRuntimePath
-    })
+    runtimeInstaller: async () => {
+      await writeFile(managedPaths.activeRuntime, `${JSON.stringify({ schema_version: 1, id: runtime.id })}\n`, { mode: 0o600 });
+      return {
+        ...runtime,
+        changed: true,
+        recovered_from_invalid_active: true,
+        previous_active_error: 'Runtime distribution contents do not match their immutable identity.',
+        repaired_distribution: false,
+        preserved_runtime_path: null
+      };
+    }
   });
   await writeFile(managedPaths.managerApiMaster, `${'a'.repeat(64)}\n`, { mode: 0o600 });
   await writeFile(managedPaths.managerConfiguration, `${JSON.stringify({ schema_version: 1, port: manager.port, symphony_port_min: 4200, symphony_port_max: 4209 })}\n`, { mode: 0o600 });
@@ -439,7 +451,8 @@ test('same-ID Runtime repair requires and records a Manager restart', async t =>
     host: '127.0.0.1',
     port: manager.port,
     runtime_path: runtime.path,
-    runtime_version: runtime.id
+    runtime_version: runtime.id,
+    manager_restart_required: true
   })}\n`, { mode: 0o600 });
 
   const recovered = await api(manager, '/api/v1/runtime/update', { method: 'POST', origin: manager.url });
@@ -447,9 +460,9 @@ test('same-ID Runtime repair requires and records a Manager restart', async t =>
   assert.equal(recovered.body.active.id, runtime.id);
   assert.equal(recovered.body.manager_runtime_version, runtime.id);
   assert.equal(recovered.body.manager_restart_required, true);
-  assert.equal(recovered.body.repaired_distribution, true);
+  assert.equal(recovered.body.repaired_distribution, false);
   assert.equal(recovered.body.preserved_runtime_path, preservedRuntimePath);
-  assert.match(recovered.body.active_runtime_error, /immutable identity/);
+  assert.match(recovered.body.active_runtime_error, /ENOENT/);
 
   const service = JSON.parse(await readFile(managedPaths.managerServiceRecord, 'utf8'));
   assert.equal(service.runtime_version, runtime.id);

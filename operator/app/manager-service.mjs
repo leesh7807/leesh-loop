@@ -7,7 +7,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { applyInstanceWorkflow, managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readInstanceWorkflow, readJsonFile, unregisterLoopInstance, validateManagedInstanceStateDirectory, writeAtomic, writeAtomicJson } from './manager-storage.mjs';
 import { discoverRunningLoops, loopInstanceStatus, readLoopLogs, startLoopInstance, stopLoopInstance } from './manager-lifecycle.mjs';
-import { activeRuntime, currentRuntimeSource, inspectRuntimeSource, installRuntimeDistribution, installRuntimeDistributionInWorker, listRuntimeDistributions, managerMustRestartForRuntime, reconcileRuntimeRecoveryRecord, recordRuntimeSource, runtimeDiagnostic, writeRuntimeRecoveryRecord } from './runtime-distribution.mjs';
+import { activeRuntime, currentRuntimeSource, inspectRuntimeSource, installRuntimeDistribution, installRuntimeDistributionInWorker, listRuntimeDistributions, managerMustRestartForRuntime, reconcileRuntimeRecoveryRecord, recordRuntimeSource, runtimeDiagnostic } from './runtime-distribution.mjs';
 import { openLoopTaskStore } from './local-task-store-runtime.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
 import { createOperatorUiServer } from './operator-ui-server.mjs';
@@ -416,13 +416,9 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
         if (managerRestartRequired && service) {
           await writeAtomicJson(paths.managerServiceRecord, { ...service, manager_restart_required: true });
         }
+        const recovery = await reconcileRuntimeRecoveryRecord({ environment, homeDirectory });
         const recoveryRecord = previousRuntimeInvalid || updated.recovered_from_invalid_active === true || updated.repaired_distribution === true
-          ? await writeRuntimeRecoveryRecord({
-              runtime_id: updated.id,
-              status: 'active',
-              validation_error: previousRuntimeError || updated.previous_active_error || null,
-              preserved_runtime_path: updated.preserved_runtime_path || null
-            }, { environment, homeDirectory })
+          ? recovery.record
           : null;
         return {
           previous,
@@ -431,8 +427,9 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
           recovered_from_invalid_active: previousRuntimeInvalid || updated.recovered_from_invalid_active === true,
           active_runtime_error: previousRuntimeError || updated.previous_active_error || null,
           repaired_distribution: updated.repaired_distribution === true,
-          preserved_runtime_path: updated.preserved_runtime_path || null,
+          preserved_runtime_path: recoveryRecord?.preserved_runtime_path || updated.preserved_runtime_path || null,
           last_recovery: recoveryRecord,
+          recovery_error: recovery.error,
           manager_runtime_version: service?.runtime_version || null,
           manager_restart_required: managerRestartRequired
         };
