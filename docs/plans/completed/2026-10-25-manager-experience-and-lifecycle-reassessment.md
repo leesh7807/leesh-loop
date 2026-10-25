@@ -294,6 +294,15 @@ UI 관련 자료는 기존 `docs/ui-evidence/` 관례를 따른다.
 
 검증에 필요한 관측 수단이 합리적인 범위에서 부족하다면 해당 검증을 가능하게 하는 작업도 수행 범위에 포함한다.
 
+## Execution evidence update (2026-10-26)
+
+The Accepted Plan remains unchanged. These notes record the evidence method and limits discovered during execution and the independent Reviewability Preparation.
+
+- **V-1 / V-7:** The actual Chrome session exercised repository selection, registration and duplicate/error paths, Task publication and switching, Workflow comparison, Runtime no-change update, unregistration readback, and the 390×844 CSS layout. The final Runtime identity-label change happened after that browser session. A later attempt to open a local file bootstrap for final captures was rejected by the browser URL policy, which prohibited serving that same page by another route. The stored desktop/narrow SVGs are therefore clearly labeled synthetic reconstructions from the final JSX/CSS, not direct browser captures. Their rendered result is available for design review, but it does not claim direct observation.
+- **V-4:** Installing and activating the source Runtime through `node bin/leesh-loop.mjs update` was directly observed in an isolated XDG profile. The no-change Manager update path was observed earlier. The different-ID, same-version, Manager-restart/Loop-pinning sequence is a synthetic fixture; no changed Runtime was applied while a Loop was running.
+- **V-5:** In the same isolated profile, the source checkout was registered as a normal `Stopped` instance. After confirming no Manager process and a refused loopback status request, invoking `node bin/leesh-loop.mjs list` returned the same registry entry and wrote a new Manager service identity. This exercised CLI recovery after Manager unavailability. No Loop was started, and recovery from a damaged Runtime remains unverified.
+- **V-6:** Root `npm test` passed 172/172. The Local E2E attempts did not reach Worker dispatch because Symphony startup timed out during compilation and then during a locked retry. `mix test` could not build the Lexbor NIF because `cmake` is unavailable. The detailed run identities and limits are in `docs/ui-evidence/manager-lifecycle-reassessment.md`.
+
 ## Verification Tools
 
 | Tool | Responsibility |
