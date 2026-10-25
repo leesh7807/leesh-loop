@@ -12,7 +12,7 @@ test('stop is available for running Loops and failed Loops with a confirmed owne
   assert.equal(managerLifecycleAction('Failed', false), 'start');
 });
 
-test('stopping has a status and unconfirmed process has no enabled stop action', () => {
+test('stopping has a status and unconfirmed ownership exposes no lifecycle action', () => {
   assert.equal(managerLifecycleAction('Stopping'), 'stopping');
-  assert.equal(managerLifecycleAction('Unconfirmed'), 'start');
+  assert.equal(managerLifecycleAction('Unconfirmed'), 'unconfirmed');
 });

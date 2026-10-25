@@ -744,6 +744,7 @@ function ManagerApp() {
   if (!selectionGateRef.current) selectionGateRef.current = createManagerSelectionGate(selectedId);
   const logsPanelRef = useRef(null);
   const logsSummaryRef = useRef(null);
+  const diagnosisSummaryRef = useRef(null);
   const instanceListGateRef = useRef(null);
   if (!instanceListGateRef.current) instanceListGateRef.current = createManagerInstanceListGate();
   const workflowRefreshControllerRef = useRef(null);
@@ -758,6 +759,7 @@ function ManagerApp() {
   const [workflowOpen, setWorkflowOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [managementOpen, setManagementOpen] = useState(false);
+  const [diagnosisOpen, setDiagnosisOpen] = useState(false);
   const [busy, setBusy] = useState('');
   const [busyOperation, setBusyOperation] = useState(null);
   const [feedback, dispatchFeedback] = useReducer(managerFeedbackReducer, initialManagerFeedback);
@@ -985,12 +987,18 @@ function ManagerApp() {
     });
   }
 
-  function openFailureControls() {
+  function openLifecycleDiagnostics() {
     setManagementOpen(true);
     setLogsOpen(true);
+    setDiagnosisOpen(Boolean(selected?.detail));
     window.requestAnimationFrame(() => {
-      logsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      logsSummaryRef.current?.focus({ preventScroll: true });
+      if (selected?.status === 'Unconfirmed' && selected.detail) {
+        diagnosisSummaryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        diagnosisSummaryRef.current?.focus({ preventScroll: true });
+      } else {
+        logsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        logsSummaryRef.current?.focus({ preventScroll: true });
+      }
     });
   }
 
@@ -1089,25 +1097,27 @@ function ManagerApp() {
               <span className="manager-current-path">{selected.repository_root}</span>
             </div>
             <div className="manager-lifecycle-actions">
-              {selected.status === 'Failed' && <button type="button" className="manager-action manager-recovery-action" aria-controls="manager-logs" aria-expanded={managementOpen && logsOpen} onClick={openFailureControls}>Review failure</button>}
-              {lifecycleAction === 'pending' ? (
+              {(selected.status === 'Failed' || selected.status === 'Unconfirmed') && <button type="button" className="manager-action manager-recovery-action" aria-controls={selected.detail ? 'manager-status-diagnosis manager-logs' : 'manager-logs'} aria-expanded={managementOpen && logsOpen && (!selected.detail || diagnosisOpen)} onClick={openLifecycleDiagnostics}>{selected.status === 'Unconfirmed' ? 'Review ownership' : 'Review failure'}</button>}
+              {lifecycleAction === 'unconfirmed' ? (
+                <span className="manager-lifecycle-pending" role="status">Lifecycle actions wait for confirmed process ownership.</span>
+              ) : lifecycleAction === 'pending' ? (
                 <span className="manager-lifecycle-pending" role="status">Stop becomes available when startup is ready.</span>
               ) : lifecycleAction === 'stopping' ? (
                 <span className="manager-lifecycle-pending" role="status">Stopping Loop…</span>
               ) : lifecycleAction === 'stop' ? (
                 <button type="button" className="manager-action secondary" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop', operation: 'stop-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Stopping Loop' && busyOperation.instanceId === selectedId ? 'Stopping…' : 'Stop Loop'}</button>
               ) : (
-                <button type="button" className={`manager-action${selected.status === 'Failed' ? ' secondary' : ''}`} disabled={Boolean(busy) || selected.status === 'Unconfirmed'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop', operation: 'start-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Starting Loop' && busyOperation.instanceId === selectedId ? 'Starting…' : selected.status === 'Failed' ? 'Retry Loop' : 'Start Loop'}</button>
+                <button type="button" className={`manager-action${selected.status === 'Failed' ? ' secondary' : ''}`} disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop', operation: 'start-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Starting Loop' && busyOperation.instanceId === selectedId ? 'Starting…' : selected.status === 'Failed' ? 'Retry Loop' : 'Start Loop'}</button>
               )}
               <a className="manager-task-jump" href="#tasks-heading">Tasks</a>
             </div>
-            {selected.status === 'Unconfirmed' && <p className="manager-status-guidance">Manager cannot verify process ownership. Start, stop, and unregister are unavailable until ownership is confirmed.</p>}
+            {selected.status === 'Unconfirmed' && <p className="manager-status-guidance">Manager cannot confirm process ownership. Review the diagnosis and Loop logs, then verify which process owns {selected.port ? `port ${selected.port}` : 'the assigned port'} with local process tools before retrying. Start, stop, and unregister remain unavailable until ownership is confirmed.</p>}
             {selected.status === 'Failed' && <p className="manager-status-guidance">{selected.can_update_workflow
               ? 'Startup failed and no active Loop process is confirmed. Review logs or repair the Workflow before restarting.'
               : selected.can_stop
                 ? 'The Loop reported a failure while its process is still owned. Stop it before restarting or changing its Workflow.'
                 : 'The Loop failed to start. Review its diagnosis and logs before retrying.'}</p>}
-            {selected.detail && <details className="manager-status-diagnosis"><summary>View diagnosis</summary><pre>{selected.detail}</pre></details>}
+            {selected.detail && <details id="manager-status-diagnosis" className="manager-status-diagnosis" open={diagnosisOpen} onToggle={event => setDiagnosisOpen(event.currentTarget.open)}><summary ref={diagnosisSummaryRef}>{diagnosisOpen ? 'Hide diagnosis' : 'View diagnosis'}</summary><p className="manager-help">Confirm which process owns the assigned port before retrying lifecycle actions.</p><pre>{selected.detail}</pre>{selected.status === 'Unconfirmed' && <a className="manager-task-jump" href="#manager-logs">Open Loop logs ↓</a>}</details>}
             <ManagerFeedback feedback={feedback} target="lifecycle" />
             <InstanceOperationFeedback feedback={selectedScopedLifecycleFeedback} target="lifecycle" />
             <WorkflowOperationFeedback feedback={selectedScopedWorkflowFeedback} placement={scopedWorkflowFeedbackPlacement === 'header' ? 'header' : null} />
