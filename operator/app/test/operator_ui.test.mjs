@@ -223,6 +223,14 @@ test('rendered UI source keeps Task actions, manager hierarchy, state cues, and 
   assert.match(source, /Add a Git repository/);
   assert.match(source, /Unregister Loop/);
   assert.match(source, /Available when Manager confirms Stopped, or confirms a Failed Loop has no active process/i);
+  assert.match(source, /Review failure/);
+  assert.match(source, /selected\.status === 'Failed' \? 'Retry Loop' : 'Start Loop'/);
+  assert.match(source, /manager-action manager-recovery-action/);
+  assert.match(source, /function openFailureControls\(\)/);
+  assert.match(source, /setManagementOpen\(true\)/);
+  assert.match(source, /setLogsOpen\(true\)/);
+  assert.match(source, /scrollIntoView\(\{ behavior: 'smooth', block: 'nearest' \}\)/);
+  assert.match(source, /aria-controls="manager-logs"/);
   assert.match(source, /const runtimePanel = \(/);
   assert.match(source, /<details className="manager-management manager-runtime-empty" open>/);
   assert.match(source, /<summary><span>Manage Runtime<\/span>/);

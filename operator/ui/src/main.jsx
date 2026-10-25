@@ -742,6 +742,8 @@ function ManagerApp() {
   });
   const selectionGateRef = useRef(null);
   if (!selectionGateRef.current) selectionGateRef.current = createManagerSelectionGate(selectedId);
+  const logsPanelRef = useRef(null);
+  const logsSummaryRef = useRef(null);
   const instanceListGateRef = useRef(null);
   if (!instanceListGateRef.current) instanceListGateRef.current = createManagerInstanceListGate();
   const workflowRefreshControllerRef = useRef(null);
@@ -755,6 +757,7 @@ function ManagerApp() {
   const [logsReadState, setLogsReadState] = useState('idle');
   const [workflowOpen, setWorkflowOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
+  const [managementOpen, setManagementOpen] = useState(false);
   const [busy, setBusy] = useState('');
   const [busyOperation, setBusyOperation] = useState(null);
   const [feedback, dispatchFeedback] = useReducer(managerFeedbackReducer, initialManagerFeedback);
@@ -982,6 +985,15 @@ function ManagerApp() {
     });
   }
 
+  function openFailureControls() {
+    setManagementOpen(true);
+    setLogsOpen(true);
+    window.requestAnimationFrame(() => {
+      logsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      logsSummaryRef.current?.focus({ preventScroll: true });
+    });
+  }
+
   async function updateWorkflow() {
     if (!workflow?.changed || !workflowEligibility?.canApply) return;
     const selectionGate = selectionGateRef.current;
@@ -1077,6 +1089,7 @@ function ManagerApp() {
               <span className="manager-current-path">{selected.repository_root}</span>
             </div>
             <div className="manager-lifecycle-actions">
+              {selected.status === 'Failed' && <button type="button" className="manager-action manager-recovery-action" aria-controls="manager-logs" aria-expanded={managementOpen && logsOpen} onClick={openFailureControls}>Review failure</button>}
               {lifecycleAction === 'pending' ? (
                 <span className="manager-lifecycle-pending" role="status">Stop becomes available when startup is ready.</span>
               ) : lifecycleAction === 'stopping' ? (
@@ -1084,7 +1097,7 @@ function ManagerApp() {
               ) : lifecycleAction === 'stop' ? (
                 <button type="button" className="manager-action secondary" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop', operation: 'stop-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Stopping Loop' && busyOperation.instanceId === selectedId ? 'Stopping…' : 'Stop Loop'}</button>
               ) : (
-                <button type="button" className="manager-action" disabled={Boolean(busy) || selected.status === 'Unconfirmed'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop', operation: 'start-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Starting Loop' && busyOperation.instanceId === selectedId ? 'Starting…' : 'Start Loop'}</button>
+                <button type="button" className={`manager-action${selected.status === 'Failed' ? ' secondary' : ''}`} disabled={Boolean(busy) || selected.status === 'Unconfirmed'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop', operation: 'start-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Starting Loop' && busyOperation.instanceId === selectedId ? 'Starting…' : selected.status === 'Failed' ? 'Retry Loop' : 'Start Loop'}</button>
               )}
               <a className="manager-task-jump" href="#tasks-heading">Tasks</a>
             </div>
@@ -1158,7 +1171,7 @@ function ManagerApp() {
       )}
 
       {selected && (
-        <details className="manager-management">
+        <details className="manager-management" open={managementOpen} onToggle={event => setManagementOpen(event.currentTarget.open)}>
           <summary><span>Manage current Loop</span><span>Runtime, Workflow, and diagnosis</span></summary>
           <div className="manager-console" aria-label="Loop Manager controls">
             {runtimePanel}
@@ -1197,8 +1210,8 @@ function ManagerApp() {
                 </div>
               )}
             </details>
-            <details open={logsOpen} onToggle={event => setLogsOpen(event.currentTarget.open)}>
-              <summary><span>Loop logs</span><span>View startup and Symphony output</span></summary>
+            <details id="manager-logs" ref={logsPanelRef} open={logsOpen} onToggle={event => setLogsOpen(event.currentTarget.open)}>
+              <summary ref={logsSummaryRef}><span>Loop logs</span><span>View startup and Symphony output</span></summary>
               {logsOpen && <ManagerFeedback feedback={feedback} target="logs" />}
               {logsOpen && logsPanelState === 'loading' && <p className="manager-help workflow-read-state" role="status">Loading Loop logs…</p>}
               {logsOpen && logsPanelState === 'refreshing' && <p className="manager-help workflow-read-state" role="status">Refreshing logs; showing the last successful response until it completes.</p>}
