@@ -1,58 +1,52 @@
 # Leesh Loop
 
-Leesh Loop runs an agent task loop for a single GitHub repository. Each Loop keeps its task data in a private SQLite Local Task Store beside the target repository, serves a local Operator page, and uses the same store for Symphony and Worker activity.
+Leesh Loop manages multiple repository Loops from one local web Operator. The central Manager owns instance data, process control, port allocation, Runtime updates, and Workflow updates. Each Loop Process keeps its own SQLite task store, workspace, configuration, and Workflow, and continues working if the browser or Manager closes.
 
-It runs on Linux or Unix. On Windows, use WSL2. Install Node.js 20.19+ or 22.12+ with npm, Git, GitHub CLI, mise, Codex CLI, and configure the `chatgpt-shot` review command on the machine that will run the Loop. You need access to the target GitHub repository. Task publishing and management do not require a Notion Task database or credentials.
+Leesh Loop currently supports Linux; Manager and Loop lifecycle ownership use Linux procfs to verify process identity safely. On Windows, use WSL2; macOS and BSD are not currently supported. Install Node.js 20.19+ or 22.12+, npm, Git, GitHub CLI, mise, Codex CLI, and configure `chatgpt-shot` on the machine that runs the Loops. The Manager listens on `127.0.0.1` and uses a private per-user token.
 
-## Create a Loop
+## Open the Manager and add repositories
 
-Run `leesh-loop init` from the root of a Git repository with its upstream configured. Init creates a sibling Loop directory containing the runtime and a generated `WORKFLOW.md`; it does not modify the target repository.
+Run the Manager command from anywhere to open the central UI. From the root of a Git repository with a configured upstream, initialize a managed instance:
 
 ```bash
+leesh-loop
 cd /path/to/your-repository
 leesh-loop init
-cd ../your-repository-loop
-npm start
 ```
 
-The Operator page opens in your browser. If it does not open automatically, use the `Operator page` URL printed by `npm start` (the default is <http://127.0.0.1:4310>). The page shows the repository, Local task queue, Accepted Plan editor, and selected task details. The task database is created under `.runtime/state/local-task-store/local-task-store.sqlite` by default.
+The first command installs the shared Runtime when needed and opens the Manager at `http://127.0.0.1:4320`. The UI can also add a repository by its local path. `init` and the UI use the same instance registry. They create settings, `WORKFLOW.md`, SQLite data, and workspaces below the user data directory; they do not copy Runtime code into the instance or modify the Git repository.
 
-`npm start` prepares the Local Task Store and UI, checks core workspace/GitHub readiness, starts Symphony against the same SQLite file, and opens the Operator. `npm stop` stops the owned runtime and UI without deleting task data. Restarting the Loop or updating the runtime preserves Tasks, Accepted Plans, Blocked By relations, Workpad records, and comments.
-
-## Publish and manage tasks
-
-In the Operator, paste a complete Accepted Plan with an H1 and select its initial State and any Blocked By tasks. Publish it to create a Task and its immutable Accepted Plan together. The Publisher derives the Task title and identifier, and the UI reports the saved identity and opens its detail.
-
-The queue puts Human Review tasks first, followed by active work. A task detail shows its Accepted Plan, Worker Workpad, comments, current State, and Blocked By tasks. Add review input as a comment, then choose the next State according to the generated `WORKFLOW.md`. State and Blocked By changes are explicit; comments do not start work or approve a change. Accepted Plans and Workpads are read-only in the UI.
-
-For a normal user flow, use the Operator. A CLI publication command is also available for maintenance or scripts:
+The sidebar lists every managed repository and its actual Loop state. Select an instance to use its Operator, tasks, comments, Workpad, and Accepted Plan flow. Start or stop only the selected Loop. The CLI equivalents are:
 
 ```bash
-npm run publish-local-plan -- --plan /path/to/accepted-plan.md --state Ready
+leesh-loop list
+leesh-loop start <instance-id>
+leesh-loop stop <instance-id>
+leesh-loop update
 ```
 
-## Configuration and updates
+Closing the browser does not stop the Manager or a Loop. Restarting the Manager does not stop a running Loop or its Worker Session. The Manager rediscovers a Loop from its execution record, process identity, readiness files, and runtime endpoint; uncertain ownership is shown as `Unconfirmed` and is not acted on.
 
-The Loop root `project.toml` records the target repository/base branch, workflow path, workspace root, and runtime state directory. There is no task-store selector: a new Loop always uses its Local Task Store. Task operations need no Notion Task settings. `chatgpt-shot` is a separate external review service and keeps its own service configuration.
+## Data and updates
 
-`leesh-loop update` updates the runtime and its npm package lock while preserving the generated workflow. `leesh-loop update --workflow` updates the generated `WORKFLOW.md` separately. Apply both when an update requires changes to both surfaces. Runtime updates preserve Project settings, environment files, task data, workspaces, and user-edited workflow files unless the workflow update is explicitly requested.
+Shared Runtime distributions are stored once under `$XDG_DATA_HOME/leesh-loop/runtimes` (default `~/.local/share/leesh-loop/runtimes`). Runtime installation prepares the shared npm and Symphony Mix dependencies and builds the Operator UI. Per-instance configuration, Workflow, SQLite, and workspaces live below `$XDG_DATA_HOME/leesh-loop/instances/<id>`. Execution records and logs use `$XDG_STATE_HOME/leesh-loop`; Manager settings and the active Runtime pointer use `$XDG_CONFIG_HOME/leesh-loop`; the Hex package cache uses `$XDG_CACHE_HOME/leesh-loop/hex`. Override the XDG roots to relocate these paths.
 
-Project settings and boundaries are described in [System responsibilities and configuration](docs/SYSTEM.md). The visual design principles are in [Design principles](docs/DESIGN.md).
+The Manager assigns an available Symphony port to each Loop. The single Manager Operator uses one address; there is no per-instance UI server. Instance `project.toml` files hold repository and worker settings, not routine port choices.
 
-## Local Smoke Run
+Runtime updates install an immutable version and make it active for future starts. Running Loops keep their selected version. If an update was started in the Manager UI, run `leesh-loop update` to reload the Manager service onto that active Runtime; this does not stop running Loops. In the Manager, compare each instance's current Workflow with the Runtime template and explicitly apply an update only to a stopped instance. The Manager backs up the prior Workflow before replacing it. Runtime updates do not update Workflow files.
 
-The isolated Local Smoke Run uses the actual Operator server and UI, Local Publisher, SQLite Store, Symphony, and a controlled Worker without an AI model or external Task database. Its data and processes are separate from user Loops.
+There is no automatic import of the previous per-project registry. Existing directories, databases, workspaces, and processes are left in place. Initialize the Git repositories you want managed by the new Manager.
+
+## Task work
+
+In the Operator, publish a complete Accepted Plan with an H1 and choose its initial State and Blocked By tasks. The Local Publisher derives the identifier and atomically stores the Task and immutable Plan. Task state, Blocked By, comments, Workpad, and Human Review operations retain their existing meanings and are scoped to the selected instance's Local Task Store.
+
+The isolated Local Smoke Run remains available for Symphony and controlled Worker development:
 
 ```bash
-# Automated publication, Store, Operator API, Symphony, Worker, and readback flow
 npm run e2e
-
-# Open on an empty Store, type s and Enter in the terminal to seed example Tasks,
-# then type q and Enter to stop
 npm run e2e -- --mode interactive
 ```
-
-Interactive mode prints the local Operator URL while the Store is empty so the Plan screen can be evaluated. After `s`, it prepares three distinct Backlog Tasks and a Human Review scenario through the real Operator, Local Publisher, Symphony, and controlled Worker. The Backlog Tasks stay non-dispatchable. The process removes its temporary files and owned processes after `q`.
 
 ## Development checks
 
@@ -62,4 +56,4 @@ npm test
 npm run e2e
 ```
 
-The Smoke Run README describes its isolated setup and interactive controls: [local-e2e/README.md](local-e2e/README.md).
+System responsibilities and data boundaries are described in [docs/SYSTEM.md](docs/SYSTEM.md).

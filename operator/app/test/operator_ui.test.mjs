@@ -202,10 +202,11 @@ test('Local Task mutations reject cross-origin browser requests and non-JSON bod
   assert.equal(sameOriginState.body.task.state, 'Human Review');
 });
 
-test('rendered UI source keeps Local task navigation, human review actions, and grayscale responsive styles', async () => {
+test('rendered UI source keeps Local task navigation, human review actions, and neutral responsive styles', async () => {
   const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
   const styles = await readFile(join(root, 'operator/ui/src/style.css'), 'utf8');
   assert.match(source, /Human Review/);
+  assert.match(source, /taskGroup\('Active work', groups\.activeWork/);
   assert.match(source, /Accepted Plan/);
   assert.match(source, /publicationReceipt\?\.page_id === taskId/);
   assert.match(source, /Task ID/);
@@ -221,7 +222,11 @@ test('rendered UI source keeps Local task navigation, human review actions, and 
   assert.doesNotMatch(source, /Notion|Symphony Dashboard|notionTasksUrl/);
   assert.match(styles, /@media \(max-width: 960px\)/);
   assert.match(styles, /\.state-toolbar \{ position: sticky/);
-  const colors = [...styles.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(match => match[0]);
+  assert.match(styles, /\.manager-status\.status-running::before \{ background: #347a54; \}/);
+  assert.match(styles, /\.manager-status\.status-starting::before, \.manager-status\.status-stopping::before \{ background: #aa782c; \}/);
+  assert.match(styles, /\.manager-status\.status-failed::before, \.manager-status\.status-unconfirmed::before \{ background: #9b4242; \}/);
+  const neutralStyles = styles.replaceAll(/#(?:347a54|aa782c|9b4242)\b/gi, '#777');
+  const colors = [...neutralStyles.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(match => match[0]);
   assert.ok(colors.length > 0);
   assert.ok(colors.every(value => {
     const hex = value.slice(1);
@@ -233,7 +238,7 @@ test('rendered UI source keeps Local task navigation, human review actions, and 
 test('Task detail and list wire the tested serialized refresh queue', async () => {
   const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
   const detail = source.slice(source.indexOf('function TaskDetail'), source.indexOf('function App'));
-  const app = source.slice(source.indexOf('function App'));
+  const app = source.slice(source.indexOf('function OperatorApp()'));
 
   assert.match(detail, /detailRefreshQueue = useRef\(null\)/);
   assert.match(detail, /detailRefreshQueue\.current = createSerializedRefreshQueue\(\)/);
