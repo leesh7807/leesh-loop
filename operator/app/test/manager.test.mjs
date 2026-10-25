@@ -250,6 +250,14 @@ async function api(manager, path, { method = 'GET', instanceId, body, origin, ti
   return { response, body: await response.json().catch(() => null) };
 }
 
+function awaitWithTimeout(operation, label, timeoutMs = 5_000) {
+  let timer;
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} did not settle within ${timeoutMs} ms`)), timeoutMs);
+  });
+  return Promise.race([operation, timeout]).finally(() => clearTimeout(timer));
+}
+
 test('managed instances share one Runtime and keep their files and Task Stores isolated', async t => {
   const paths = await fixture(t);
   const repositories = join(paths.directory, 'repositories');
@@ -478,7 +486,7 @@ test('Manager drains an in-flight Task request before unregistering its instance
 
   try {
     const taskRead = track(api(manager, '/api/v1/tasks', { instanceId: instance.id }));
-    await storeOpen;
+    await awaitWithTimeout(storeOpen, 'Loop A Task Store opener held-open signal');
     let unregisterFinished = false;
     const unregister = track(api(manager, `/api/v1/instances/${instance.id}`, { method: 'DELETE', origin: manager.url })
       .then(result => { unregisterFinished = true; return result; }));
@@ -508,7 +516,11 @@ test('Manager drains an in-flight Task request before unregistering its instance
     clearTimeout(registrationTimeout);
 
     allowStoreOpen();
-    const [read, removed, registered] = await Promise.all([taskRead, unregister, registration]);
+    const [read, removed, registered] = await Promise.all([
+      awaitWithTimeout(taskRead, 'Loop A held Task request'),
+      awaitWithTimeout(unregister, 'Loop A unregister after Task drain'),
+      awaitWithTimeout(registration, 'Loop B registration after Task drain')
+    ]);
     assert.equal(read.response.status, 200, JSON.stringify(read.body));
     assert.equal(removed.response.status, 200);
     assert.equal(registrationWhileDrainWaits.completed, true, 'an unrelated repository registration must not wait for this Loop Task drain');
@@ -516,7 +528,7 @@ test('Manager drains an in-flight Task request before unregistering its instance
     assert.equal(registered.response.status, 201);
     assert.equal(storeClosed, true);
     assert.deepEqual((await listLoopInstances(paths)).map(value => value.id), [registered.body.instance.id]);
-    assert.equal((await api(manager, '/api/v1/tasks', { instanceId: registered.body.instance.id })).response.status, 200);
+    assert.equal((await api(manager, '/api/v1/tasks', { instanceId: registered.body.instance.id, timeoutMs: 5_000 })).response.status, 200);
     assert.equal(await readFile(join(instance.data_directory, 'WORKFLOW.md'), 'utf8').then(value => value.includes('Repository workflow')), true);
   } finally {
     allowStoreOpen();
