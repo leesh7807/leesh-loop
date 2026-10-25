@@ -18,6 +18,7 @@ import { workflowComparisonAfterApply } from './workflow-apply-result.js';
 import { createWorkflowDiff } from './workflow-diff.js';
 import { runtimeLabel } from './runtime-label.js';
 import { canUnregisterLoop } from './manager-unregister-eligibility.js';
+import { runtimeUpdateCompletionMessage } from './manager-runtime-feedback.js';
 import './style.css';
 
 const REFRESH_INTERVAL_MS = 7500;
@@ -916,15 +917,10 @@ function ManagerApp() {
         method,
         ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       }));
-      const restartRequired = path === '/api/v1/runtime/update' && result.manager_restart_required;
       const message = operation === 'unregister-instance'
         ? `${result.instance.repository_name} was removed from Manager. Its Git repository and Loop data remain at ${result.instance.data_directory}.`
         : path === '/api/v1/runtime/update'
-          ? !result.changed
-            ? `Runtime is already up to date at version ${result.active?.version || 'unknown'}. No running Loop or Workflow was changed.`
-            : restartRequired
-              ? `Installed Runtime ${result.active?.version || ''} for future Loop starts. The Manager still uses Runtime ${managerRuntimeVersion}; run leesh-loop to reopen it. Running Loops and Workflow files were not changed.`
-              : `Installed Runtime ${result.active?.version || ''} for future Loop starts. Running Loops and Workflow files were not changed.`
+          ? runtimeUpdateCompletionMessage(result, managerRuntimeVersion)
           : result.instance
             ? `${result.instance.repository_name || result.instance.id}: ${result.instance.status}.`
             : managerOperationCompletionMessage(operation);

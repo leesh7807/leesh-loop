@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile as execute } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -35,13 +35,23 @@ test('Runtime installs once into the central version store and a failed update p
   assert.equal(repeated.changed, false);
 
   const activeFile = join(directory, 'config/leesh-loop/active-runtime.json');
-  const activeBeforeFailure = await readFile(activeFile, 'utf8');
   const runtimeCode = join(first.path, 'operator/app/manager.mjs');
   const originalCode = await readFile(runtimeCode);
   await writeFile(runtimeCode, `${originalCode}\n// tampered\n`);
   await assert.rejects(activeRuntime({ environment, homeDirectory: directory }), /contents do not match their immutable identity/);
-  await writeFile(runtimeCode, originalCode);
+
+  const recovered = await installRuntimeDistribution(sourceRoot, { environment, homeDirectory: directory });
+  assert.equal(recovered.id, first.id);
+  assert.equal(recovered.changed, true);
+  assert.equal(recovered.recovered_from_invalid_active, true);
+  assert.equal(recovered.repaired_distribution, true);
   assert.equal((await activeRuntime({ environment, homeDirectory: directory })).id, first.id);
+  const runtimeRoot = join(directory, 'data/leesh-loop/runtimes');
+  const damagedDistribution = (await readdir(runtimeRoot)).find(name => name.startsWith(`.damaged-${first.id}-`));
+  assert.ok(damagedDistribution, 'the invalid immutable distribution is preserved for diagnosis');
+  assert.match(await readFile(join(runtimeRoot, damagedDistribution, 'operator/app/manager.mjs'), 'utf8'), /tampered/);
+
+  const activeBeforeFailure = await readFile(activeFile, 'utf8');
   const badSource = join(directory, 'bad-source');
   await mkdir(badSource);
   await materializeRuntimeSnapshot(sourceRoot, badSource);

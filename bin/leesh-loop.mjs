@@ -104,6 +104,7 @@ async function main() {
   }
   if (selectedCommand === 'update' && args.length === 0) {
     const updated = await installRuntimeDistribution(sourceRoot);
+    if (updated.recovered_from_invalid_active) console.log('Recovered from an invalid active Runtime selection using the validated source checkout.');
     let manager = await ensureReadyManager();
     if (manager.alreadyRunning) {
       const paths = managerPaths();

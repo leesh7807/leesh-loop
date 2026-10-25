@@ -388,13 +388,17 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
     }
     if (pathname === '/api/v1/runtime/update' && request.method === 'POST') {
       const result = await serializeRuntimeUpdate(async () => {
-        const previous = await activeRuntime({ environment, homeDirectory });
+        let previous = null;
+        let previousRuntimeInvalid = false;
+        try { previous = await activeRuntime({ environment, homeDirectory }); }
+        catch { previousRuntimeInvalid = true; }
         const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
         const updated = await runtimeInstaller(await latestSourceRoot(), { environment, homeDirectory });
         return {
           previous,
           active: updated,
           changed: updated.changed,
+          recovered_from_invalid_active: previousRuntimeInvalid || updated.recovered_from_invalid_active === true,
           manager_runtime_version: service?.runtime_version || null,
           manager_restart_required: service?.runtime_version !== updated.id
         };

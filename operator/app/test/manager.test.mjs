@@ -366,6 +366,35 @@ test('Manager Runtime status and install action remain available with an empty r
   assert.deepEqual(await listLoopInstances(paths), []);
 });
 
+test('Manager Runtime update can select a validated Runtime when the active distribution is invalid', async t => {
+  const paths = await fixture(t);
+  const invalidRuntime = await installTestRuntime(paths, 'corrupt-active-runtime');
+  const replacement = await installTestRuntime(paths, 'validated-replacement-runtime');
+  const activeFile = managerPaths(paths).activeRuntime;
+  await writeFile(join(invalidRuntime.path, 'runtime-fixture.mjs'), 'corrupt active contents');
+  await writeFile(activeFile, `${JSON.stringify({ schema_version: 1, id: invalidRuntime.id })}\n`);
+  await assert.rejects(activeRuntime(paths), /contents do not match/);
+
+  let installerCalled = false;
+  const manager = await startManagerFixture(t, paths, {
+    runtimeInstaller: async () => {
+      installerCalled = true;
+      await writeFile(activeFile, `${JSON.stringify({ schema_version: 1, id: replacement.id })}\n`);
+      return { ...replacement, changed: true, recovered_from_invalid_active: true };
+    }
+  });
+
+  const recovered = await api(manager, '/api/v1/runtime/update', { method: 'POST', origin: manager.url });
+  assert.equal(recovered.response.status, 200);
+  assert.equal(installerCalled, true);
+  assert.equal(recovered.body.previous, null);
+  assert.equal(recovered.body.active.id, replacement.id);
+  assert.equal(recovered.body.recovered_from_invalid_active, true);
+  assert.equal(recovered.body.manager_restart_required, true);
+  assert.equal((await activeRuntime(paths)).id, replacement.id);
+  assert.equal(await readFile(join(invalidRuntime.path, 'runtime-fixture.mjs'), 'utf8'), 'corrupt active contents');
+});
+
 test('Manager unregisters a Stopped or confirmed process-absent Failed instance and preserves its repository and Task Store', async t => {
   const paths = await fixture(t);
   const repositoryRoot = join(paths.directory, 'repositories');

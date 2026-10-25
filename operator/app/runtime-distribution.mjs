@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
@@ -111,6 +111,60 @@ export async function activeRuntime(options = {}) {
   return { id: pointer.id, version: details.version, path: runtimePath, installed_at: details.installed_at };
 }
 
+async function publishRuntimeStage(stage, destination, expectedId) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let current;
+    try { current = await lstat(destination); }
+    catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      try {
+        await rename(stage, destination);
+        return false;
+      } catch (renameError) {
+        if (['EEXIST', 'ENOTEMPTY'].includes(renameError?.code)) continue;
+        throw renameError;
+      }
+    }
+    if (current.isSymbolicLink() || !current.isDirectory()) throw new Error(`Runtime distribution path is unsafe: ${destination}`);
+
+    let currentIsValid = false;
+    try {
+      await validateInstalledDistribution(destination, expectedId);
+      currentIsValid = true;
+    } catch { /* Replace only a real directory whose content fails validation. */ }
+    if (currentIsValid) {
+      await rm(stage, { recursive: true, force: true });
+      return false;
+    }
+
+    const preservedPath = join(dirname(destination), `.damaged-${expectedId}-${randomUUID()}`);
+    try { await rename(destination, preservedPath); }
+    catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      throw error;
+    }
+
+    try {
+      await rename(stage, destination);
+      return true;
+    } catch (error) {
+      if (['EEXIST', 'ENOTEMPTY'].includes(error?.code)) {
+        try {
+          await validateInstalledDistribution(destination, expectedId);
+          await rm(stage, { recursive: true, force: true });
+          return true;
+        } catch { /* A concurrent invalid destination remains a hard failure. */ }
+      }
+      try { await rename(preservedPath, destination); }
+      catch (restoreError) {
+        throw new Error(`Runtime replacement failed and the prior distribution remains preserved at ${preservedPath}; it could not be restored to ${destination}: ${restoreError.message}`, { cause: error });
+      }
+      throw error;
+    }
+  }
+  throw new Error(`Runtime distribution changed repeatedly during installation: ${destination}`);
+}
+
 export async function recordRuntimeSource(sourceRoot, options = {}) {
   const paths = managerPaths(options);
   const source = await sourceIdentity(sourceRoot);
@@ -142,14 +196,22 @@ export async function currentRuntimeSource(fallbackSource = defaultSourceRoot, o
 export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot, options = {}) {
   const paths = managerPaths(options);
   const source = await sourceIdentity(sourceRoot);
+  let previousActive = null;
+  let recoveredFromInvalidActive = false;
+  try { previousActive = await activeRuntime(options); }
+  catch { recoveredFromInvalidActive = true; }
   await Promise.all([ensurePrivateDirectory(paths.runtimeRoot), ensurePrivateDirectory(paths.configRoot)]);
   const destination = join(paths.runtimeRoot, source.id);
-  let installed = false;
-  try { await lstat(destination); installed = true; }
-  catch (error) { if (error?.code !== 'ENOENT') throw error; }
-  if (installed) {
+  let destinationIsValid = false;
+  try {
     await validateInstalledDistribution(destination, source.id);
-  } else {
+    destinationIsValid = true;
+  } catch {
+    const details = await lstat(destination).catch(error => error?.code === 'ENOENT' ? null : Promise.reject(error));
+    if (details && (details.isSymbolicLink() || !details.isDirectory())) throw new Error(`Runtime distribution path is unsafe: ${destination}`);
+  }
+  let repairedDistribution = false;
+  if (!destinationIsValid) {
     const stage = join(paths.runtimeRoot, `.stage-${process.pid}-${randomUUID()}`);
     await mkdir(stage, { mode: 0o700 });
     try {
@@ -162,23 +224,21 @@ export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot,
       await buildRuntimeDependencies(stage, options.environment ?? process.env, options.homeDirectory ?? homedir());
       const metadata = { schema_version: 1, id: source.id, version: source.version, path: destination, source_root: source.root, files: source.files, installed_at: new Date().toISOString() };
       await writeFile(join(stage, '.distribution.json'), `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
-      try {
-        await rename(stage, destination);
-      } catch (error) {
-        // CLI startup and another Manager request can race to install the same immutable snapshot.
-        // Reuse the winner only after validating its complete identity and metadata.
-        if (!['EEXIST', 'ENOTEMPTY'].includes(error?.code)) throw error;
-        await validateInstalledDistribution(destination, source.id);
-        await rm(stage, { recursive: true, force: true });
-      }
+      // A broken immutable directory is retained under a diagnostic name before
+      // a fully validated replacement can reclaim its content-addressed path.
+      repairedDistribution = await publishRuntimeStage(stage, destination, source.id);
     } catch (error) {
       await rm(stage, { recursive: true, force: true }).catch(() => {});
       throw error;
     }
   }
-  const existing = await activeRuntime(options);
   await writeAtomicJson(paths.activeRuntime, { schema_version: 1, id: source.id, activated_at: new Date().toISOString() });
-  return { ...(await activeRuntime(options)), changed: existing?.id !== source.id };
+  return {
+    ...(await activeRuntime(options)),
+    changed: recoveredFromInvalidActive || repairedDistribution || previousActive?.id !== source.id,
+    recovered_from_invalid_active: recoveredFromInvalidActive,
+    repaired_distribution: repairedDistribution
+  };
 }
 
 export function installRuntimeDistributionInWorker(sourceRoot = defaultSourceRoot, options = {}, { moduleUrl = import.meta.url } = {}) {
