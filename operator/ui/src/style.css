@@ -158,13 +158,20 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .inline-message.failure { color: #202020; font-weight: 600; }
 .inline-message .text-button { margin-left: .45rem; }
 
-.manager-header { display: grid; width: min(100% - 3.5rem, 100rem); grid-template-columns: minmax(10rem, .7fr) minmax(0, 1fr); align-items: end; gap: 1.4rem; margin: 0 auto; padding: 1.35rem 0 1rem; border-bottom: 1px solid #d7d7d7; }
+.manager-header { display: grid; width: min(100% - 3.5rem, 100rem); grid-template-columns: minmax(10rem, .42fr) minmax(0, 1fr); align-items: start; gap: 1.1rem 2rem; margin: 0 auto; padding: 1.35rem 0 1rem; border-bottom: 1px solid #d7d7d7; }
 .manager-brand .eyebrow { margin-bottom: .2rem; }
 .manager-brand h1 { font-size: 1.45rem; }
-.manager-lifecycle { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .7rem; }
+.manager-lifecycle { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .3rem 1rem; }
+.manager-current-instance { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: .1rem .7rem; }
 .manager-lifecycle-target { min-width: 0; max-width: 14rem; overflow-wrap: anywhere; color: #444; font-size: .74rem; font-weight: 650; }
+.manager-current-path { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; color: #737373; font-size: .68rem; }
+.manager-lifecycle-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .6rem .9rem; }
 .manager-lifecycle-pending { color: #626262; font-size: .72rem; }
-.manager-lifecycle-detail, .manager-lifecycle .manager-feedback { flex: 1 0 100%; max-width: 34rem; margin: 0; text-align: right; }
+.manager-lifecycle-detail, .manager-lifecycle .manager-feedback { grid-column: 1 / -1; max-width: 56rem; margin: 0; }
+.manager-status-guidance { grid-column: 1 / -1; margin: .25rem 0 0; color: #4f4f4f; font-size: .74rem; }
+.manager-status-diagnosis { grid-column: 1 / -1; min-width: 0; margin-top: .15rem; }
+.manager-status-diagnosis > summary { width: fit-content; color: #555; cursor: pointer; font-size: .7rem; text-decoration: underline; text-underline-offset: .2em; }
+.manager-status-diagnosis pre { max-height: 12rem; margin: .45rem 0 0; padding: .6rem .7rem; overflow: auto; border-radius: .3rem; background: #ececec; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .7rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .manager-feedback { min-width: 0; }
 .manager-operation-pending { grid-column: 1 / -1; margin: .15rem 0 0; }
 .manager-task-jump { color: #343434; font-size: .72rem; text-decoration: underline; text-decoration-color: #a8a8a8; text-underline-offset: .2em; white-space: nowrap; }
@@ -174,10 +181,16 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .manager-status.status-running::before { background: #347a54; }
 .manager-status.status-starting::before, .manager-status.status-stopping::before { background: #aa782c; }
 .manager-status.status-failed::before, .manager-status.status-unconfirmed::before { background: #9b4242; }
-.manager-instances { width: min(100% - 3.5rem, 100rem); margin: 0 auto; padding: .85rem 0 .9rem; border-bottom: 1px solid #d7d7d7; }
-.manager-instances-heading { display: flex; align-items: baseline; gap: .65rem; margin-bottom: .55rem; }
-.manager-instances-heading h2 { margin: 0; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; }
-.manager-instances-heading > span { color: #777; font-size: .68rem; }
+.manager-instances { width: min(100% - 3.5rem, 100rem); margin: 0 auto; padding: .62rem 0 .7rem; border-bottom: 1px solid #d7d7d7; }
+.manager-instances-summary, .manager-management > summary { display: flex; align-items: baseline; gap: .55rem; color: #333; cursor: pointer; list-style: none; font-size: .76rem; font-weight: 650; }
+.manager-instances-summary::-webkit-details-marker, .manager-management > summary::-webkit-details-marker { display: none; }
+.manager-instances-summary::before, .manager-management > summary::before { content: '+'; width: .65rem; color: #626262; }
+.manager-instances[open] > .manager-instances-summary::before, .manager-management[open] > summary::before { content: '−'; }
+.manager-instances-summary span:last-child, .manager-management > summary span:last-child { margin-left: auto; color: #717171; font-size: .68rem; font-weight: 450; text-align: right; }
+.manager-instances-content { display: grid; gap: .7rem; padding: .8rem 0 .25rem; }
+.manager-instances-heading { display: flex; align-items: baseline; gap: .65rem; }
+.manager-instances-heading h2 { margin: 0; font-size: .82rem; }
+.manager-instances-heading > span { color: #777; font-size: .7rem; }
 .manager-instance-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: .45rem; }
 .manager-instance-choice { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: .15rem .6rem; min-width: 0; padding: .55rem .65rem; border: 1px solid #d5d5d5; border-radius: .35rem; background: transparent; text-align: left; }
 .manager-instance-choice:hover { background: #ededed; }
@@ -190,28 +203,32 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .manager-action.secondary { background: transparent; color: #242424; }
 .manager-action.secondary:hover { background: #e9e9e9; }
 .manager-action:disabled { cursor: wait; opacity: .55; }
-.manager-console { display: grid; width: min(100% - 3.5rem, 100rem); grid-template-columns: minmax(18rem, 1.25fr) minmax(15rem, .85fr); align-items: start; gap: 0 2.4rem; margin: 0 auto; padding: .15rem 0 0; }
-.manager-create-details { grid-column: 1 / -1; padding: .55rem 0 .7rem; border-bottom: 1px solid #dcdcdc; }
-.manager-create-details > summary { display: flex; align-items: center; gap: .5rem; color: #4a4a4a; cursor: pointer; list-style: none; font-size: .74rem; font-weight: 650; }
-.manager-create-details > summary::-webkit-details-marker { display: none; }
-.manager-create-details > summary::before { content: '+'; width: .65rem; color: #626262; }
-.manager-create-details[open] > summary::before { content: '−'; }
-.manager-create { display: grid; gap: .38rem; padding: .65rem 0 .15rem; }
+.manager-create { display: grid; gap: .38rem; padding: .8rem 0 .15rem; border-top: 1px solid #e0e0e0; }
 .manager-create h2, .manager-runtime h2, .manager-instance-info h2 { margin: 0 0 .28rem; font-size: 1.08rem; letter-spacing: -.02em; }
 .manager-help { max-width: 72ch; margin: 0; color: #666; font-size: .74rem; line-height: 1.5; }
 .manager-input-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .55rem; margin-top: .12rem; }
 .manager-input-row input { min-width: 0; min-height: 2.55rem; padding: .42rem .65rem; border: 1px solid #a8a8a8; border-radius: .35rem; background: white; font-size: .78rem; }
-.manager-runtime { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid #dcdcdc; }
+.manager-management { width: min(100% - 3.5rem, 100rem); margin: 1.4rem auto 0; padding: .7rem 0 .9rem; border-top: 1px solid #d7d7d7; }
+.manager-console { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 0; padding-top: .65rem; }
+.manager-runtime { display: flex; align-items: center; justify-content: space-between; gap: 1.2rem; padding: .5rem 0 1rem; border-bottom: 1px solid #dcdcdc; }
 .manager-runtime .manager-action { flex: 0 0 auto; }
 .manager-runtime-action { display: grid; justify-items: end; gap: .35rem; min-width: 0; max-width: min(32rem, 46%); }
 .manager-runtime-feedback { width: 100%; }
-.manager-instance-info { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; padding: 1rem 0; border-bottom: 1px solid #dcdcdc; }
+.manager-runtime-source { display: grid; grid-template-columns: auto auto auto; justify-content: start; align-items: baseline; gap: .25rem .5rem; margin: .45rem 0 0; color: #686868; font-size: .69rem; }
+.manager-runtime-source strong { color: #292929; font-weight: 650; }
+.manager-runtime-source code { color: #454545; }
+.manager-runtime-source span { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.manager-runtime-versions { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .5rem; margin: .55rem 0 0; color: #666; font-size: .7rem; }
+.manager-runtime-versions strong { color: #292929; font-weight: 650; }
+.manager-instance-info { display: grid; grid-template-columns: minmax(12rem, .9fr) minmax(13rem, 1fr) minmax(15rem, 1.1fr); align-items: center; gap: 1rem 1.5rem; padding: 1rem 0; border-bottom: 1px solid #dcdcdc; }
 .manager-instance-info > div:first-child { min-width: 0; }
 .manager-repository-path { margin: 0; color: #646464; font-size: .75rem; overflow-wrap: anywhere; }
-.manager-instance-meta { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .45rem 1.2rem; color: #6c6c6c; font-size: .68rem; }
+.manager-instance-meta { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: .45rem 1.2rem; color: #6c6c6c; font-size: .68rem; }
 .manager-instance-meta span { white-space: nowrap; }
 .manager-instance-meta strong { margin-left: .25rem; color: #262626; font-weight: 650; }
-.manager-folders { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(15rem, .8fr); gap: 1.3rem; padding: .65rem 0 0; }
+.manager-unregister { display: grid; justify-items: start; gap: .4rem; min-width: 0; }
+.manager-unregister .manager-help { max-width: 48ch; }
+.manager-folders { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(15rem, .8fr); gap: 1.3rem; padding: .65rem 0 0; }
 .manager-folders-workflow-open { grid-template-columns: minmax(0, 1fr); }
 .manager-folders details { min-width: 0; }
 .manager-folders summary { display: flex; justify-content: space-between; gap: 1rem; padding: .3rem 0; color: #292929; cursor: pointer; list-style: none; font-size: .78rem; font-weight: 650; }
@@ -249,17 +266,15 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .manager-logs { max-height: 14rem; margin-top: .45rem; }
 .manager-logs-actions { display: flex; align-items: center; gap: .55rem; margin-top: .55rem; }
 .manager-empty { grid-column: 1 / -1; margin: .9rem 0 0; color: #666; font-size: .82rem; }
-.manager-console > .inline-message { grid-column: 1 / -1; margin-bottom: 0; }
 .manager-shell > .page-shell { padding-top: .8rem; }
 
 @media (max-width: 960px) {
-  .manager-header, .manager-instances, .manager-console { width: min(100% - 2.5rem, 56rem); }
+  .manager-header, .manager-instances, .manager-management { width: min(100% - 2.5rem, 56rem); }
   .manager-header { grid-template-columns: minmax(0, 1fr); gap: .65rem; }
-  .manager-lifecycle { grid-column: 1; justify-content: flex-start; }
-  .manager-console { grid-template-columns: 1fr; }
-  .manager-runtime { grid-column: 1; }
+  .manager-lifecycle { grid-column: 1; grid-template-columns: minmax(0, 1fr); justify-content: flex-start; }
+  .manager-lifecycle-actions { justify-content: flex-start; }
   .manager-folders { grid-template-columns: 1fr; gap: .5rem; }
-  .manager-instance-info { align-items: flex-start; flex-direction: column; gap: .7rem; }
+  .manager-instance-info { grid-template-columns: 1fr; gap: .7rem; }
   .manager-instance-meta { justify-content: flex-start; }
   .page-shell { width: min(100% - 2.5rem, 56rem); padding-top: 1.15rem; }
   .page-header { align-items: flex-start; flex-direction: column; gap: .85rem; }
@@ -279,19 +294,19 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 }
 
 @media (max-width: 560px) {
-  .manager-header, .manager-instances, .manager-console { width: min(100% - 1.4rem, 100%); }
+  .manager-header, .manager-instances, .manager-management { width: min(100% - 1.4rem, 100%); }
   .manager-header { grid-template-columns: 1fr; gap: .8rem; padding-top: .85rem; }
   .manager-brand h1 { font-size: 1.35rem; }
   .manager-lifecycle { grid-column: 1; justify-content: flex-start; }
   .manager-lifecycle { column-gap: .55rem; row-gap: .45rem; }
   .manager-lifecycle-target { max-width: 9rem; }
   .manager-lifecycle-detail, .manager-lifecycle .manager-feedback { text-align: left; }
-  .manager-console { padding-top: .85rem; }
   .manager-input-row { grid-template-columns: 1fr; }
   .manager-input-row .manager-action { justify-self: start; }
   .manager-runtime { align-items: flex-start; flex-direction: column; }
   .manager-runtime-action { justify-items: start; max-width: 100%; }
   .manager-runtime-feedback { max-width: 100%; }
+  .manager-runtime-source { grid-template-columns: auto auto auto; }
   .manager-instance-meta { display: grid; grid-template-columns: 1fr; gap: .25rem; }
   .workflow-comparison { grid-template-columns: 1fr; }
   .manager-folders summary { align-items: flex-start; flex-wrap: wrap; }

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 function decodeRepositoryPart(value) {
   try { return decodeURIComponent(value); }
@@ -52,7 +54,7 @@ export function githubRepositoryTransport(remoteUrl) {
   return githubRepositoryDetails(remoteUrl).transport;
 }
 
-if (process.argv[1] && new URL(`file://${process.argv[1]}`).pathname === new URL(import.meta.url).pathname) {
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {
     process.stdout.write(`${githubRepositoryTransport(process.argv[2])}\n`);
   } catch (error) {

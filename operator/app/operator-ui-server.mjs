@@ -111,6 +111,7 @@ export async function createOperatorUiServer({ root, config, stateDirectory, tas
 
   const server = createServer(async (request, response) => {
     const url = new URL(request.url || '/', 'http://127.0.0.1');
+    let releaseTaskContext = null;
     try {
       if (managerController) {
         response.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
@@ -136,7 +137,8 @@ export async function createOperatorUiServer({ root, config, stateDirectory, tas
         if (isTaskRoute) {
           const instanceId = request.headers['x-leesh-loop-instance-id'];
           if (typeof instanceId !== 'string' || !instanceId) throw Object.assign(new Error('Select a Loop instance before using the Operator.'), { status: 400 });
-          const context = await managerController.resolveTaskContext(instanceId);
+          const context = await managerController.acquireTaskContext(instanceId);
+          releaseTaskContext = context.release;
           requestStore = context.store;
           requestConfig = context.config;
         }
@@ -227,6 +229,8 @@ export async function createOperatorUiServer({ root, config, stateDirectory, tas
       if (error?.code === 'ENOENT' || error instanceof URIError) { response.statusCode = 404; response.end(); return; }
       if (!response.headersSent) sendJson(response, errorStatus(error), { error: error instanceof Error ? error.message : 'Operator UI request failed.' });
       else response.destroy(error);
+    } finally {
+      releaseTaskContext?.();
     }
   });
   server.once('close', () => {

@@ -202,7 +202,7 @@ test('Local Task mutations reject cross-origin browser requests and non-JSON bod
   assert.equal(sameOriginState.body.task.state, 'Human Review');
 });
 
-test('rendered UI source keeps Local task navigation, human review actions, and neutral responsive styles', async () => {
+test('rendered UI source keeps Task actions, manager hierarchy, state cues, and responsive styles', async () => {
   const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
   const styles = await readFile(join(root, 'operator/ui/src/style.css'), 'utf8');
   assert.match(source, /Human Review/);
@@ -219,26 +219,27 @@ test('rendered UI source keeps Local task navigation, human review actions, and 
   assert.match(source, /Find a task by title, identifier, or State/);
   assert.match(source, /Review selected blockers/);
   assert.match(source, /Show \{remainingBlockers.length\} more/);
+  assert.match(source, /className="manager-management"/);
+  assert.match(source, /Add a Git repository/);
+  assert.match(source, /Unregister Loop/);
+  assert.match(source, /only after Manager confirms Stopped/i);
+  assert.match(source, /Active for new starts/);
   assert.doesNotMatch(source, /Notion|Symphony Dashboard|notionTasksUrl/);
   assert.match(styles, /@media \(max-width: 960px\)/);
   assert.match(styles, /\.state-toolbar \{ position: sticky/);
   assert.match(styles, /\.manager-status\.status-running::before \{ background: #347a54; \}/);
   assert.match(styles, /\.manager-status\.status-starting::before, \.manager-status\.status-stopping::before \{ background: #aa782c; \}/);
   assert.match(styles, /\.manager-status\.status-failed::before, \.manager-status\.status-unconfirmed::before \{ background: #9b4242; \}/);
-  const neutralStyles = styles.replaceAll(/#(?:347a54|aa782c|9b4242)\b/gi, '#777');
-  const colors = [...neutralStyles.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(match => match[0]);
-  assert.ok(colors.length > 0);
-  assert.ok(colors.every(value => {
-    const hex = value.slice(1);
-    const normalized = hex.length === 3 ? [...hex].map(char => char + char).join('') : hex.slice(0, 6);
-    return normalized.slice(0, 2) === normalized.slice(2, 4) && normalized.slice(2, 4) === normalized.slice(4, 6);
-  }), `expected grayscale-only CSS colors, received: ${colors.join(', ')}`);
+  assert.match(styles, /\.manager-management > summary/);
+  assert.match(styles, /\.manager-runtime-source/);
+  assert.match(styles, /\.workflow-diff-line\.added \{ background: #e4eee6; \}/);
+  assert.match(styles, /\.workflow-diff-line\.removed \{ background: #f1e5e5; \}/);
 });
 
 test('Task detail and list wire the tested serialized refresh queue', async () => {
   const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
   const detail = source.slice(source.indexOf('function TaskDetail'), source.indexOf('function App'));
-  const app = source.slice(source.indexOf('function OperatorApp()'));
+  const app = source.slice(source.indexOf('function OperatorApp('));
 
   assert.match(detail, /detailRefreshQueue = useRef\(null\)/);
   assert.match(detail, /detailRefreshQueue\.current = createSerializedRefreshQueue\(\)/);

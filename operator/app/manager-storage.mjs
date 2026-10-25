@@ -284,6 +284,17 @@ export async function createLoopInstance(repositoryPath, { sourceRoot, environme
   }
 }
 
+export async function unregisterLoopInstance(id, options = {}) {
+  if (typeof id !== 'string' || !idPattern.test(id)) throw Object.assign(new Error('Instance ID is invalid.'), { status: 400 });
+  const paths = managerPaths(options);
+  const registry = await readRegistry(paths);
+  const instance = registry.instances.find(value => value.id === id);
+  if (!instance) throw Object.assign(new Error('Loop instance was not found.'), { status: 404 });
+  registry.instances = registry.instances.filter(value => value.id !== id);
+  await writeAtomicJson(paths.instanceRegistry, registry);
+  return { ...instance };
+}
+
 export async function readInstanceWorkflow(id, { sourceRoot, ...options } = {}) {
   const instance = await getLoopInstance(id, options);
   const config = await readProjectConfiguration(instance.project_file, { homeDirectory: options.homeDirectory });

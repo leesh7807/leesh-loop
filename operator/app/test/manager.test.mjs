@@ -15,6 +15,7 @@ import { hashDistribution } from '../installation-metadata.mjs';
 import { allocatePort, discoverRunningLoops, loopInstanceStatus, startLoopInstance, stopLoopInstance } from '../manager-lifecycle.mjs';
 import { createLoopInstance, listLoopInstances, managerPaths } from '../manager-storage.mjs';
 import { activeRuntime, installRuntimeDistributionInWorker } from '../runtime-distribution.mjs';
+import { openLoopTaskStore } from '../local-task-store-runtime.mjs';
 
 const execFile = promisify(execute);
 const sourceRoot = resolve(import.meta.dirname, '../../..');
@@ -274,6 +275,11 @@ test('managed instances share one Runtime and keep their files and Task Stores i
   assert.equal((await readdir(managerPathsForUser.runtimeRoot).catch(error => error.code === 'ENOENT' ? [] : Promise.reject(error))).length, 0);
 
   const manager = await startManagerFixture(t, paths);
+  const runtimeReadback = await api(manager, '/api/v1/runtime');
+  assert.equal(runtimeReadback.response.status, 200);
+  assert.equal(runtimeReadback.body.source.path, sourceRoot);
+  assert.equal(runtimeReadback.body.source.version, JSON.parse(await readFile(join(sourceRoot, 'package.json'), 'utf8')).version);
+  assert.match(runtimeReadback.body.source.id, /^[a-f0-9]{64}$/);
   const relativeRepository = await api(manager, '/api/v1/instances', {
     method: 'POST', origin: manager.url,
     body: { repositoryPath: 'repositories/third-project' }
@@ -323,6 +329,115 @@ test('managed instances share one Runtime and keep their files and Task Stores i
   assert.ok(!pageText.includes(manager.token));
   assert.equal(page.headers.get('x-frame-options'), 'DENY');
   assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+});
+
+test('Manager unregisters only a confirmed Stopped instance and preserves its repository and Task Store', async t => {
+  const paths = await fixture(t);
+  const repositoryRoot = join(paths.directory, 'repositories');
+  const firstRoot = await makeRepository(repositoryRoot, 'unregister-first');
+  const secondRoot = await makeRepository(repositoryRoot, 'unregister-second');
+  const first = await createLoopInstance(firstRoot, { sourceRoot, ...paths });
+  const second = await createLoopInstance(secondRoot, { sourceRoot, ...paths });
+  const manager = await startManagerFixture(t, paths);
+
+  const firstPublication = await api(manager, '/api/v1/publish', {
+    method: 'POST', instanceId: first.id, origin: manager.url,
+    body: { plan: '# Preserve first task\n\n## Objective\nKeep this task after unregistration.', state: 'Ready' }
+  });
+  const secondPublication = await api(manager, '/api/v1/publish', {
+    method: 'POST', instanceId: second.id, origin: manager.url,
+    body: { plan: '# Preserve second task\n\n## Objective\nKeep this other instance isolated.', state: 'Ready' }
+  });
+  assert.equal(firstPublication.response.status, 201);
+  assert.equal(secondPublication.response.status, 201);
+  assert.equal((await api(manager, '/api/v1/tasks', { instanceId: first.id })).response.status, 200);
+  assert.equal((await api(manager, '/api/v1/tasks', { instanceId: second.id })).response.status, 200);
+
+  const executionDirectory = join(managerPaths(paths).loopExecutionRoot, first.id);
+  await mkdir(executionDirectory, { recursive: true });
+  const executionPath = join(executionDirectory, 'execution.json');
+  await writeFile(executionPath, `${JSON.stringify({
+    schema_version: 1,
+    id: first.id,
+    status: 'Starting',
+    started_at: new Date().toISOString(),
+    port: 4181
+  })}\n`);
+  const refused = await api(manager, `/api/v1/instances/${first.id}`, { method: 'DELETE', origin: manager.url });
+  assert.equal(refused.response.status, 409);
+  assert.match(refused.body.error, /confirmed Stopped status/);
+  assert.equal((await listLoopInstances(paths)).length, 2);
+
+  await writeFile(executionPath, `${JSON.stringify({ schema_version: 1, id: first.id, status: 'Stopped' })}\n`);
+  const removed = await api(manager, `/api/v1/instances/${first.id}`, { method: 'DELETE', origin: manager.url });
+  assert.equal(removed.response.status, 200);
+  assert.equal(removed.body.repository_preserved, true);
+  assert.equal(removed.body.data_preserved, true);
+  assert.equal(removed.body.instance.id, first.id);
+  assert.equal(removed.body.instance.data_directory, first.data_directory);
+  assert.deepEqual((await listLoopInstances(paths)).map(value => value.id), [second.id]);
+
+  assert.equal(await readFile(join(firstRoot, 'README.md'), 'utf8'), '# unregister-first\n');
+  assert.match(await readFile(join(first.data_directory, 'WORKFLOW.md'), 'utf8'), /Repository workflow/);
+  const preservedStore = await openLoopTaskStore(join(first.data_directory, 'state'));
+  try {
+    assert.deepEqual(preservedStore.listTasks().map(task => task.id), [firstPublication.body.page_id]);
+  } finally { preservedStore.close(); }
+  const removedStoreRequest = await api(manager, '/api/v1/tasks', { instanceId: first.id });
+  assert.equal(removedStoreRequest.response.status, 404);
+  const otherTasks = await api(manager, '/api/v1/tasks', { instanceId: second.id });
+  assert.deepEqual(otherTasks.body.tasks.map(task => task.id), [secondPublication.body.page_id]);
+  const remainingStatus = await api(manager, `/api/v1/instances/${second.id}`);
+  assert.equal(remainingStatus.body.instance.status, 'Stopped');
+
+  const reRegistered = await api(manager, '/api/v1/instances', {
+    method: 'POST', origin: manager.url, body: { repositoryPath: firstRoot }
+  });
+  assert.equal(reRegistered.response.status, 201);
+  assert.notEqual(reRegistered.body.instance.id, first.id);
+  assert.equal(reRegistered.body.instance.repository_root, firstRoot);
+  assert.notEqual(reRegistered.body.instance.data_directory, first.data_directory);
+  assert.deepEqual((await listLoopInstances(paths)).map(value => value.id).sort(), [second.id, reRegistered.body.instance.id].sort());
+});
+
+test('Manager drains an in-flight Task request before unregistering its instance', async t => {
+  const paths = await fixture(t);
+  const repository = await makeRepository(join(paths.directory, 'repositories'), 'unregister-drains-task-request');
+  const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
+  let allowStoreOpen;
+  let signalStoreOpen;
+  const storeOpen = new Promise(resolve => { signalStoreOpen = resolve; });
+  const storeOpenGate = new Promise(resolve => { allowStoreOpen = resolve; });
+  let storeClosed = false;
+  const manager = await startManagerFixture(t, paths, {
+    taskStoreOpener: async stateDirectory => {
+      const store = await openLoopTaskStore(stateDirectory);
+      signalStoreOpen();
+      await storeOpenGate;
+      const close = store.close.bind(store);
+      store.close = async () => {
+        storeClosed = true;
+        await close();
+      };
+      return store;
+    }
+  });
+
+  const taskRead = api(manager, '/api/v1/tasks', { instanceId: instance.id });
+  await storeOpen;
+  let unregisterFinished = false;
+  const unregister = api(manager, `/api/v1/instances/${instance.id}`, { method: 'DELETE', origin: manager.url })
+    .then(result => { unregisterFinished = true; return result; });
+  await new Promise(resolveSleep => setTimeout(resolveSleep, 40));
+  assert.equal(unregisterFinished, false, 'unregistration must wait for a Task request that already acquired the instance context');
+
+  allowStoreOpen();
+  const [read, removed] = await Promise.all([taskRead, unregister]);
+  assert.equal(read.response.status, 200, JSON.stringify(read.body));
+  assert.equal(removed.response.status, 200);
+  assert.equal(storeClosed, true);
+  assert.deepEqual(await listLoopInstances(paths), []);
+  assert.equal(await readFile(join(instance.data_directory, 'WORKFLOW.md'), 'utf8').then(value => value.includes('Repository workflow')), true);
 });
 
 test('Manager log reads return bounded tails and preserve the other log when one is large', async t => {
@@ -516,6 +631,7 @@ test('web Runtime installation runs on a worker while the Manager serves other r
   paths.environment.LEESH_LOOP_TEST_RUNTIME_WORKER_MARKER = workerStartedPath;
   await writeFile(installerModulePath, `
 import { writeFileSync } from 'node:fs';
+import '${pathToFileURL(join(sourceRoot, 'operator/app/runtime-distribution.mjs')).href}';
 
 export function installRuntimeDistribution(sourceRoot, { environment }) {
   writeFileSync(environment.LEESH_LOOP_TEST_RUNTIME_WORKER_MARKER, 'started');

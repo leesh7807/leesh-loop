@@ -47,6 +47,11 @@ async function sourceIdentity(sourceRoot) {
   return { root, version: manifest.version, files, entries, id: hashDistribution(manifest.version, entries) };
 }
 
+export async function inspectRuntimeSource(sourceRoot = defaultSourceRoot) {
+  const source = await sourceIdentity(sourceRoot);
+  return { path: source.root, id: source.id, version: source.version };
+}
+
 function runRuntimeBuild(command, args, cwd, environment, label) {
   const result = spawnSync(command, args, { cwd, env: environment, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   if (result.error) throw new Error(`${label} failed: ${result.error.message}`);

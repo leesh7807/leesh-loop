@@ -5,9 +5,9 @@ import { constants, readFileSync } from 'node:fs';
 import { lstat, open, readFile, truncate, unlink } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { applyInstanceWorkflow, managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readInstanceWorkflow, readJsonFile, validateManagedInstanceStateDirectory, writeAtomic, writeAtomicJson } from './manager-storage.mjs';
+import { applyInstanceWorkflow, managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readInstanceWorkflow, readJsonFile, unregisterLoopInstance, validateManagedInstanceStateDirectory, writeAtomic, writeAtomicJson } from './manager-storage.mjs';
 import { discoverRunningLoops, loopInstanceStatus, readLoopLogs, startLoopInstance, stopLoopInstance } from './manager-lifecycle.mjs';
-import { activeRuntime, currentRuntimeSource, installRuntimeDistribution, installRuntimeDistributionInWorker, listRuntimeDistributions, recordRuntimeSource } from './runtime-distribution.mjs';
+import { activeRuntime, currentRuntimeSource, inspectRuntimeSource, installRuntimeDistribution, installRuntimeDistributionInWorker, listRuntimeDistributions, recordRuntimeSource } from './runtime-distribution.mjs';
 import { openLoopTaskStore } from './local-task-store-runtime.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
 import { createOperatorUiServer } from './operator-ui-server.mjs';
@@ -140,6 +140,9 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
   let runtimeUpdateQueue = Promise.resolve();
   const lifecycleQueues = new Map();
   let registryQueue = Promise.resolve();
+  const unregisteringInstances = new Set();
+  const activeTaskOperations = new Map();
+  const taskOperationWaiters = new Map();
 
   function serializeLifecycle(id, operation) {
     const previous = lifecycleQueues.get(id) || Promise.resolve();
@@ -193,6 +196,76 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
     });
   }
 
+  function releaseTaskOperation(id) {
+    const remaining = (activeTaskOperations.get(id) || 1) - 1;
+    if (remaining > 0) {
+      activeTaskOperations.set(id, remaining);
+      return;
+    }
+    activeTaskOperations.delete(id);
+    const waiters = taskOperationWaiters.get(id);
+    taskOperationWaiters.delete(id);
+    for (const resolveWaiter of waiters || []) resolveWaiter();
+  }
+
+  async function acquireTaskContext(id) {
+    if (unregisteringInstances.has(id)) throw Object.assign(new Error('This Loop is being unregistered from Manager.'), { status: 409 });
+    activeTaskOperations.set(id, (activeTaskOperations.get(id) || 0) + 1);
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      releaseTaskOperation(id);
+    };
+    try { return { ...(await taskContext(id)), release }; }
+    catch (error) { release(); throw error; }
+  }
+
+  function waitForTaskOperations(id) {
+    if (!activeTaskOperations.has(id)) return Promise.resolve();
+    return new Promise(resolveWaiter => {
+      const waiters = taskOperationWaiters.get(id) || new Set();
+      waiters.add(resolveWaiter);
+      taskOperationWaiters.set(id, waiters);
+    });
+  }
+
+  async function unregisterInstance(id) {
+    const operation = registryQueue.then(async () => {
+      if (unregisteringInstances.has(id)) throw Object.assign(new Error('This Loop is already being unregistered.'), { status: 409 });
+      if (lifecycleQueues.has(id)) throw Object.assign(new Error('Wait for the current Loop management action to finish before unregistering it.'), { status: 409 });
+      unregisteringInstances.add(id);
+      try {
+        const instance = await getLoopInstance(id, { environment, homeDirectory });
+        const status = await loopInstanceStatus(id, lifecycleStatusOptions());
+        if (status.status !== 'Stopped') {
+          throw Object.assign(new Error(`Stop this Loop and wait for a confirmed Stopped status before unregistering it. Current status: ${status.status}${status.detail ? ` — ${status.detail}` : ''}`), { status: 409 });
+        }
+        if (lifecycleQueues.has(id)) throw Object.assign(new Error('A Loop management action started before unregistration could complete. Retry after it finishes.'), { status: 409 });
+        await waitForTaskOperations(id);
+        const cached = taskStores.get(id);
+        if (cached) {
+          const initialized = await cached;
+          await initialized.store.close();
+          if (taskStores.get(id) === cached) taskStores.delete(id);
+        }
+        const unregistered = await unregisterLoopInstance(id, { environment, homeDirectory });
+        return {
+          instance: {
+            ...unregistered,
+            project_file: instance.project_file,
+            state_directory: instance.state_directory,
+            workspace_root: instance.workspace_root
+          },
+          repository_preserved: true,
+          data_preserved: true
+        };
+      } finally { unregisteringInstances.delete(id); }
+    });
+    registryQueue = operation.catch(() => {});
+    return operation;
+  }
+
   function closeTaskStores() {
     if (taskStoresClosePromise) return taskStoresClosePromise;
     taskStoresClosed = true;
@@ -243,7 +316,13 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
       try { id = requireInstanceId(decodeURIComponent(instanceRoute[1])); }
       catch (error) { throw error; }
       const action = instanceRoute[2];
+      if (request.method === 'DELETE' && !action) {
+        const result = await unregisterInstance(id);
+        respond(response, 200, result);
+        return true;
+      }
       if (request.method === 'POST' && action === 'start') {
+        if (unregisteringInstances.has(id)) throw Object.assign(new Error('This Loop is being unregistered from Manager.'), { status: 409 });
         const operation = serializeLifecycle(id, () => {
           const startOperation = startQueue.then(() => (lifecycle.start || startLoopInstance)(id, {
             runtimeSource: sourceRoot,
@@ -259,6 +338,7 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
         return true;
       }
       if (request.method === 'POST' && action === 'stop') {
+        if (unregisteringInstances.has(id)) throw Object.assign(new Error('This Loop is being unregistered from Manager.'), { status: 409 });
         const operation = serializeLifecycle(id, () => (lifecycle.stop || stopLoopInstance)(id, { environment, homeDirectory }));
         respond(response, 200, { instance: await operation });
         return true;
@@ -272,8 +352,10 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
         return true;
       }
       if (request.method === 'PUT' && action === 'workflow') {
+        if (unregisteringInstances.has(id)) throw Object.assign(new Error('This Loop is being unregistered from Manager.'), { status: 409 });
         const submitted = await requestJson(request);
         if (submitted?.confirm !== true) throw Object.assign(new Error('Workflow update requires explicit confirmation.'), { status: 400 });
+        if (unregisteringInstances.has(id)) throw Object.assign(new Error('This Loop is being unregistered from Manager.'), { status: 409 });
         const operation = serializeLifecycle(id, async () => (lifecycle.updateWorkflow || applyInstanceWorkflow)(id, {
             expectedCurrent: submitted?.expectedCurrent,
             expectedCandidateDigest: submitted?.expectedCandidateDigest,
@@ -301,7 +383,8 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
     if (pathname === '/api/v1/runtime' && request.method === 'GET') {
       const active = await activeRuntime({ environment, homeDirectory });
       const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
-      respond(response, 200, { active, distributions: await listRuntimeDistributions({ environment, homeDirectory }), manager_runtime_version: service?.runtime_version || null });
+      const source = await latestSourceRoot().then(sourceRootPath => inspectRuntimeSource(sourceRootPath)).catch(error => ({ error: error.message }));
+      respond(response, 200, { active, source, distributions: await listRuntimeDistributions({ environment, homeDirectory }), manager_runtime_version: service?.runtime_version || null });
       return true;
     }
     if (pathname === '/api/v1/runtime/update' && request.method === 'POST') {
@@ -344,6 +427,7 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
       return true;
     },
     async resolveTaskContext(id) { return taskContext(id); },
+    acquireTaskContext,
     handleRequest,
     closeTaskStores
   };
