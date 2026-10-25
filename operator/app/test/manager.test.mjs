@@ -236,11 +236,12 @@ async function stopRecordedProcess(pid, startTicks, signal = 'SIGTERM') {
   assert.notEqual(processStartTicks(pid), startTicks, `process ${pid} did not exit after ${signal}`);
 }
 
-async function api(manager, path, { method = 'GET', instanceId, body, origin } = {}) {
+async function api(manager, path, { method = 'GET', instanceId, body, origin, timeoutMs } = {}) {
   const headers = { 'x-leesh-loop-token': manager.token, accept: 'application/json' };
   if (instanceId) headers['x-leesh-loop-instance-id'] = instanceId;
   if (origin) headers.origin = origin;
   const options = { method, headers };
+  if (timeoutMs !== undefined) options.signal = AbortSignal.timeout(timeoutMs);
   if (body !== undefined) {
     headers['content-type'] = 'application/json';
     options.body = JSON.stringify(body);
@@ -455,6 +456,12 @@ test('Manager drains an in-flight Task request before unregistering its instance
   const storeOpen = new Promise(resolve => { signalStoreOpen = resolve; });
   const storeOpenGate = new Promise(resolve => { allowStoreOpen = resolve; });
   let storeClosed = false;
+  const pendingOperations = [];
+  const track = operation => {
+    pendingOperations.push(operation);
+    void operation.catch(() => {});
+    return operation;
+  };
   const manager = await startManagerFixture(t, paths, {
     taskStoreOpener: async stateDirectory => {
       const store = await openLoopTaskStore(stateDirectory);
@@ -469,41 +476,57 @@ test('Manager drains an in-flight Task request before unregistering its instance
     }
   });
 
-  const taskRead = api(manager, '/api/v1/tasks', { instanceId: instance.id });
-  await storeOpen;
-  let unregisterFinished = false;
-  const unregister = api(manager, `/api/v1/instances/${instance.id}`, { method: 'DELETE', origin: manager.url })
-    .then(result => { unregisterFinished = true; return result; });
-  let unregisterReservation;
-  const reservationDeadline = Date.now() + 5_000;
-  while (!unregisterReservation && Date.now() < reservationDeadline) {
-    const currentTaskRequest = await api(manager, '/api/v1/tasks', { instanceId: instance.id });
-    if (currentTaskRequest.response.status === 409) unregisterReservation = currentTaskRequest;
-    else await new Promise(resolveSleep => setTimeout(resolveSleep, 10));
+  try {
+    const taskRead = track(api(manager, '/api/v1/tasks', { instanceId: instance.id }));
+    await storeOpen;
+    let unregisterFinished = false;
+    const unregister = track(api(manager, `/api/v1/instances/${instance.id}`, { method: 'DELETE', origin: manager.url })
+      .then(result => { unregisterFinished = true; return result; }));
+    let unregisterReservation;
+    const reservationDeadline = Date.now() + 5_000;
+    while (!unregisterReservation && Date.now() < reservationDeadline) {
+      try {
+        const currentTaskRequest = await api(manager, '/api/v1/tasks', { instanceId: instance.id, timeoutMs: 250 });
+        if (currentTaskRequest.response.status === 409) unregisterReservation = currentTaskRequest;
+      } catch (error) {
+        if (!['AbortError', 'TimeoutError'].includes(error?.name)) throw error;
+      }
+      if (!unregisterReservation) await new Promise(resolveSleep => setTimeout(resolveSleep, 10));
+    }
+    assert.ok(unregisterReservation, 'a fresh Task request must observe the unregister reservation before testing independent registry progress');
+    assert.match(unregisterReservation.body.error, /being unregistered/);
+    assert.equal(unregisterFinished, false, 'unregistration must wait for a Task request that already acquired the instance context');
+
+    const registration = track(api(manager, '/api/v1/instances', {
+      method: 'POST', origin: manager.url, body: { repositoryPath: otherRepository }
+    }));
+    let registrationTimeout;
+    const registrationWhileDrainWaits = await Promise.race([
+      registration.then(result => ({ completed: true, result })),
+      new Promise(resolveTimeout => { registrationTimeout = setTimeout(() => resolveTimeout({ completed: false }), 5_000); })
+    ]);
+    clearTimeout(registrationTimeout);
+
+    allowStoreOpen();
+    const [read, removed, registered] = await Promise.all([taskRead, unregister, registration]);
+    assert.equal(read.response.status, 200, JSON.stringify(read.body));
+    assert.equal(removed.response.status, 200);
+    assert.equal(registrationWhileDrainWaits.completed, true, 'an unrelated repository registration must not wait for this Loop Task drain');
+    assert.equal(registrationWhileDrainWaits.result.response.status, 201);
+    assert.equal(registered.response.status, 201);
+    assert.equal(storeClosed, true);
+    assert.deepEqual((await listLoopInstances(paths)).map(value => value.id), [registered.body.instance.id]);
+    assert.equal((await api(manager, '/api/v1/tasks', { instanceId: registered.body.instance.id })).response.status, 200);
+    assert.equal(await readFile(join(instance.data_directory, 'WORKFLOW.md'), 'utf8').then(value => value.includes('Repository workflow')), true);
+  } finally {
+    allowStoreOpen();
+    let cleanupTimeout;
+    await Promise.race([
+      Promise.allSettled(pendingOperations),
+      new Promise(resolveTimeout => { cleanupTimeout = setTimeout(resolveTimeout, 5_000); })
+    ]);
+    clearTimeout(cleanupTimeout);
   }
-  assert.ok(unregisterReservation, 'a new Task request must observe the unregister reservation before testing independent registry progress');
-  assert.match(unregisterReservation.body.error, /being unregistered/);
-  assert.equal(unregisterFinished, false, 'unregistration must wait for a Task request that already acquired the instance context');
-
-  const registration = api(manager, '/api/v1/instances', {
-    method: 'POST', origin: manager.url, body: { repositoryPath: otherRepository }
-  });
-  const registrationWhileDrainWaits = await Promise.race([
-    registration.then(result => ({ completed: true, result })),
-    new Promise(resolveTimeout => setTimeout(() => resolveTimeout({ completed: false }), 5_000))
-  ]);
-
-  allowStoreOpen();
-  const [read, removed, registered] = await Promise.all([taskRead, unregister, registration]);
-  assert.equal(read.response.status, 200, JSON.stringify(read.body));
-  assert.equal(removed.response.status, 200);
-  assert.equal(registrationWhileDrainWaits.completed, true, 'an unrelated repository registration must not wait for this Loop Task drain');
-  assert.equal(registrationWhileDrainWaits.result.response.status, 201);
-  assert.equal(registered.response.status, 201);
-  assert.equal(storeClosed, true);
-  assert.deepEqual((await listLoopInstances(paths)).map(value => value.id), [registered.body.instance.id]);
-  assert.equal((await api(manager, '/api/v1/tasks', { instanceId: registered.body.instance.id })).response.status, 200);
-  assert.equal(await readFile(join(instance.data_directory, 'WORKFLOW.md'), 'utf8').then(value => value.includes('Repository workflow')), true);
 });
 
 test('Manager log reads return bounded tails and preserve the other log when one is large', async t => {
