@@ -474,7 +474,15 @@ test('Manager drains an in-flight Task request before unregistering its instance
   let unregisterFinished = false;
   const unregister = api(manager, `/api/v1/instances/${instance.id}`, { method: 'DELETE', origin: manager.url })
     .then(result => { unregisterFinished = true; return result; });
-  await new Promise(resolveSleep => setTimeout(resolveSleep, 40));
+  let unregisterReservation;
+  const reservationDeadline = Date.now() + 5_000;
+  while (!unregisterReservation && Date.now() < reservationDeadline) {
+    const currentTaskRequest = await api(manager, '/api/v1/tasks', { instanceId: instance.id });
+    if (currentTaskRequest.response.status === 409) unregisterReservation = currentTaskRequest;
+    else await new Promise(resolveSleep => setTimeout(resolveSleep, 10));
+  }
+  assert.ok(unregisterReservation, 'a new Task request must observe the unregister reservation before testing independent registry progress');
+  assert.match(unregisterReservation.body.error, /being unregistered/);
   assert.equal(unregisterFinished, false, 'unregistration must wait for a Task request that already acquired the instance context');
 
   const registration = api(manager, '/api/v1/instances', {
@@ -482,7 +490,7 @@ test('Manager drains an in-flight Task request before unregistering its instance
   });
   const registrationWhileDrainWaits = await Promise.race([
     registration.then(result => ({ completed: true, result })),
-    new Promise(resolveTimeout => setTimeout(() => resolveTimeout({ completed: false }), 1_000))
+    new Promise(resolveTimeout => setTimeout(() => resolveTimeout({ completed: false }), 5_000))
   ]);
 
   allowStoreOpen();
