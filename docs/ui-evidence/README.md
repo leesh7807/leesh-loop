@@ -1,5 +1,25 @@
 # Operator UI evidence
 
+## Current Manager screenshots
+
+These captures show the current Manager UI rendered by Chrome against the actual Manager Service and its authenticated HTTP API. The source checkout was at `0a6cb4df78b6aeb6ad0a125c6c95a5680816e122`; subsequent changes in this delivery add only evidence artifacts and documentation. The Manager Runtime was installed from that checkout through the normal CLI path.
+
+The isolated Manager registered two temporary local Git repositories through `leesh-loop init`: `leesh-loop` and `operator-docs`. Its API returned both instance IDs and `Stopped` states before capture. Their settings, Workflow files, and empty Task Stores were kept under a temporary XDG data root. The `operator-docs` remote was illustrative metadata; neither temporary repository was cloned from GitHub. The selected `leesh-loop` instance's temporary `WORKFLOW.md` received two local review-note lines so the real Manager API returned a visible comparison. That comparison was only viewed; it was not applied. No user repository or `.leesh-loop/` data was used.
+
+Chrome wrote the browser screenshots directly to these files; no screenshot was downloaded. Desktop screenshots use 1440px width, and the narrow screenshots use a 390×844 viewport. For the Workflow comparison capture, a temporary script in the installed Runtime opened the existing disclosure; the UI bundle and Manager API responses were unchanged.
+
+- Desktop Manager overview, two instances, central Runtime, selected instance, and empty Local Task Store:
+
+  ![Current Manager desktop overview captured from Chrome](manager-current-desktop.png)
+
+- Desktop Workflow comparison with its apply controls and the actual temporary instance diff:
+
+  ![Current Manager Workflow comparison captured from Chrome](manager-current-workflow.png)
+
+- Narrow Manager layout at 390×844 with instance selection and the collapsed Workflow and log controls:
+
+  ![Current Manager narrow layout captured from Chrome](manager-current-mobile.png)
+
 ## Central Manager design evidence
 
 These captures show the production Operator UI bundle rendered from PR #120's UI source at commit `0be36e34b130e901be617c5007bdc49c904ecb81`. The local fixture in `capture-manager-demo.mjs` supplies synthetic, read-only instance, Runtime, Workflow, and Task responses; no Manager Service, real repository, or Task Store was used. Treat the displayed names, paths, statuses, port, Runtime version, and tasks as illustrative data. These images support visual review only; they do not verify lifecycle behavior or live service integration.
