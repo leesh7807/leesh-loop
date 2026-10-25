@@ -196,7 +196,7 @@ Security        — trust, permission, and execution boundaries constrain uninte
 Design          — the artifact's relevant design qualities serve its intent and experience
 ```
 
-Each Review Job covers one perspective. The worker owns Review Confidence and handles evidence affecting other perspectives through cross-perspective impact.
+Each four-perspective Review Job covers one perspective. Reviewability Preparation is a separate prerequisite review, not a perspective. The worker owns Review Confidence and handles evidence affecting other perspectives through cross-perspective impact.
 
 Behavior, Maintainability, and Security use these established boundaries:
 
@@ -207,6 +207,54 @@ Security: Trust / Authorization / Capability / Input and execution boundary / Da
 ```
 
 For Design, judge how well the artifact's form, organization, and experience serve its intended purpose, choosing the qualities that matter most for the actual result.
+
+### Reviewability Preparation
+
+Before initializing Review Confidence or starting any of the four perspective reviews, run an independent `Reviewability Preparation` review for the exact delivery PR/HEAD. Use the request below for its assessment criteria and verdict format. Apply the existing submission, polling, retry, finding disposition, Workpad recording, and blocker rules; worker dispositions do not replace the independent verdict. Do not apply Review Confidence or its outcome arithmetic. Begin the four-perspective model only after the independent reviewer returns a usable `PASS` for the current PR/HEAD. Keep UI review evidence together where practical, respecting repository conventions. The repository owns long-term retention and cleanup policy.
+
+Use this request:
+
+```text
+Review PR <PR_URL> at HEAD <HEAD_SHA> for Reviewability Preparation.
+
+Accepted Plan: <REPOSITORY_RELATIVE_PLAN_PATH>
+
+Inspect the exact HEAD and diff. Read the Accepted Plan from that exact HEAD
+and independently inspect the actual changes and available repository or PR
+evidence. Identify outcomes worth assessing in the later Behavior,
+Maintainability, Security, and Design reviews; do not limit the review to
+outcomes or evidence the worker submitted. Treat the Accepted Plan and
+repository contracts as authority, and assess reviewability rather than
+implementation correctness.
+
+Decide whether those outcomes are sufficiently reviewable. If direct execution
+or experience is unavailable, actively consider reasonable indirect
+representations, such as a behavior description, representative images,
+captures of relevant states, or test results. Do not require perfect
+verification, reproduction of every state, or a particular evidence format.
+Distinguish direct observation or test verification from descriptions,
+inferences, and synthetic or composite material.
+
+Use available tools for this read-only review when useful. If a tool is
+unavailable or approval-gated, continue with accessible evidence and report
+any material limitation.
+
+# Verdict
+PASS | FINDINGS
+
+PASS when reasonable means make outcomes worth later review sufficiently
+reviewable and no worthwhile reviewability gap remains. FINDINGS when such an
+outcome is not sufficiently reviewable and a reasonable improvement is
+available.
+
+# Findings
+None. | findings
+
+For each finding, explain what worthwhile outcome is not sufficiently
+reviewable, where the evidence gap is, how reasonable effort could improve
+reviewability, why that improvement matters, and whether supporting evidence
+is observed, test-verified, described, inferred, or synthetic.
+```
 
 ### Confidence and initialization
 
@@ -235,7 +283,7 @@ range: 0.00..1.00
 precision: 2 decimals
 ```
 
-After implementing and performing required verification, capture the exact delivery PR and HEAD, and independently classify each perspective:
+After implementing and performing required verification, capture the exact delivery PR and HEAD. Complete Reviewability Preparation for that PR/HEAD before independently classifying each perspective:
 
 * `Settled`: further material independent review is unlikely to add needed information.
 * `Standard`: the changed area and consequences justify a bounded review.
@@ -243,7 +291,7 @@ After implementing and performing required verification, capture the exact deliv
 
 Choose initial confidence from the changed surface and impact. For Design, consider the artifact's relevant design qualities. A clean review can settle Standard or Focus in one step.
 
-Record a current snapshot in Workpad whenever the review state materially changes. If feedback materially changes the delivery during an unfinished review pass, reassess affected perspectives and their confidence based on the changed evidence; do not automatically restart all four. A human-directed return to implementation after a completed Human Review follows the new-pass rule below:
+Record a current snapshot in Workpad whenever the review state materially changes. If feedback materially changes the delivery during an unfinished review pass, reassess affected perspectives and Reviewability Preparation against the changed evidence; do not automatically restart unaffected perspectives or repeat preparation when its reviewability basis did not materially change. A human-directed return to implementation after a completed Human Review follows the new-pass rule below:
 
 ```yaml
 Review Confidence
@@ -260,7 +308,7 @@ On retry, reconcile the latest Review Confidence snapshot with the delivery and 
 
 Any perspective below 0.90 is eligible. Run one perspective review at a time, prioritizing the most consequential unresolved perspective and using lower confidence to break ties. Repeat a perspective when evidence warrants it.
 
-Give `chatgpt-shot submit` enough time to return a Job ID. Poll `chatgpt-shot jobs <job-id>` every 30 seconds. An attempt succeeds only when a usable completed result is retrieved within 20 minutes of receiving its Job ID. If submission fails or an attempt ends without a usable result, retry once for the same PR/HEAD/perspective. Do not record attempts or retries separately in Workpad.
+Give `chatgpt-shot submit` enough time to return a Job ID. Poll `chatgpt-shot jobs <job-id>` every 30 seconds. An attempt succeeds only when a usable completed result is retrieved within 20 minutes of receiving its Job ID. If submission fails or an attempt ends without a usable result, retry once for the same PR/HEAD and review scope (the same perspective or Reviewability Preparation pass). Do not record attempts or retries separately in Workpad.
 
 Provide the Accepted Plan's repository-relative path so the reviewer reads it from the exact reviewed HEAD. Supply concise changed-result context and exact PR/HEAD. The Accepted Plan and repository contracts take precedence over implementation and test evidence. Label reviewer-reported confidence as `Evidence confidence`; the worker owns Review Confidence.
 
@@ -341,7 +389,7 @@ rejected          — not supported, outside accepted scope, too trivial, merely
 
 The worker independently disposes each reviewer finding using concrete evidence and value within this delivery. Accept a Design improvement when its expected benefit justifies resolving it now, whether or not a functional defect exists.
 
-For each Review Job, apply its strongest outcome:
+For each four-perspective Review Job, apply its strongest outcome:
 
 ```text
 any accepted material → material -0.10
@@ -360,11 +408,13 @@ After resolving an accepted material finding, lower a secondary perspective by 0
 
 ### Completion, blockers, and new passes
 
-Record each completed review once in Workpad with its result, disposition, verification, updated Confidence, and relevant PR/HEAD/Job ID. If both attempts fail, leave confidence unchanged, record one blocker with the failure and required action, and use Human Review.
+Record each completed Review Job once in Workpad with its result, disposition, verification, and relevant PR/HEAD/Job ID; include updated Confidence for four-perspective jobs only. If both attempts fail, leave the affected perspective's confidence unchanged when applicable, record one blocker with the failure and required action, and use Human Review. Reviewability Preparation uses the same recording and failure rules without a confidence value.
 
-Review is complete only when:
+The four-perspective review is complete only when:
 
 ```text
+Reviewability Preparation: PASS for the current delivery PR/HEAD
+AND
 all perspective confidence >= 0.90
 AND
 no unresolved material finding remains
