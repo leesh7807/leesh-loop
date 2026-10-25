@@ -7,7 +7,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { applyInstanceWorkflow, managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readInstanceWorkflow, readJsonFile, unregisterLoopInstance, validateManagedInstanceStateDirectory, writeAtomic, writeAtomicJson } from './manager-storage.mjs';
 import { discoverRunningLoops, loopInstanceStatus, readLoopLogs, startLoopInstance, stopLoopInstance } from './manager-lifecycle.mjs';
-import { activeRuntime, currentRuntimeSource, inspectRuntimeSource, installRuntimeDistribution, installRuntimeDistributionInWorker, listRuntimeDistributions, managerMustRestartForRuntime, readRuntimeRecoveryRecord, recordRuntimeSource, runtimeDiagnostic, writeRuntimeRecoveryRecord } from './runtime-distribution.mjs';
+import { activeRuntime, currentRuntimeSource, inspectRuntimeSource, installRuntimeDistribution, installRuntimeDistributionInWorker, listRuntimeDistributions, managerMustRestartForRuntime, reconcileRuntimeRecoveryRecord, recordRuntimeSource, runtimeDiagnostic, writeRuntimeRecoveryRecord } from './runtime-distribution.mjs';
 import { openLoopTaskStore } from './local-task-store-runtime.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
 import { createOperatorUiServer } from './operator-ui-server.mjs';
@@ -386,7 +386,7 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
       catch (error) { activeError = runtimeDiagnostic(error); }
       const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
       const source = await latestSourceRoot().then(sourceRootPath => inspectRuntimeSource(sourceRootPath)).catch(error => ({ error: error.message }));
-      const recovery = await readRuntimeRecoveryRecord({ environment, homeDirectory });
+      const recovery = await reconcileRuntimeRecoveryRecord({ environment, homeDirectory });
       const managerRestartRequired = service?.manager_restart_required === true || (active ? service?.runtime_version !== active.id : false);
       respond(response, 200, {
         active,

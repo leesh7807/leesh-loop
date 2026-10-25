@@ -125,17 +125,27 @@ export async function markManagerRestartRequiredForRuntimeRepair(runtimeId, opti
   return true;
 }
 
+function validPreservedRuntimePath(path, runtimeId, paths) {
+  return path == null || (
+    typeof path === 'string'
+    && isAbsolute(path)
+    && resolve(path) === path
+    && dirname(path) === paths.runtimeRoot
+    && basename(path).startsWith(`.damaged-${runtimeId}-`)
+  );
+}
+
 export async function writeRuntimeRecoveryRecord(record, options = {}) {
   if (!record || !digestPattern.test(record.runtime_id) || !['activation-pending', 'active'].includes(record.status)) {
     throw new Error('Runtime recovery record is invalid');
   }
-  if (record.preserved_runtime_path != null && (typeof record.preserved_runtime_path !== 'string' || !isAbsolute(record.preserved_runtime_path))) {
+  const paths = managerPaths(options);
+  if (!validPreservedRuntimePath(record.preserved_runtime_path, record.runtime_id, paths)) {
     throw new Error('Runtime recovery record path is invalid');
   }
   if (record.recovered_at != null && (typeof record.recovered_at !== 'string' || !Number.isFinite(Date.parse(record.recovered_at)))) {
     throw new Error('Runtime recovery record timestamp is invalid');
   }
-  const paths = managerPaths(options);
   const value = {
     schema_version: 1,
     runtime_id: record.runtime_id,
@@ -155,7 +165,7 @@ export async function readRuntimeRecoveryRecord(options = {}) {
   catch (error) { return { record: null, error: runtimeDiagnostic(error) }; }
   if (!value) return { record: null, error: null };
   const validError = value.validation_error === null || (typeof value.validation_error === 'string' && value.validation_error.length <= 400);
-  const validPath = value.preserved_runtime_path === null || (typeof value.preserved_runtime_path === 'string' && isAbsolute(value.preserved_runtime_path));
+  const validPath = validPreservedRuntimePath(value.preserved_runtime_path, value.runtime_id, paths);
   const validTimestamp = typeof value.recovered_at === 'string' && Number.isFinite(Date.parse(value.recovered_at));
   if (value.schema_version !== 1 || !digestPattern.test(value.runtime_id) || !['activation-pending', 'active'].includes(value.status) || !validError || !validPath || !validTimestamp) {
     return { record: null, error: 'Runtime recovery record is invalid.' };
@@ -163,7 +173,33 @@ export async function readRuntimeRecoveryRecord(options = {}) {
   return { record: value, error: null };
 }
 
-async function publishRuntimeStage(stage, destination, expectedId) {
+async function preservedRuntimePathIfPresent(record, options = {}) {
+  if (!record?.preserved_runtime_path) return null;
+  const details = await lstat(record.preserved_runtime_path).catch(error => error?.code === 'ENOENT' ? null : Promise.reject(error));
+  return details && !details.isSymbolicLink() && details.isDirectory() ? record.preserved_runtime_path : null;
+}
+
+export async function reconcileRuntimeRecoveryRecord(options = {}) {
+  const current = await readRuntimeRecoveryRecord(options);
+  if (current.error || current.record?.status !== 'activation-pending') return current;
+  try {
+    let record = current.record;
+    const preservedPath = await preservedRuntimePathIfPresent(record, options);
+    if (preservedPath !== record.preserved_runtime_path) {
+      record = await writeRuntimeRecoveryRecord({ ...record, preserved_runtime_path: preservedPath }, options);
+    }
+    let active;
+    try { active = await activeRuntime(options); }
+    catch { return { record, error: null }; }
+    if (active?.id !== record.runtime_id) return { record, error: null };
+    record = await writeRuntimeRecoveryRecord({ ...record, status: 'active', recovered_at: new Date().toISOString() }, options);
+    return { record, error: null };
+  } catch (error) {
+    return { record: current.record, error: runtimeDiagnostic(error) };
+  }
+}
+
+export async function publishRuntimeStage(stage, destination, expectedId, { beforePreserve } = {}) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     let current;
     try { current = await lstat(destination); }
@@ -190,6 +226,7 @@ async function publishRuntimeStage(stage, destination, expectedId) {
     }
 
     const preservedPath = join(dirname(destination), `.damaged-${expectedId}-${randomUUID()}`);
+    await beforePreserve?.(preservedPath);
     try { await rename(destination, preservedPath); }
     catch (error) {
       if (error?.code === 'ENOENT') continue;
@@ -252,6 +289,10 @@ export async function currentRuntimeSource(fallbackSource = defaultSourceRoot, o
 export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot, options = {}) {
   const paths = managerPaths(options);
   const source = await sourceIdentity(sourceRoot);
+  const existingRecovery = await readRuntimeRecoveryRecord(options);
+  let recoveryRecord = existingRecovery.record?.runtime_id === source.id && existingRecovery.record.status === 'activation-pending'
+    ? existingRecovery.record
+    : null;
   let previousActive = null;
   let recoveredFromInvalidActive = false;
   let previousActiveError = null;
@@ -286,28 +327,54 @@ export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot,
       await buildRuntimeDependencies(stage, options.environment ?? process.env, options.homeDirectory ?? homedir());
       const metadata = { schema_version: 1, id: source.id, version: source.version, path: destination, source_root: source.root, files: source.files, installed_at: new Date().toISOString() };
       await writeFile(join(stage, '.distribution.json'), `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
-      // A broken immutable directory is retained under a diagnostic name before
-      // a fully validated replacement can reclaim its content-addressed path.
-      if (destinationIsDamagedDirectory) {
-        await markManagerRestartRequiredForRuntimeRepair(source.id, options);
+      if (recoveredFromInvalidActive && !destinationIsDamagedDirectory) {
+        const priorPreservedPath = await preservedRuntimePathIfPresent(recoveryRecord, options);
+        recoveryRecord = {
+          runtime_id: source.id,
+          status: 'activation-pending',
+          validation_error: recoveryRecord?.validation_error || previousActiveError,
+          preserved_runtime_path: priorPreservedPath,
+          recovered_at: new Date().toISOString()
+        };
+        await writeRuntimeRecoveryRecord(recoveryRecord, options);
       }
-      repair = await publishRuntimeStage(stage, destination, source.id);
+      repair = await publishRuntimeStage(stage, destination, source.id, {
+        beforePreserve: async preservedRuntimePath => {
+          recoveryRecord = {
+            runtime_id: source.id,
+            status: 'activation-pending',
+            validation_error: previousActiveError,
+            preserved_runtime_path: preservedRuntimePath,
+            recovered_at: new Date().toISOString()
+          };
+          await writeRuntimeRecoveryRecord(recoveryRecord, options);
+          if (destinationIsDamagedDirectory) await markManagerRestartRequiredForRuntimeRepair(source.id, options);
+        }
+      });
     } catch (error) {
       await rm(stage, { recursive: true, force: true }).catch(() => {});
       throw error;
     }
   }
-  const recoveryRecord = recoveredFromInvalidActive || repair.repaired
-    ? {
+  if (!recoveryRecord && (recoveredFromInvalidActive || repair.repaired)) {
+    recoveryRecord = {
         runtime_id: source.id,
         status: 'activation-pending',
         validation_error: previousActiveError,
-        preserved_runtime_path: repair.preservedPath
-      }
-    : null;
-  if (recoveryRecord) await writeRuntimeRecoveryRecord(recoveryRecord, options);
+        preserved_runtime_path: repair.preservedPath,
+        recovered_at: new Date().toISOString()
+    };
+    await writeRuntimeRecoveryRecord(recoveryRecord, options);
+  }
   await writeAtomicJson(paths.activeRuntime, { schema_version: 1, id: source.id, activated_at: new Date().toISOString() });
-  if (recoveryRecord) await writeRuntimeRecoveryRecord({ ...recoveryRecord, status: 'active' }, options);
+  if (recoveryRecord) {
+    await writeRuntimeRecoveryRecord({
+      ...recoveryRecord,
+      status: 'active',
+      preserved_runtime_path: await preservedRuntimePathIfPresent(recoveryRecord, options),
+      recovered_at: new Date().toISOString()
+    }, options);
+  }
   return {
     ...(await activeRuntime(options)),
     changed: recoveredFromInvalidActive || repair.repaired || previousActive?.id !== source.id,

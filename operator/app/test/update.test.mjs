@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFile as execute } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { activeRuntime, installRuntimeDistribution, listRuntimeDistributions, managerMustRestartForRuntime, readRuntimeRecoveryRecord, runtimeDiagnostic, writeRuntimeRecoveryRecord } from '../runtime-distribution.mjs';
+import { activeRuntime, installRuntimeDistribution, listRuntimeDistributions, managerMustRestartForRuntime, publishRuntimeStage, readRuntimeRecoveryRecord, reconcileRuntimeRecoveryRecord, runtimeDiagnostic, writeRuntimeRecoveryRecord } from '../runtime-distribution.mjs';
 import { managerPaths } from '../manager-storage.mjs';
+import { hashDistribution } from '../installation-metadata.mjs';
 import { listRuntimeSnapshotFiles, materializeRuntimeSnapshot } from '../runtime-manifest.mjs';
 
 const execFile = promisify(execute);
@@ -111,10 +112,95 @@ test('Runtime recovery readback rejects malformed diagnostic fields', async t =>
     XDG_CONFIG_HOME: join(directory, 'config')
   };
   const options = { environment, homeDirectory: directory };
-  const record = await writeRuntimeRecoveryRecord({ runtime_id: 'a'.repeat(64), status: 'active', validation_error: 'damaged file', preserved_runtime_path: join(directory, '.damaged-runtime') }, options);
+  const id = 'a'.repeat(64);
+  const preservedPath = join(managerPaths(options).runtimeRoot, `.damaged-${id}-fixture`);
+  const record = await writeRuntimeRecoveryRecord({ runtime_id: id, status: 'active', validation_error: 'damaged file', preserved_runtime_path: preservedPath }, options);
   assert.equal(record.status, 'active');
   assert.equal((await readRuntimeRecoveryRecord(options)).record.preserved_runtime_path, record.preserved_runtime_path);
-  await assert.rejects(writeRuntimeRecoveryRecord({ runtime_id: 'a'.repeat(64), status: 'active', preserved_runtime_path: 'relative/path' }, options), /path is invalid/);
+  await assert.rejects(writeRuntimeRecoveryRecord({ runtime_id: id, status: 'active', preserved_runtime_path: 'relative/path' }, options), /path is invalid/);
+  await assert.rejects(writeRuntimeRecoveryRecord({ runtime_id: id, status: 'active', preserved_runtime_path: join(managerPaths(options).runtimeRoot, '.damaged-other-id-fixture') }, options), /path is invalid/);
   await writeFile(managerPaths(options).runtimeRecovery, `${JSON.stringify({ ...record, validation_error: 'x'.repeat(401) })}\n`);
   assert.deepEqual(await readRuntimeRecoveryRecord(options), { record: null, error: 'Runtime recovery record is invalid.' });
+});
+
+test('pending Runtime recovery reconciles against a validated active distribution', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-reconcile-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const environment = {
+    ...process.env,
+    XDG_DATA_HOME: join(directory, 'data'),
+    XDG_STATE_HOME: join(directory, 'state'),
+    XDG_CONFIG_HOME: join(directory, 'config')
+  };
+  const options = { environment, homeDirectory: directory };
+  const paths = managerPaths(options);
+  const version = '0.1.0';
+  const filename = 'runtime-fixture.mjs';
+  const contents = Buffer.from('export {};\n');
+  const mode = 0o644;
+  const id = hashDistribution(version, [[filename, contents, mode]]);
+  const runtimePath = join(paths.runtimeRoot, id);
+  await mkdir(runtimePath, { recursive: true });
+  await mkdir(paths.configRoot, { recursive: true });
+  await writeFile(join(runtimePath, filename), contents, { mode });
+  await chmod(join(runtimePath, filename), mode);
+  await writeFile(join(runtimePath, '.distribution.json'), `${JSON.stringify({ schema_version: 1, id, version, path: runtimePath, files: [filename] })}\n`, { mode: 0o600 });
+  await writeFile(paths.activeRuntime, `${JSON.stringify({ schema_version: 1, id })}\n`, { mode: 0o600 });
+
+  const absentQuarantine = join(paths.runtimeRoot, `.damaged-${id}-not-created`);
+  await writeRuntimeRecoveryRecord({ runtime_id: id, status: 'activation-pending', validation_error: 'prior Runtime mismatch', preserved_runtime_path: absentQuarantine }, options);
+  const recovered = await reconcileRuntimeRecoveryRecord(options);
+  assert.equal(recovered.error, null);
+  assert.equal(recovered.record.status, 'active');
+  assert.equal(recovered.record.preserved_runtime_path, null);
+
+  const retainedQuarantine = join(paths.runtimeRoot, `.damaged-${id}-retained`);
+  await mkdir(retainedQuarantine);
+  await writeRuntimeRecoveryRecord({ runtime_id: id, status: 'activation-pending', validation_error: 'prior Runtime mismatch', preserved_runtime_path: retainedQuarantine }, options);
+  const retained = await reconcileRuntimeRecoveryRecord(options);
+  assert.equal(retained.record.status, 'active');
+  assert.equal(retained.record.preserved_runtime_path, retainedQuarantine);
+});
+
+test('Runtime repair intent is durable before a damaged distribution is moved', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-publication-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const environment = {
+    ...process.env,
+    XDG_DATA_HOME: join(directory, 'data'),
+    XDG_STATE_HOME: join(directory, 'state'),
+    XDG_CONFIG_HOME: join(directory, 'config')
+  };
+  const options = { environment, homeDirectory: directory };
+  const paths = managerPaths(options);
+  const id = 'c'.repeat(64);
+  const destination = join(paths.runtimeRoot, id);
+  const stage = join(paths.runtimeRoot, '.stage-fixture');
+  await mkdir(destination, { recursive: true });
+  await mkdir(stage, { recursive: true });
+  await writeFile(join(destination, 'damaged.marker'), 'preserve me');
+  await writeFile(join(stage, 'replacement.marker'), 'validated replacement');
+
+  await assert.rejects(publishRuntimeStage(stage, destination, id, {
+    beforePreserve: async preservedPath => {
+      await writeRuntimeRecoveryRecord({ runtime_id: id, status: 'activation-pending', validation_error: 'content mismatch', preserved_runtime_path: preservedPath }, options);
+      throw new Error('simulated interruption after recovery intent');
+    }
+  }), /simulated interruption/);
+  const intent = (await readRuntimeRecoveryRecord(options)).record;
+  assert.equal(intent.status, 'activation-pending');
+  assert.equal(await readFile(join(destination, 'damaged.marker'), 'utf8'), 'preserve me');
+  await assert.rejects(readFile(intent.preserved_runtime_path), { code: 'ENOENT' });
+
+  const published = await publishRuntimeStage(stage, destination, id, {
+    beforePreserve: async preservedPath => writeRuntimeRecoveryRecord({
+      ...intent,
+      status: 'activation-pending',
+      preserved_runtime_path: preservedPath
+    }, options)
+  });
+  assert.equal(published.repaired, true);
+  assert.equal(await readFile(join(published.preservedPath, 'damaged.marker'), 'utf8'), 'preserve me');
+  assert.equal(await readFile(join(destination, 'replacement.marker'), 'utf8'), 'validated replacement');
+  assert.equal((await readRuntimeRecoveryRecord(options)).record.preserved_runtime_path, published.preservedPath);
 });
