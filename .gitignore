@@ -7,6 +7,7 @@
 .env
 .env.*
 !.env.example
+.leesh-loop/
 operator/.runtime/
 /.runtime/
 e2e/runs/*
