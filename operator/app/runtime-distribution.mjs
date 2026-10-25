@@ -146,12 +146,18 @@ export async function writeRuntimeRecoveryRecord(record, options = {}) {
   if (record.recovered_at != null && (typeof record.recovered_at !== 'string' || !Number.isFinite(Date.parse(record.recovered_at)))) {
     throw new Error('Runtime recovery record timestamp is invalid');
   }
+  const existing = await readRuntimeRecoveryRecord(options);
+  const preservedRuntimePath = record.preserved_runtime_path || (
+    existing.record?.runtime_id === record.runtime_id
+      ? await preservedRuntimePathIfPresent(existing.record, options)
+      : null
+  );
   const value = {
     schema_version: 1,
     runtime_id: record.runtime_id,
     status: record.status,
     validation_error: record.validation_error ? runtimeDiagnostic(record.validation_error) : null,
-    preserved_runtime_path: record.preserved_runtime_path || null,
+    preserved_runtime_path: preservedRuntimePath,
     recovered_at: record.recovered_at ?? new Date().toISOString()
   };
   await writeAtomicJson(paths.runtimeRecovery, value);
@@ -287,7 +293,7 @@ export async function currentRuntimeSource(fallbackSource = defaultSourceRoot, o
   return sourcePath;
 }
 
-export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot, options = {}) {
+export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot, options = {}, testHooks = {}) {
   const paths = managerPaths(options);
   const source = await sourceIdentity(sourceRoot);
   const existingRecovery = await readRuntimeRecoveryRecord(options);
@@ -302,6 +308,7 @@ export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot,
     recoveredFromInvalidActive = true;
     previousActiveError = runtimeDiagnostic(error);
   }
+  await testHooks.afterRecoverySnapshot?.({ recoveryRecord, previousActive, previousActiveError });
   await Promise.all([ensurePrivateDirectory(paths.runtimeRoot), ensurePrivateDirectory(paths.configRoot)]);
   const destination = join(paths.runtimeRoot, source.id);
   let destinationIsValid = false;

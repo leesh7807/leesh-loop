@@ -89,6 +89,59 @@ test('Runtime installs once into the central version store and a failed update p
   assert.deepEqual(distributions.map(value => value.id), [first.id]);
 });
 
+test('a concurrent same-ID installer retry retains the winner’s quarantine path', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-concurrent-recovery-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const environment = {
+    ...process.env,
+    XDG_DATA_HOME: join(directory, 'data'),
+    XDG_STATE_HOME: join(directory, 'state'),
+    XDG_CONFIG_HOME: join(directory, 'config')
+  };
+  const options = { environment, homeDirectory: directory };
+  const first = await installRuntimeDistribution(sourceRoot, options);
+  const damagedFile = join(first.path, 'operator/app/manager.mjs');
+  const originalContents = await readFile(damagedFile);
+  await writeFile(damagedFile, `${originalContents}\n// concurrent repair fixture\n`);
+  await assert.rejects(activeRuntime(options), /contents do not match their immutable identity/);
+
+  let continueDelayedInstaller;
+  const delayedInstallerGate = new Promise(resolveGate => { continueDelayedInstaller = resolveGate; });
+  let signalRecoverySnapshot;
+  const recoverySnapshotReady = new Promise(resolveSnapshot => { signalRecoverySnapshot = resolveSnapshot; });
+  const delayedInstaller = installRuntimeDistribution(sourceRoot, options, {
+    afterRecoverySnapshot: async snapshot => {
+      signalRecoverySnapshot(snapshot);
+      await delayedInstallerGate;
+    }
+  });
+  const delayedSnapshot = await recoverySnapshotReady;
+  assert.equal(delayedSnapshot.recoveryRecord, null);
+  assert.equal(delayedSnapshot.previousActive, null);
+  assert.match(delayedSnapshot.previousActiveError, /contents do not match their immutable identity/);
+
+  let winner;
+  let winnerError;
+  try { winner = await installRuntimeDistribution(sourceRoot, options); }
+  catch (error) { winnerError = error; }
+  finally { continueDelayedInstaller(); }
+  if (winnerError) {
+    await delayedInstaller.catch(() => {});
+    throw winnerError;
+  }
+  assert.equal(winner.repaired_distribution, true);
+  assert.ok(winner.preserved_runtime_path);
+  assert.match(await readFile(join(winner.preserved_runtime_path, 'operator/app/manager.mjs'), 'utf8'), /concurrent repair fixture/);
+
+  const delayedResult = await delayedInstaller;
+  assert.equal(delayedResult.recovered_from_invalid_active, true);
+  assert.equal(delayedResult.repaired_distribution, false);
+  const recovery = (await readRuntimeRecoveryRecord(options)).record;
+  assert.equal(recovery.status, 'active');
+  assert.equal(recovery.runtime_id, first.id);
+  assert.equal(recovery.preserved_runtime_path, winner.preserved_runtime_path);
+});
+
 test('Manager restart is required when a damaged Runtime is repaired under the same identity', () => {
   const runtime = { id: 'a'.repeat(64), repaired_distribution: true };
   assert.equal(managerMustRestartForRuntime(runtime.id, runtime), true);
