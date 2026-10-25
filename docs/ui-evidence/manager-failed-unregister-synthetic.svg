@@ -29,7 +29,7 @@
   <text x="283" y="133" class="text small" font-weight="650" fill="#7f3434">Failed</text>
   <text x="355" y="134" class="text body" font-weight="650">payments-service</text>
   <text x="355" y="158" class="text small muted">/work/projects/payments-service</text>
-  <text x="54" y="199" class="text small failure">Startup failed and no active Loop process is confirmed. Review logs or repair the Workflow before restarting.</text>
+  <text x="54" y="199" class="text small failure">The Loop failed and no active process remains. Review diagnosis and logs before restarting.</text>
   <text x="54" y="225" class="text tiny muted">Diagnosis is available separately; this state does not claim that a running process was stopped.</text>
 
   <rect x="50" y="254" width="940" height="235" rx="12" class="card"/>

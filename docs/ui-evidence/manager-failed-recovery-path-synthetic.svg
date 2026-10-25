@@ -36,7 +36,7 @@
   <text x="283" y="133" class="text small" font-weight="650">Failed</text>
   <text x="355" y="134" class="text body" font-weight="650">payments-service</text>
   <text x="355" y="158" class="text small muted">/work/projects/payments-service</text>
-  <text x="54" y="195" class="text small failure">Startup failed and no active Loop process is confirmed. Review logs or repair the Workflow before restarting.</text>
+  <text x="54" y="195" class="text small failure">The Loop failed and no active process remains. Review diagnosis and logs before restarting.</text>
   <rect x="54" y="210" width="154" height="36" rx="8" class="primary-button"/>
   <text x="131" y="233" text-anchor="middle" class="text small primary-label" font-weight="650">Review failure</text>
   <rect x="220" y="210" width="136" height="36" rx="8" class="button"/>
