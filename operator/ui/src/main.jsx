@@ -1074,6 +1074,15 @@ function ManagerApp() {
         {runtime?.source?.error && <p className="inline-message failure" role="status">Runtime source checkout is unavailable: {runtime.source.error}</p>}
         {runtime?.active_error && <p className="inline-message failure" role="status">The active Runtime could not be validated: {runtime.active_error} Install source Runtime to repair it.</p>}
         {runtime?.active_error && <p className="manager-help">Other validated Runtime distributions: {runtime.distributions?.length ? runtime.distributions.map(value => runtimeLabel(value.id, runtime.distributions)).join(', ') : 'none available'}.</p>}
+        {runtime?.recovery_error && <p className="inline-message failure" role="status">Last Runtime recovery details are unavailable: {runtime.recovery_error}</p>}
+        {runtime?.last_recovery && <details className="manager-runtime-recovery">
+          <summary>Last Runtime recovery details</summary>
+          {runtime.last_recovery.status === 'active'
+            ? <p className="manager-help">Runtime {runtimeLabel(runtime.last_recovery.runtime_id, runtime.distributions)} was activated at {runtime.last_recovery.recovered_at}.</p>
+            : <p className="inline-message failure" role="status">Runtime recovery has not confirmed activation yet. If this remains after the update completes, install source Runtime again.</p>}
+          {runtime.last_recovery.validation_error && <p className="manager-help">Previous validation: {runtime.last_recovery.validation_error}</p>}
+          {runtime.last_recovery.preserved_runtime_path && <p className="manager-help">Damaged Runtime preserved at <code>{runtime.last_recovery.preserved_runtime_path}</code></p>}
+        </details>}
         <p className="manager-runtime-versions">Manager service <strong title={runtime?.manager_runtime_version || undefined}>{managerRuntimeVersion}</strong><span>·</span> selected Loop <strong title={selected?.runtime_version || undefined}>{selected ? selectedRuntimeVersion : 'None'}</strong></p>
         {runtime?.active && (runtime.manager_restart_required || runtime.manager_runtime_version !== runtime.active.id) && <p className="inline-message" role="status">New starts use Runtime {activeRuntimeVersion}; Manager still requires a restart to load the active Runtime. Run <code>leesh-loop</code> to reopen Manager. Running Loops continue on their selected versions.</p>}
       </div>

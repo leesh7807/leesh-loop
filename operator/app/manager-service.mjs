@@ -7,7 +7,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { applyInstanceWorkflow, managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readInstanceWorkflow, readJsonFile, unregisterLoopInstance, validateManagedInstanceStateDirectory, writeAtomic, writeAtomicJson } from './manager-storage.mjs';
 import { discoverRunningLoops, loopInstanceStatus, readLoopLogs, startLoopInstance, stopLoopInstance } from './manager-lifecycle.mjs';
-import { activeRuntime, currentRuntimeSource, inspectRuntimeSource, installRuntimeDistribution, installRuntimeDistributionInWorker, listRuntimeDistributions, managerMustRestartForRuntime, recordRuntimeSource, runtimeDiagnostic } from './runtime-distribution.mjs';
+import { activeRuntime, currentRuntimeSource, inspectRuntimeSource, installRuntimeDistribution, installRuntimeDistributionInWorker, listRuntimeDistributions, managerMustRestartForRuntime, readRuntimeRecoveryRecord, recordRuntimeSource, runtimeDiagnostic, writeRuntimeRecoveryRecord } from './runtime-distribution.mjs';
 import { openLoopTaskStore } from './local-task-store-runtime.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
 import { createOperatorUiServer } from './operator-ui-server.mjs';
@@ -386,10 +386,13 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
       catch (error) { activeError = runtimeDiagnostic(error); }
       const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
       const source = await latestSourceRoot().then(sourceRootPath => inspectRuntimeSource(sourceRootPath)).catch(error => ({ error: error.message }));
+      const recovery = await readRuntimeRecoveryRecord({ environment, homeDirectory });
       const managerRestartRequired = service?.manager_restart_required === true || (active ? service?.runtime_version !== active.id : false);
       respond(response, 200, {
         active,
         active_error: activeError,
+        last_recovery: recovery.record,
+        recovery_error: recovery.error,
         source,
         distributions: await listRuntimeDistributions({ environment, homeDirectory }),
         manager_runtime_version: service?.runtime_version || null,
@@ -413,6 +416,14 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
         if (managerRestartRequired && service) {
           await writeAtomicJson(paths.managerServiceRecord, { ...service, manager_restart_required: true });
         }
+        const recoveryRecord = previousRuntimeInvalid || updated.recovered_from_invalid_active === true || updated.repaired_distribution === true
+          ? await writeRuntimeRecoveryRecord({
+              runtime_id: updated.id,
+              status: 'active',
+              validation_error: previousRuntimeError || updated.previous_active_error || null,
+              preserved_runtime_path: updated.preserved_runtime_path || null
+            }, { environment, homeDirectory })
+          : null;
         return {
           previous,
           active: updated,
@@ -421,6 +432,7 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
           active_runtime_error: previousRuntimeError || updated.previous_active_error || null,
           repaired_distribution: updated.repaired_distribution === true,
           preserved_runtime_path: updated.preserved_runtime_path || null,
+          last_recovery: recoveryRecord,
           manager_runtime_version: service?.runtime_version || null,
           manager_restart_required: managerRestartRequired
         };

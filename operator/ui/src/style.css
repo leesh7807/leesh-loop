@@ -222,6 +222,11 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .manager-runtime-source span { grid-column: 1 / -1; overflow-wrap: anywhere; }
 .manager-runtime-versions { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .5rem; margin: .55rem 0 0; color: #666; font-size: .7rem; }
 .manager-runtime-versions strong { color: #292929; font-weight: 650; }
+.manager-runtime .inline-message { overflow-wrap: anywhere; }
+.manager-runtime-recovery { max-width: 72ch; margin-top: .45rem; color: #555; font-size: .72rem; }
+.manager-runtime-recovery > summary { cursor: pointer; text-decoration: underline; text-underline-offset: .2em; }
+.manager-runtime-recovery p { margin: .35rem 0; overflow-wrap: anywhere; }
+.manager-runtime-recovery code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .manager-instance-info { display: grid; grid-template-columns: minmax(12rem, .9fr) minmax(13rem, 1fr) minmax(15rem, 1.1fr); align-items: center; gap: 1rem 1.5rem; padding: 1rem 0; border-bottom: 1px solid #dcdcdc; }
 .manager-instance-info > div:first-child { min-width: 0; }
 .manager-repository-path { margin: 0; color: #646464; font-size: .75rem; overflow-wrap: anywhere; }

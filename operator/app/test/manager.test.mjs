@@ -456,10 +456,20 @@ test('same-ID Runtime repair requires and records a Manager restart', async t =>
   assert.equal(service.manager_restart_required, true);
   const readback = await api(manager, '/api/v1/runtime');
   assert.equal(readback.body.manager_restart_required, true);
+  assert.equal(readback.body.last_recovery.runtime_id, runtime.id);
+  assert.equal(readback.body.last_recovery.status, 'active');
+  assert.equal(readback.body.last_recovery.validation_error, 'Runtime distribution contents do not match their immutable identity.');
+  assert.equal(readback.body.last_recovery.preserved_runtime_path, preservedRuntimePath);
 
   const reopen = await ensureManagerService({ sourceRoot, environment: paths.environment, homeDirectory: paths.homeDirectory });
   assert.equal(reopen.alreadyRunning, true);
   assert.equal(reopen.managerRestartRequired, true);
+
+  delete service.manager_restart_required;
+  await writeFile(managedPaths.managerServiceRecord, `${JSON.stringify(service)}\n`, { mode: 0o600 });
+  const afterManagerReopen = await api(manager, '/api/v1/runtime');
+  assert.equal(afterManagerReopen.body.manager_restart_required, false);
+  assert.equal(afterManagerReopen.body.last_recovery.preserved_runtime_path, preservedRuntimePath);
 });
 
 test('Manager unregisters a Stopped or confirmed process-absent Failed instance and preserves its repository and Task Store', async t => {
