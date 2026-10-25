@@ -7,6 +7,7 @@ import { readTaskDetailDraft } from './task-detail-draft.js';
 import { bootstrapManagerToken } from './manager-auth.js';
 import { createManagerApiFetch } from './manager-api.js';
 import { managerLifecycleAction } from './manager-lifecycle-action.js';
+import { managerFailedGuidance } from './manager-failed-guidance.js';
 import { createManagerInstanceListGate } from './manager-instance-list-gate.js';
 import { createManagerSelectionGate } from './manager-selection-gate.js';
 import { InstanceOperationFeedback, WorkflowOperationFeedback } from './manager-operation-feedback.js';
@@ -1112,11 +1113,7 @@ function ManagerApp() {
               <a className="manager-task-jump" href="#tasks-heading">Tasks</a>
             </div>
             {selected.status === 'Unconfirmed' && <p className="manager-status-guidance">Manager cannot confirm process ownership. Review the diagnosis and Loop logs, then verify which process owns {selected.port ? `port ${selected.port}` : 'the assigned port'} with local process tools before retrying. Start, stop, and unregister remain unavailable until ownership is confirmed.</p>}
-            {selected.status === 'Failed' && <p className="manager-status-guidance">{selected.can_update_workflow
-              ? 'The Loop failed and no active process remains. Review diagnosis and logs before restarting.'
-              : selected.can_stop
-                ? 'The Loop reported a failure while its process is still owned. Stop it before restarting or changing its Workflow.'
-                : 'The Loop failed to start. Review its diagnosis and logs before retrying.'}</p>}
+            {selected.status === 'Failed' && <p className="manager-status-guidance">{managerFailedGuidance(selected)}</p>}
             {selected.detail && <details id="manager-status-diagnosis" className="manager-status-diagnosis" open={diagnosisOpen} onToggle={event => setDiagnosisOpen(event.currentTarget.open)}><summary ref={diagnosisSummaryRef}>{diagnosisOpen ? 'Hide diagnosis' : 'View diagnosis'}</summary><p className="manager-help">Confirm which process owns the assigned port before retrying lifecycle actions.</p><pre>{selected.detail}</pre>{selected.status === 'Unconfirmed' && <a className="manager-task-jump" href="#manager-logs">Open Loop logs ↓</a>}</details>}
             <ManagerFeedback feedback={feedback} target="lifecycle" />
             <InstanceOperationFeedback feedback={selectedScopedLifecycleFeedback} target="lifecycle" />

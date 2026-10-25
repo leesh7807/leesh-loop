@@ -1491,6 +1491,8 @@ test('unexpected Loop exits report Failed while a confirmed stop reports Stopped
   const expected = await loopInstanceStatus(stopping.id, paths);
   assert.equal(unexpected.status, 'Failed');
   assert.match(unexpected.detail, /without a confirmed stop request/);
+  assert.equal(unexpected.can_update_workflow, undefined);
+  assert.equal(unexpected.can_stop, undefined);
   assert.equal(JSON.parse(await readFile(join(managerPaths(paths).loopExecutionRoot, running.id, 'execution.json'), 'utf8')).status, 'Failed');
   assert.equal(expected.status, 'Stopped');
   assert.equal(JSON.parse(await readFile(join(managerPaths(paths).loopExecutionRoot, stopping.id, 'execution.json'), 'utf8')).status, 'Stopped');
