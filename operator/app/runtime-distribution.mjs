@@ -199,13 +199,14 @@ export async function reconcileRuntimeRecoveryRecord(options = {}) {
   }
 }
 
-export async function publishRuntimeStage(stage, destination, expectedId, { beforePreserve } = {}) {
+export async function publishRuntimeStage(stage, destination, expectedId, { beforePreserve, beforeInstall } = {}) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     let current;
     try { current = await lstat(destination); }
     catch (error) {
       if (error?.code !== 'ENOENT') throw error;
       try {
+        await beforeInstall?.();
         await rename(stage, destination);
         return { repaired: false, preservedPath: null };
       } catch (renameError) {
@@ -305,6 +306,7 @@ export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot,
   const destination = join(paths.runtimeRoot, source.id);
   let destinationIsValid = false;
   let destinationIsDamagedDirectory = false;
+  let restoredMissingDistribution = false;
   try {
     await validateInstalledDistribution(destination, source.id);
     destinationIsValid = true;
@@ -328,6 +330,7 @@ export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot,
       const metadata = { schema_version: 1, id: source.id, version: source.version, path: destination, source_root: source.root, files: source.files, installed_at: new Date().toISOString() };
       await writeFile(join(stage, '.distribution.json'), `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
       if (recoveredFromInvalidActive && !destinationIsDamagedDirectory) {
+        restoredMissingDistribution = true;
         const priorPreservedPath = await preservedRuntimePathIfPresent(recoveryRecord, options);
         recoveryRecord = {
           runtime_id: source.id,
@@ -337,8 +340,23 @@ export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot,
           recovered_at: new Date().toISOString()
         };
         await writeRuntimeRecoveryRecord(recoveryRecord, options);
+        await markManagerRestartRequiredForRuntimeRepair(source.id, options);
       }
       repair = await publishRuntimeStage(stage, destination, source.id, {
+        beforeInstall: async () => {
+          const managerRestartRequired = await markManagerRestartRequiredForRuntimeRepair(source.id, options);
+          if (managerRestartRequired) restoredMissingDistribution = true;
+          if (!recoveryRecord && (destinationIsDamagedDirectory || managerRestartRequired)) {
+            recoveryRecord = {
+              runtime_id: source.id,
+              status: 'activation-pending',
+              validation_error: previousActiveError,
+              preserved_runtime_path: null,
+              recovered_at: new Date().toISOString()
+            };
+            await writeRuntimeRecoveryRecord(recoveryRecord, options);
+          }
+        },
         beforePreserve: async preservedRuntimePath => {
           recoveryRecord = {
             runtime_id: source.id,
@@ -380,7 +398,7 @@ export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot,
     changed: recoveredFromInvalidActive || repair.repaired || previousActive?.id !== source.id,
     recovered_from_invalid_active: recoveredFromInvalidActive,
     previous_active_error: previousActiveError,
-    repaired_distribution: repair.repaired,
+    repaired_distribution: repair.repaired || restoredMissingDistribution,
     preserved_runtime_path: repair.preservedPath,
     recovery_status: recoveryRecord ? 'active' : null
   };

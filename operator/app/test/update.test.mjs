@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { activeRuntime, installRuntimeDistribution, listRuntimeDistributions, managerMustRestartForRuntime, publishRuntimeStage, readRuntimeRecoveryRecord, reconcileRuntimeRecoveryRecord, runtimeDiagnostic, writeRuntimeRecoveryRecord } from '../runtime-distribution.mjs';
+import { activeRuntime, installRuntimeDistribution, inspectRuntimeSource, listRuntimeDistributions, managerMustRestartForRuntime, publishRuntimeStage, readRuntimeRecoveryRecord, reconcileRuntimeRecoveryRecord, runtimeDiagnostic, writeRuntimeRecoveryRecord } from '../runtime-distribution.mjs';
 import { managerPaths } from '../manager-storage.mjs';
 import { hashDistribution } from '../installation-metadata.mjs';
 import { listRuntimeSnapshotFiles, materializeRuntimeSnapshot } from '../runtime-manifest.mjs';
@@ -203,4 +203,35 @@ test('Runtime repair intent is durable before a damaged distribution is moved', 
   assert.equal(await readFile(join(published.preservedPath, 'damaged.marker'), 'utf8'), 'preserve me');
   assert.equal(await readFile(join(destination, 'replacement.marker'), 'utf8'), 'validated replacement');
   assert.equal((await readRuntimeRecoveryRecord(options)).record.preserved_runtime_path, published.preservedPath);
+});
+
+test('restoring a missing same-ID Runtime records the Manager restart obligation', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-missing-runtime-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const environment = {
+    ...process.env,
+    XDG_DATA_HOME: join(directory, 'data'),
+    XDG_STATE_HOME: join(directory, 'state'),
+    XDG_CONFIG_HOME: join(directory, 'config')
+  };
+  const options = { environment, homeDirectory: directory };
+  const paths = managerPaths(options);
+  const source = await inspectRuntimeSource(sourceRoot);
+  await mkdir(paths.configRoot, { recursive: true });
+  await mkdir(paths.managerStateRoot, { recursive: true });
+  await writeFile(paths.activeRuntime, `${JSON.stringify({ schema_version: 1, id: source.id })}\n`, { mode: 0o600 });
+  await writeFile(paths.managerServiceRecord, `${JSON.stringify({ schema_version: 1, runtime_version: source.id })}\n`, { mode: 0o600 });
+  await assert.rejects(activeRuntime(options), /ENOENT/);
+
+  const restored = await installRuntimeDistribution(sourceRoot, options);
+  assert.equal(restored.id, source.id);
+  assert.equal(restored.recovered_from_invalid_active, true);
+  assert.equal(restored.repaired_distribution, true);
+  assert.equal(managerMustRestartForRuntime(source.id, restored), true);
+  assert.equal(JSON.parse(await readFile(paths.managerServiceRecord, 'utf8')).manager_restart_required, true);
+  assert.equal((await activeRuntime(options)).id, source.id);
+  const recovery = (await readRuntimeRecoveryRecord(options)).record;
+  assert.equal(recovery.runtime_id, source.id);
+  assert.equal(recovery.status, 'active');
+  assert.equal(recovery.preserved_runtime_path, null);
 });
