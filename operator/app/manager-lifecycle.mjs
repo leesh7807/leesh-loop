@@ -176,7 +176,7 @@ async function recordRuntimeExit(paths, instance, execution, state, options = {}
     repository_url: instance.repository_url,
     status,
     ...(detail ? { detail } : {}),
-    ...(status === 'Failed' && recordedProcessesAreAbsent(execution, { requireLauncher: true, requireRuntime: true }) ? { can_update_workflow: true } : {}),
+    ...(status === 'Failed' && recordedProcessesAreAbsent(execution, { requireLauncher: true, requireRuntime: true }) ? { can_update_workflow: true, process_absence_confirmed: true } : {}),
     ...(Number.isInteger(execution.port) ? { port: execution.port } : {})
   };
 }
@@ -273,7 +273,7 @@ export async function loopInstanceStatus(id, options = {}) {
         ...(recordedProcessesAreAbsent(execution, {
           requireLauncher: true,
           requireRuntime: ['Running', 'Stopping'].includes(execution.status)
-        }) ? { can_update_workflow: true } : {}),
+        }) ? { can_update_workflow: true, process_absence_confirmed: true } : {}),
         port: execution.port
       };
     }
@@ -288,7 +288,7 @@ export async function loopInstanceStatus(id, options = {}) {
         execution.launcher_pid !== undefined && execution.launcher_pid !== null
           ? recordedProcessesAreAbsent(execution, { requireLauncher: true })
           : execution.pid == null && execution.process_start_ticks == null && execution.launcher_start_ticks == null
-      ) ? { can_update_workflow: true } : {}),
+      ) ? { can_update_workflow: true, process_absence_confirmed: true } : {}),
       ...(execution.port ? { port: execution.port } : {})
     };
   }
@@ -312,7 +312,7 @@ export async function loopInstanceStatus(id, options = {}) {
       repository_url: instance.repository_url,
       status: 'Failed',
       detail: state.cleanup_error || 'Loop startup failed',
-      ...(Number.isSafeInteger(state.pid) && state.pid > 0 && recordedProcessesAreAbsent(execution, { requireLauncher: true }) ? { can_update_workflow: true } : {}),
+      ...(Number.isSafeInteger(state.pid) && state.pid > 0 && recordedProcessesAreAbsent(execution, { requireLauncher: true }) ? { can_update_workflow: true, process_absence_confirmed: true } : {}),
       port: execution.port
     };
   }

@@ -1,5 +1,5 @@
 export function managerFailedGuidance(instance = {}) {
-  if (instance.can_update_workflow === true) {
+  if (instance.process_absence_confirmed === true) {
     return 'The Loop failed and no active process remains. Review diagnosis and logs before restarting.';
   }
   if (instance.can_stop === true) {

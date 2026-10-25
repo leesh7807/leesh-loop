@@ -413,6 +413,7 @@ test('Manager unregisters a Stopped or confirmed process-absent Failed instance 
   const uncertainFailure = await api(manager, `/api/v1/instances/${first.id}`);
   assert.equal(uncertainFailure.body.instance.status, 'Failed');
   assert.equal(uncertainFailure.body.instance.can_update_workflow, undefined);
+  assert.equal(uncertainFailure.body.instance.process_absence_confirmed, undefined);
   const refusedFailed = await api(manager, `/api/v1/instances/${first.id}`, { method: 'DELETE', origin: manager.url });
   assert.equal(refusedFailed.response.status, 409);
   assert.match(refusedFailed.body.error, /Current status: Failed/);
@@ -422,6 +423,7 @@ test('Manager unregisters a Stopped or confirmed process-absent Failed instance 
   const confirmedFailure = await api(manager, `/api/v1/instances/${first.id}`);
   assert.equal(confirmedFailure.body.instance.status, 'Failed');
   assert.equal(confirmedFailure.body.instance.can_update_workflow, true);
+  assert.equal(confirmedFailure.body.instance.process_absence_confirmed, true);
   const removed = await api(manager, `/api/v1/instances/${first.id}`, { method: 'DELETE', origin: manager.url });
   assert.equal(removed.response.status, 200);
   assert.equal(removed.body.repository_preserved, true);
@@ -1535,6 +1537,7 @@ test('unexpected Loop exits report Failed while a confirmed stop reports Stopped
   assert.equal(unexpected.status, 'Failed');
   assert.match(unexpected.detail, /without a confirmed stop request/);
   assert.equal(unexpected.can_update_workflow, undefined);
+  assert.equal(unexpected.process_absence_confirmed, undefined);
   assert.equal(unexpected.can_stop, undefined);
   assert.equal(JSON.parse(await readFile(join(managerPaths(paths).loopExecutionRoot, running.id, 'execution.json'), 'utf8')).status, 'Failed');
   assert.equal(expected.status, 'Stopped');
@@ -1858,6 +1861,7 @@ test('Workflow repair is available after a failed launcher exits and remains blo
   const failedStatus = failedList.body.instances.find(value => value.id === failed.id);
   assert.equal(failedStatus.status, 'Failed');
   assert.equal(failedStatus.can_update_workflow, true);
+  assert.equal(failedStatus.process_absence_confirmed, true);
   const failedComparison = await api(manager, `/api/v1/instances/${failed.id}/workflow`);
   const repaired = await api(manager, `/api/v1/instances/${failed.id}/workflow`, {
     method: 'PUT', origin: manager.url,
@@ -1901,6 +1905,7 @@ test('Workflow repair is available after a failed launcher exits and remains blo
   const activeStatus = activeList.body.instances.find(value => value.id === activeFailure.id);
   assert.equal(activeStatus.status, 'Unconfirmed');
   assert.equal(activeStatus.can_update_workflow, undefined);
+  assert.equal(activeStatus.process_absence_confirmed, undefined);
   const activeComparison = await api(manager, `/api/v1/instances/${activeFailure.id}/workflow`);
   const refused = await api(manager, `/api/v1/instances/${activeFailure.id}/workflow`, {
     method: 'PUT', origin: manager.url,
@@ -1964,6 +1969,7 @@ test('Workflow repair recovers a confirmed-exited pre-ready runtime without its 
   const status = listed.body.instances.find(value => value.id === instance.id);
   assert.equal(status.status, 'Failed');
   assert.equal(status.can_update_workflow, true);
+  assert.equal(status.process_absence_confirmed, true);
 
   const workflowPath = join(instance.data_directory, 'WORKFLOW.md');
   const current = `${await readFile(workflowPath, 'utf8')}\nKeep this pre-ready repair input.\n`;
