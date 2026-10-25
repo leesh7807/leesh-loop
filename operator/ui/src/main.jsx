@@ -1113,7 +1113,7 @@ function ManagerApp() {
             </div>
             {selected.status === 'Unconfirmed' && <p className="manager-status-guidance">Manager cannot confirm process ownership. Review the diagnosis and Loop logs, then verify which process owns {selected.port ? `port ${selected.port}` : 'the assigned port'} with local process tools before retrying. Start, stop, and unregister remain unavailable until ownership is confirmed.</p>}
             {selected.status === 'Failed' && <p className="manager-status-guidance">{selected.can_update_workflow
-              ? 'Startup failed and no active Loop process is confirmed. Review logs or repair the Workflow before restarting.'
+              ? 'The Loop failed and no active process remains. Review diagnosis and logs before restarting.'
               : selected.can_stop
                 ? 'The Loop reported a failure while its process is still owned. Stop it before restarting or changing its Workflow.'
                 : 'The Loop failed to start. Review its diagnosis and logs before retrying.'}</p>}

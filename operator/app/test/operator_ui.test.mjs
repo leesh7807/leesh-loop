@@ -236,6 +236,8 @@ test('rendered UI source keeps Task actions, manager hierarchy, state cues, and 
   assert.match(source, /scrollIntoView\(\{ behavior: 'smooth', block: 'nearest' \}\)/);
   assert.match(source, /aria-controls=\{selected\.detail \? 'manager-status-diagnosis manager-logs' : 'manager-logs'\}/);
   assert.match(source, /Lifecycle actions wait for confirmed process ownership/);
+  assert.match(source, /The Loop failed and no active process remains\. Review diagnosis and logs before restarting\./);
+  assert.doesNotMatch(source, /Startup failed and no active Loop process is confirmed/);
   assert.match(source, /verify which process owns/);
   assert.match(source, /Open Loop logs/);
   assert.match(source, /const runtimePanel = \(/);

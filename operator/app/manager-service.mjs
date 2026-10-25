@@ -231,40 +231,38 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
   }
 
   async function unregisterInstance(id) {
-    const operation = registryQueue.then(async () => {
-      if (unregisteringInstances.has(id)) throw Object.assign(new Error('This Loop is already being unregistered.'), { status: 409 });
-      if (lifecycleQueues.has(id)) throw Object.assign(new Error('Wait for the current Loop management action to finish before unregistering it.'), { status: 409 });
-      unregisteringInstances.add(id);
-      try {
-        const instance = await getLoopInstance(id, { environment, homeDirectory });
-        const status = await loopInstanceStatus(id, lifecycleStatusOptions());
-        const processAbsenceConfirmed = status.status === 'Failed' && status.can_update_workflow === true;
-        if (status.status !== 'Stopped' && !processAbsenceConfirmed) {
-          throw Object.assign(new Error(`Stop this Loop or wait until Manager confirms a Failed Loop has no active processes before unregistering it. Current status: ${status.status}${status.detail ? ` — ${status.detail}` : ''}`), { status: 409 });
-        }
-        if (lifecycleQueues.has(id)) throw Object.assign(new Error('A Loop management action started before unregistration could complete. Retry after it finishes.'), { status: 409 });
-        await waitForTaskOperations(id);
-        const cached = taskStores.get(id);
-        if (cached) {
-          const initialized = await cached;
-          await initialized.store.close();
-          if (taskStores.get(id) === cached) taskStores.delete(id);
-        }
-        const unregistered = await unregisterLoopInstance(id, { environment, homeDirectory });
-        return {
-          instance: {
-            ...unregistered,
-            project_file: instance.project_file,
-            state_directory: instance.state_directory,
-            workspace_root: instance.workspace_root
-          },
-          repository_preserved: true,
-          data_preserved: true
-        };
-      } finally { unregisteringInstances.delete(id); }
-    });
-    registryQueue = operation.catch(() => {});
-    return operation;
+    if (unregisteringInstances.has(id)) throw Object.assign(new Error('This Loop is already being unregistered.'), { status: 409 });
+    if (lifecycleQueues.has(id)) throw Object.assign(new Error('Wait for the current Loop management action to finish before unregistering it.'), { status: 409 });
+    unregisteringInstances.add(id);
+    try {
+      const instance = await getLoopInstance(id, { environment, homeDirectory });
+      const status = await loopInstanceStatus(id, lifecycleStatusOptions());
+      const processAbsenceConfirmed = status.status === 'Failed' && status.can_update_workflow === true;
+      if (status.status !== 'Stopped' && !processAbsenceConfirmed) {
+        throw Object.assign(new Error(`Stop this Loop or wait until Manager confirms a Failed Loop has no active processes before unregistering it. Current status: ${status.status}${status.detail ? ` — ${status.detail}` : ''}`), { status: 409 });
+      }
+      if (lifecycleQueues.has(id)) throw Object.assign(new Error('A Loop management action started before unregistration could complete. Retry after it finishes.'), { status: 409 });
+      await waitForTaskOperations(id);
+      const cached = taskStores.get(id);
+      if (cached) {
+        const initialized = await cached;
+        await initialized.store.close();
+        if (taskStores.get(id) === cached) taskStores.delete(id);
+      }
+      const operation = registryQueue.then(() => unregisterLoopInstance(id, { environment, homeDirectory }));
+      registryQueue = operation.catch(() => {});
+      const unregistered = await operation;
+      return {
+        instance: {
+          ...unregistered,
+          project_file: instance.project_file,
+          state_directory: instance.state_directory,
+          workspace_root: instance.workspace_root
+        },
+        repository_preserved: true,
+        data_preserved: true
+      };
+    } finally { unregisteringInstances.delete(id); }
   }
 
   function closeTaskStores() {
