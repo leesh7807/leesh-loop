@@ -222,7 +222,12 @@ test('rendered UI source keeps Task actions, manager hierarchy, state cues, and 
   assert.match(source, /className="manager-management"/);
   assert.match(source, /Add a Git repository/);
   assert.match(source, /Unregister Loop/);
-  assert.match(source, /only after Manager confirms Stopped/i);
+  assert.match(source, /Available when Manager confirms Stopped, or confirms a Failed Loop has no active process/i);
+  assert.match(source, /const runtimePanel = \(/);
+  assert.match(source, /<details className="manager-management manager-runtime-empty" open>/);
+  assert.match(source, /<summary><span>Manage Runtime<\/span>/);
+  assert.match(source, /aria-label="Manager Runtime controls">\{runtimePanel\}<\/div>/);
+  assert.match(source, /\{runtimePanel\}/);
   assert.match(source, /Active for new starts/);
   assert.doesNotMatch(source, /Notion|Symphony Dashboard|notionTasksUrl/);
   assert.match(styles, /@media \(max-width: 960px\)/);

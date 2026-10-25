@@ -238,8 +238,9 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
       try {
         const instance = await getLoopInstance(id, { environment, homeDirectory });
         const status = await loopInstanceStatus(id, lifecycleStatusOptions());
-        if (status.status !== 'Stopped') {
-          throw Object.assign(new Error(`Stop this Loop and wait for a confirmed Stopped status before unregistering it. Current status: ${status.status}${status.detail ? ` — ${status.detail}` : ''}`), { status: 409 });
+        const processAbsenceConfirmed = status.status === 'Failed' && status.can_update_workflow === true;
+        if (status.status !== 'Stopped' && !processAbsenceConfirmed) {
+          throw Object.assign(new Error(`Stop this Loop or wait until Manager confirms a Failed Loop has no active processes before unregistering it. Current status: ${status.status}${status.detail ? ` — ${status.detail}` : ''}`), { status: 409 });
         }
         if (lifecycleQueues.has(id)) throw Object.assign(new Error('A Loop management action started before unregistration could complete. Retry after it finishes.'), { status: 409 });
         await waitForTaskOperations(id);

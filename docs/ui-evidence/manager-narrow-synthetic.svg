@@ -18,7 +18,7 @@
   </defs>
   <rect width="460" height="1450" fill="#f3f1ec"/>
   <text x="20" y="29" class="text tiny" font-weight="700" letter-spacing=".8">SYNTHETIC REVIEW FIXTURE · NARROW 390 PX CSS</text>
-  <text x="20" y="49" class="text tiny muted">Reconstructed from PR #121 source; not a browser capture.</text>
+  <text x="20" y="49" class="text tiny muted">Reconstructed from PR #121 and post-review source; not a browser capture.</text>
   <rect x="15" y="65" width="390" height="1210" rx="18" fill="#fbfaf8" stroke="#d8d5ce" stroke-width="1.4"/>
   <g transform="translate(3 0) scale(.9)">
 

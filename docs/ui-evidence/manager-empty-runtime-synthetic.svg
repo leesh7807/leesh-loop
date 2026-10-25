@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="720" viewBox="0 0 1040 720" role="img" aria-labelledby="title description">
+  <title id="title">Synthetic Manager empty registry Runtime view</title>
+  <desc id="description">A synthetic reconstruction of the Manager when no Loop is selected. The repository form is available, and the Manager-level Runtime disclosure is open with a global install action. Not a browser capture.</desc>
+  <defs>
+    <style>
+      .text { font-family: Inter, ui-sans-serif, system-ui, sans-serif; fill: #282724; }
+      .muted { fill: #716e68; }
+      .tiny { font-size: 13px; }
+      .small { font-size: 15px; }
+      .body { font-size: 17px; }
+      .heading { font-size: 23px; font-weight: 650; }
+      .title { font-size: 31px; font-weight: 700; }
+      .card { fill: #fff; stroke: #dedbd4; stroke-width: 1.5; }
+      .soft { fill: #f8f7f4; stroke: #e3e0d9; stroke-width: 1.2; }
+      .rule { stroke: #e4e1da; stroke-width: 1.2; }
+      .button { fill: #fff; stroke: #c9c5bc; stroke-width: 1.4; }
+      .button-label { fill: #fff; }
+    </style>
+  </defs>
+  <rect width="1040" height="720" fill="#f3f1ec"/>
+  <text x="30" y="34" class="text tiny" font-weight="700" letter-spacing="1.2">SYNTHETIC VISUAL REVIEW FIXTURE · EMPTY MANAGER</text>
+  <text x="30" y="57" class="text tiny muted">Reconstructed from the post-review JSX/CSS. Not a browser capture. Runtime identities are illustrative.</text>
+  <rect x="20" y="78" width="1000" height="615" rx="18" fill="#fbfaf8" stroke="#d8d5ce" stroke-width="1.5"/>
+
+  <text x="54" y="128" class="text tiny muted" letter-spacing="1.2">LEESH LOOP</text>
+  <text x="54" y="163" class="text title">Manager</text>
+
+  <rect x="50" y="188" width="940" height="248" rx="12" class="card"/>
+  <path d="M72 219 l7 7 7-7" fill="none" stroke="#55524d" stroke-width="2"/>
+  <text x="101" y="228" class="text body" font-weight="650">Repositories</text>
+  <text x="965" y="228" text-anchor="end" class="text small muted">0 managed Loops</text>
+  <line x1="68" y1="247" x2="972" y2="247" class="rule"/>
+  <text x="75" y="281" class="text heading">Switch Loop</text>
+  <text x="75" y="309" class="text small muted">No managed Loops yet. Add an existing local Git repository below.</text>
+  <text x="75" y="351" class="text heading">Add a Git repository</text>
+  <text x="75" y="376" class="text small muted">Manager creates a separate Workflow, Task Store, and workspace; the Git repository stays unchanged.</text>
+  <text x="75" y="407" class="text tiny muted">LOCAL REPOSITORY PATH</text>
+  <rect x="75" y="414" width="700" height="1" fill="#aaa69e"/>
+  <rect x="797" y="391" width="160" height="38" rx="8" fill="#292824"/>
+  <text x="877" y="416" text-anchor="middle" class="text small button-label" font-weight="650">Add Loop</text>
+
+  <rect x="50" y="457" width="940" height="202" rx="12" class="card"/>
+  <path d="M72 488 l7 7 7-7" fill="none" stroke="#55524d" stroke-width="2"/>
+  <text x="101" y="497" class="text body" font-weight="650">Manage Runtime</text>
+  <text x="965" y="497" text-anchor="end" class="text small muted">Source, installed Runtime, and Manager version</text>
+  <line x1="68" y1="516" x2="972" y2="516" class="rule"/>
+  <text x="75" y="548" class="text tiny muted" letter-spacing="1">RUNTIME DISTRIBUTION</text>
+  <text x="75" y="578" class="text heading">Runtime not installed</text>
+  <text x="75" y="605" class="text small muted">Install the Runtime from this checkout for future Loop starts. Running Loops keep their pinned Runtime.</text>
+  <text x="75" y="632" class="text tiny">Source checkout <tspan font-weight="650">v0.1.0</tspan> · <tspan font-family="monospace">c2844fd4b061</tspan></text>
+  <text x="75" y="651" class="text tiny">Manager service <tspan font-weight="650">—</tspan> · Selected Loop <tspan font-weight="650">None</tspan></text>
+  <rect x="784" y="556" width="173" height="40" rx="8" class="button"/>
+  <text x="870" y="582" text-anchor="middle" class="text small" font-weight="650">Install source Runtime</text>
+</svg>

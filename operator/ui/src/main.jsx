@@ -16,6 +16,7 @@ import { workflowUpdateEligibility } from './workflow-update-eligibility.js';
 import { workflowComparisonAfterApply } from './workflow-apply-result.js';
 import { createWorkflowDiff } from './workflow-diff.js';
 import { runtimeLabel } from './runtime-label.js';
+import { canUnregisterLoop } from './manager-unregister-eligibility.js';
 import './style.css';
 
 const REFRESH_INTERVAL_MS = 7500;
@@ -967,10 +968,10 @@ function ManagerApp() {
   }
 
   async function unregisterSelected() {
-    if (!selected || selected.status !== 'Stopped' || busy) return;
+    if (!selected || !canUnregisterLoop(selected) || busy) return;
     const instance = selected;
     const confirmed = window.confirm(
-      `Unregister ${instance.repository_name} from Manager?\n\nThe Loop must be Stopped. This removes only its management entry. The Git repository and existing Workflow, Task Store, and workspace data stay on disk at ${instance.data_directory}.`
+      `Unregister ${instance.repository_name} from Manager?\n\nManager confirms this Loop is ${instance.status === 'Stopped' ? 'Stopped' : 'Failed with no active process'}. This removes only its management entry. The Git repository and existing Workflow, Task Store, and workspace data stay on disk at ${instance.data_directory}.`
     );
     if (!confirmed) return;
     await perform(`/api/v1/instances/${encodeURIComponent(instance.id)}`, {
@@ -1040,6 +1041,29 @@ function ManagerApp() {
   }
 
   const lifecycleAction = managerLifecycleAction(selected?.status, selected?.can_stop);
+  const canUnregisterSelected = canUnregisterLoop(selected);
+
+  const runtimePanel = (
+    <section className="manager-runtime" aria-label="Central Runtime">
+      <div>
+        <p className="eyebrow">Runtime distribution</p>
+        <h2>{runtimeViewState === 'loading'
+          ? 'Loading Runtime…'
+          : runtimeViewState === 'ready'
+            ? `Active for new starts · ${activeRuntimeVersion}`
+            : runtimeViewState === 'missing' ? 'Runtime not installed' : 'Runtime unavailable'}</h2>
+        <p className="manager-help">Updating installs the Runtime from this checkout for future Loop starts. Running Loops keep their pinned Runtime, and Workflow files are changed only by the separate Workflow action below.</p>
+        {runtime?.source?.path && <p className="manager-runtime-source">Source checkout <strong>v{runtime.source.version}</strong> · <code title={runtime.source.id}>{runtime.source.id.slice(0, 12)}</code><span>{runtime.source.path}</span></p>}
+        {runtime?.source?.error && <p className="inline-message failure" role="status">Runtime source checkout is unavailable: {runtime.source.error}</p>}
+        <p className="manager-runtime-versions">Manager service <strong title={runtime?.manager_runtime_version || undefined}>{managerRuntimeVersion}</strong><span>·</span> selected Loop <strong title={selected?.runtime_version || undefined}>{selected ? selectedRuntimeVersion : 'None'}</strong></p>
+        {runtime?.active && runtime.manager_runtime_version !== runtime.active.id && <p className="inline-message" role="status">New starts use Runtime {activeRuntimeVersion}; Manager still uses Runtime {managerRuntimeVersion}. Run <code>leesh-loop</code> to reopen Manager on the active Runtime. Running Loops continue on their selected versions.</p>}
+      </div>
+      <div className="manager-runtime-action">
+        <button className="manager-action secondary" type="button" disabled={Boolean(busy) || runtimeReadState === 'loading'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform('/api/v1/runtime/update', { label: 'Updating Runtime', operation: 'update-runtime', target: 'runtime' })}>{busy === 'Updating Runtime' ? 'Installing…' : 'Install source Runtime'}</button>
+        <ManagerFeedback feedback={feedback} target="runtime" />
+      </div>
+    </section>
+  );
 
   return (
     <div className="manager-shell">
@@ -1126,29 +1150,18 @@ function ManagerApp() {
 
       {selected ? <OperatorApp key={selectedId} instanceId={selectedId} /> : null}
 
+      {!selected && (
+        <details className="manager-management manager-runtime-empty" open>
+          <summary><span>Manage Runtime</span><span>Source, installed Runtime, and Manager version</span></summary>
+          <div className="manager-console" aria-label="Manager Runtime controls">{runtimePanel}</div>
+        </details>
+      )}
+
       {selected && (
         <details className="manager-management">
           <summary><span>Manage current Loop</span><span>Runtime, Workflow, and diagnosis</span></summary>
           <div className="manager-console" aria-label="Loop Manager controls">
-            <section className="manager-runtime" aria-label="Central Runtime">
-              <div>
-                <p className="eyebrow">Runtime distribution</p>
-                <h2>{runtimeViewState === 'loading'
-                  ? 'Loading Runtime…'
-                  : runtimeViewState === 'ready'
-                    ? `Active for new starts · ${activeRuntimeVersion}`
-                    : runtimeViewState === 'missing' ? 'Runtime not installed' : 'Runtime unavailable'}</h2>
-                <p className="manager-help">Updating installs the Runtime from this checkout for future Loop starts. Running Loops keep their pinned Runtime, and Workflow files are changed only by the separate Workflow action below.</p>
-                {runtime?.source?.path && <p className="manager-runtime-source">Source checkout <strong>v{runtime.source.version}</strong> · <code title={runtime.source.id}>{runtime.source.id.slice(0, 12)}</code><span>{runtime.source.path}</span></p>}
-                {runtime?.source?.error && <p className="inline-message failure" role="status">Runtime source checkout is unavailable: {runtime.source.error}</p>}
-                <p className="manager-runtime-versions">Manager service <strong title={runtime?.manager_runtime_version || undefined}>{managerRuntimeVersion}</strong><span>·</span> selected Loop <strong title={selected?.runtime_version || undefined}>{selectedRuntimeVersion}</strong></p>
-                {runtime?.active && runtime.manager_runtime_version !== runtime.active.id && <p className="inline-message" role="status">New starts use Runtime {activeRuntimeVersion}; Manager still uses Runtime {managerRuntimeVersion}. Run <code>leesh-loop</code> to reopen Manager on the active Runtime. Running Loops continue on their selected versions.</p>}
-              </div>
-              <div className="manager-runtime-action">
-                <button className="manager-action secondary" type="button" disabled={Boolean(busy) || runtimeReadState === 'loading'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform('/api/v1/runtime/update', { label: 'Updating Runtime', operation: 'update-runtime', target: 'runtime' })}>{busy === 'Updating Runtime' ? 'Installing…' : 'Install source Runtime'}</button>
-                <ManagerFeedback feedback={feedback} target="runtime" />
-              </div>
-            </section>
+            {runtimePanel}
 
             <section className="manager-instance-info" aria-label="Selected Loop details">
               <div><p className="eyebrow">Selected Loop</p><h2>{selected.repository_name}</h2><p className="manager-repository-path">{selected.repository_root}</p></div>
@@ -1158,8 +1171,8 @@ function ManagerApp() {
                 <span>Runtime <strong title={selected.runtime_version || undefined}>{selectedRuntimeVersion}</strong></span>
               </div>
               <div className="manager-unregister">
-                <button type="button" className="manager-action secondary" disabled={Boolean(busy) || selected.status !== 'Stopped'} aria-describedby={selected.status !== 'Stopped' ? 'manager-unregister-guidance' : busy ? 'manager-operation-pending' : undefined} onClick={() => void unregisterSelected()}>{busyOperation?.label === 'Unregistering Loop' && busyOperation.instanceId === '' ? 'Unregistering…' : 'Unregister Loop'}</button>
-                <p className="manager-help" id="manager-unregister-guidance">Available only after Manager confirms Stopped. Unregistering removes the registry entry; it does not stop the Loop or delete the Git repository, Workflow, Task Store, or workspace.</p>
+                <button type="button" className="manager-action secondary" disabled={Boolean(busy) || !canUnregisterSelected} aria-describedby={!canUnregisterSelected ? 'manager-unregister-guidance' : busy ? 'manager-operation-pending' : undefined} onClick={() => void unregisterSelected()}>{busyOperation?.label === 'Unregistering Loop' && busyOperation.instanceId === '' ? 'Unregistering…' : 'Unregister Loop'}</button>
+                <p className="manager-help" id="manager-unregister-guidance">Available when Manager confirms Stopped, or confirms a Failed Loop has no active process. Unregistering removes the registry entry; it does not stop a process or delete the Git repository, Workflow, Task Store, or workspace.</p>
               </div>
             </section>
 

@@ -331,7 +331,33 @@ test('managed instances share one Runtime and keep their files and Task Stores i
   assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
 });
 
-test('Manager unregisters only a confirmed Stopped instance and preserves its repository and Task Store', async t => {
+test('Manager Runtime status and install action remain available with an empty registry', async t => {
+  const paths = await fixture(t);
+  let installedSource;
+  const manager = await startManagerFixture(t, paths, {
+    runtimeInstaller: async source => {
+      installedSource = source;
+      return { id: 'a'.repeat(64), version: '0.1.0', path: join(paths.directory, 'installed-runtime'), changed: true };
+    }
+  });
+
+  assert.deepEqual(await listLoopInstances(paths), []);
+  const runtime = await api(manager, '/api/v1/runtime');
+  assert.equal(runtime.response.status, 200);
+  assert.equal(runtime.body.source.path, sourceRoot);
+  assert.match(runtime.body.source.id, /^[a-f0-9]{64}$/);
+  assert.equal(runtime.body.active, null);
+  assert.equal(runtime.body.manager_runtime_version, null);
+
+  const installed = await api(manager, '/api/v1/runtime/update', { method: 'POST', origin: manager.url });
+  assert.equal(installed.response.status, 200);
+  assert.equal(installedSource, sourceRoot);
+  assert.equal(installed.body.active.id, 'a'.repeat(64));
+  assert.equal(installed.body.manager_restart_required, true);
+  assert.deepEqual(await listLoopInstances(paths), []);
+});
+
+test('Manager unregisters a Stopped or confirmed process-absent Failed instance and preserves its repository and Task Store', async t => {
   const paths = await fixture(t);
   const repositoryRoot = join(paths.directory, 'repositories');
   const firstRoot = await makeRepository(repositoryRoot, 'unregister-first');
@@ -365,10 +391,28 @@ test('Manager unregisters only a confirmed Stopped instance and preserves its re
   })}\n`);
   const refused = await api(manager, `/api/v1/instances/${first.id}`, { method: 'DELETE', origin: manager.url });
   assert.equal(refused.response.status, 409);
-  assert.match(refused.body.error, /confirmed Stopped status/);
+  assert.match(refused.body.error, /confirms a Failed Loop has no active processes/);
   assert.equal((await listLoopInstances(paths)).length, 2);
 
-  await writeFile(executionPath, `${JSON.stringify({ schema_version: 1, id: first.id, status: 'Stopped' })}\n`);
+  await writeFile(executionPath, `${JSON.stringify({
+    schema_version: 1,
+    id: first.id,
+    status: 'Failed',
+    detail: 'startup failed while the recorded launcher is still present',
+    launcher_pid: process.pid
+  })}\n`);
+  const uncertainFailure = await api(manager, `/api/v1/instances/${first.id}`);
+  assert.equal(uncertainFailure.body.instance.status, 'Failed');
+  assert.equal(uncertainFailure.body.instance.can_update_workflow, undefined);
+  const refusedFailed = await api(manager, `/api/v1/instances/${first.id}`, { method: 'DELETE', origin: manager.url });
+  assert.equal(refusedFailed.response.status, 409);
+  assert.match(refusedFailed.body.error, /Current status: Failed/);
+  assert.equal((await listLoopInstances(paths)).length, 2);
+
+  await writeFile(executionPath, `${JSON.stringify({ schema_version: 1, id: first.id, status: 'Failed', detail: 'startup failed before a process was launched' })}\n`);
+  const confirmedFailure = await api(manager, `/api/v1/instances/${first.id}`);
+  assert.equal(confirmedFailure.body.instance.status, 'Failed');
+  assert.equal(confirmedFailure.body.instance.can_update_workflow, true);
   const removed = await api(manager, `/api/v1/instances/${first.id}`, { method: 'DELETE', origin: manager.url });
   assert.equal(removed.response.status, 200);
   assert.equal(removed.body.repository_preserved, true);
