@@ -60,6 +60,8 @@ Include material requirements concerning intended execution paths, external effe
 
 State what must be proven, not how to prove it. Do not prescribe verification mechanisms unless a particular path or boundary is itself part of the requirement.
 
+Require representative evidence to be retained in the repository when the delivered result cannot be adequately reviewed from code and tests alone.
+
 ### Definitions
 
 Define domain-specific or repository-specific terms that might otherwise be misunderstood.
@@ -89,6 +91,8 @@ For each material Verification Requirement, describe the sufficient observable e
 - If full verification is infeasible, state what cannot be demonstrated, why, the closest available verification, and the remaining uncertainty.
 
 - When missing tooling, infrastructure, or observability prevents sufficient verification, include enabling that verification in the planned work when reasonably within scope.
+
+- For evidence that must be retained, specify its form and repository location, following existing conventions. Ensure it reflects the delivered result and supports later review.
 
 ### Verification Tools
 
