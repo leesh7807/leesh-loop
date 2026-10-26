@@ -19,6 +19,7 @@ export const RUNTIME_SNAPSHOT_PATHS = Object.freeze([
   'operator/app/manager-storage.mjs',
   'operator/app/manager-lifecycle.mjs',
   'operator/app/runtime-distribution.mjs',
+  'operator/app/runtime-install-lock.mjs',
   'operator/app/manager-service.mjs',
   'operator/app/manager.mjs',
   'operator/app/operator-bootstrap',

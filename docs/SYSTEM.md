@@ -37,6 +37,8 @@ The Local Publisher remains the authority for Accepted Plan publication. The Man
 
 The Runtime manifest selects shared execution code and its locked dependencies. Installation materializes a content-identified version in the Runtime directory, installs UI and Store npm dependencies, fetches and compiles the locked Symphony Mix dependencies, builds the UI, verifies the identity, and only then activates it. Failed staging leaves the previous active pointer in place. Installed versions are retained so a running process can continue using the Runtime directory it started from.
 
+The source snapshot is explicit in `operator/app/runtime-manifest.mjs`. When adding a Runtime module, add its file or containing directory to `RUNTIME_SNAPSHOT_PATHS`; importing it from another module does not include it in the installed distribution.
+
 `leesh-loop update` explicitly installs and activates the current source's Runtime and reloads an already-running Manager when its own Runtime version is behind. A Runtime update started in the Manager UI activates the version for new Loops and reports when the Manager needs that CLI reload. New Loop starts use the active distribution; running Loop processes keep their existing code and dependencies. Runtime updates are independent of Workflow updates. An instance Workflow can be compared with the latest template and explicitly replaced only while that instance is stopped. The previous file is saved under `workflow-backups/` before replacement.
 
 Runtime or Manager upgrades do not migrate Task Store schemas or mutate active Workers. If a future Runtime requires an incompatible data change, compatibility must be established before that operation is enabled.
