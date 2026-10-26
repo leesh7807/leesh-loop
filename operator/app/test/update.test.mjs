@@ -237,6 +237,9 @@ test('Runtime repair intent is durable before a damaged distribution is moved', 
   await assert.rejects(publishRuntimeStage(stage, destination, id, {
     beforePreserve: async preservedPath => {
       await writeRuntimeRecoveryRecord({ runtime_id: id, status: 'activation-pending', validation_error: 'content mismatch', preserved_runtime_path: preservedPath }, options);
+      const statusRead = await reconcileRuntimeRecoveryRecord(options);
+      assert.equal(statusRead.record.status, 'activation-pending');
+      assert.equal(statusRead.record.preserved_runtime_path, preservedPath);
       throw new Error('simulated interruption after recovery intent');
     }
   }), /simulated interruption/);

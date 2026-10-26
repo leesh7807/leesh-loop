@@ -249,6 +249,7 @@ test('rendered UI source keeps Task actions, manager hierarchy, state cues, and 
   assert.match(source, /Active for new starts/);
   assert.match(source, /Other validated Runtime distributions/);
   assert.match(source, /Last Runtime recovery details/);
+  assert.match(source, /runtime\.last_recovery\.status === 'active' \? 'Damaged Runtime preserved at' : 'Planned quarantine path'/);
   assert.match(styles, /\.manager-runtime-recovery code \{ white-space: pre-wrap; overflow-wrap: anywhere; \}/);
   assert.doesNotMatch(source, /Notion|Symphony Dashboard|notionTasksUrl/);
   assert.match(styles, /@media \(max-width: 960px\)/);

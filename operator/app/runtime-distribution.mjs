@@ -190,14 +190,14 @@ export async function reconcileRuntimeRecoveryRecord(options = {}) {
   if (current.error || current.record?.status !== 'activation-pending') return current;
   try {
     let record = current.record;
-    const preservedPath = await preservedRuntimePathIfPresent(record, options);
-    if (preservedPath !== record.preserved_runtime_path) {
-      record = await writeRuntimeRecoveryRecord({ ...record, preserved_runtime_path: preservedPath }, options);
-    }
     let active;
     try { active = await activeRuntime(options); }
     catch { return { record, error: null }; }
     if (active?.id !== record.runtime_id) return { record, error: null };
+    const preservedPath = await preservedRuntimePathIfPresent(record, options);
+    if (preservedPath !== record.preserved_runtime_path) {
+      record = await writeRuntimeRecoveryRecord({ ...record, preserved_runtime_path: preservedPath }, options);
+    }
     record = await writeRuntimeRecoveryRecord({ ...record, status: 'active', recovered_at: new Date().toISOString() }, options);
     return { record, error: null };
   } catch (error) {

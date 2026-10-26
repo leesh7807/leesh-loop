@@ -413,6 +413,30 @@ test('Manager Runtime status keeps valid alternatives visible when the active di
   assert.ok(runtime.body.distributions.every(value => value.active === false));
 });
 
+test('Manager Runtime status retains a pending quarantine target until activation is confirmed', async t => {
+  const paths = await fixture(t);
+  const runtime = await installTestRuntime(paths, 'pending-runtime-recovery');
+  const managedPaths = managerPaths(paths);
+  const quarantineTarget = join(managedPaths.runtimeRoot, `.damaged-${runtime.id}-pending-fixture`);
+  await writeFile(managedPaths.activeRuntime, `${JSON.stringify({ schema_version: 1, id: 'f'.repeat(64) })}\n`, { mode: 0o600 });
+  await writeRuntimeRecoveryRecord({
+    runtime_id: runtime.id,
+    status: 'activation-pending',
+    validation_error: 'Runtime distribution contents do not match their immutable identity.',
+    preserved_runtime_path: quarantineTarget
+  }, paths);
+
+  const manager = await startManagerFixture(t, paths);
+  const status = await api(manager, '/api/v1/runtime');
+
+  assert.equal(status.response.status, 200);
+  assert.equal(status.body.active, null);
+  assert.equal(status.body.last_recovery.status, 'activation-pending');
+  assert.equal(status.body.last_recovery.preserved_runtime_path, quarantineTarget);
+  await assert.rejects(lstat(quarantineTarget), { code: 'ENOENT' });
+  assert.equal((await readFile(managedPaths.runtimeRecovery, 'utf8')).includes(quarantineTarget), true);
+});
+
 test('same-ID Runtime recovery retry preserves its quarantined path and Manager restart requirement', async t => {
   const paths = await fixture(t);
   const runtime = await installTestRuntime(paths, 'same-id-runtime-repair');
