@@ -36,6 +36,19 @@ function printInstances(instances) {
   for (const value of instances) if (value.detail) console.error(`leesh-loop: ${value.id}: ${value.detail}`);
 }
 
+function formatDuration(durationMs) {
+  const seconds = Math.max(1, Math.ceil(durationMs / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+}
+
+function reportRuntimeInstallLockWait(wait) {
+  const owner = wait.owner_pid === null ? 'an owner with unknown PID' : `PID ${wait.owner_pid}`;
+  console.error(`Waiting for the Runtime installation lock held by ${owner} (owner age ${formatDuration(wait.owner_age_ms)}; waited ${formatDuration(wait.waited_ms)} of ${formatDuration(wait.wait_timeout_ms)}). Ctrl-C cancels this wait without stopping the owner.`);
+}
+
 async function waitForManagerExit(record) {
   if (!record) return;
   const deadline = Date.now() + 10_000;
@@ -103,7 +116,7 @@ async function main() {
     return;
   }
   if (selectedCommand === 'update' && args.length === 0) {
-    const updated = await installRuntimeDistribution(sourceRoot);
+    const updated = await installRuntimeDistribution(sourceRoot, {}, { onInstallLockWait: reportRuntimeInstallLockWait });
     if (updated.recovered_from_invalid_active) console.log('Recovered from an invalid active Runtime selection using the validated source checkout.');
     if (updated.previous_active_error) console.log(`Previous active Runtime validation: ${updated.previous_active_error}`);
     if (updated.preserved_runtime_path) console.log(`Damaged Runtime preserved at ${updated.preserved_runtime_path}.`);

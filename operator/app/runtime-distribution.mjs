@@ -294,7 +294,7 @@ export async function currentRuntimeSource(fallbackSource = defaultSourceRoot, o
   return sourcePath;
 }
 
-async function installRuntimeDistributionUnlocked(sourceRoot = defaultSourceRoot, options = {}, testHooks = {}) {
+async function installRuntimeDistributionUnlocked(sourceRoot = defaultSourceRoot, options = {}, hooks = {}) {
   const paths = managerPaths(options);
   const source = await sourceIdentity(sourceRoot);
   const existingRecovery = await readRuntimeRecoveryRecord(options);
@@ -309,7 +309,7 @@ async function installRuntimeDistributionUnlocked(sourceRoot = defaultSourceRoot
     recoveredFromInvalidActive = true;
     previousActiveError = runtimeDiagnostic(error);
   }
-  await testHooks.afterRecoverySnapshot?.({ recoveryRecord, previousActive, previousActiveError });
+  await hooks.afterRecoverySnapshot?.({ recoveryRecord, previousActive, previousActiveError });
   await Promise.all([ensurePrivateDirectory(paths.runtimeRoot), ensurePrivateDirectory(paths.configRoot)]);
   const destination = join(paths.runtimeRoot, source.id);
   let destinationIsValid = false;
@@ -412,16 +412,21 @@ async function installRuntimeDistributionUnlocked(sourceRoot = defaultSourceRoot
   };
 }
 
-export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot, options = {}, testHooks = {}) {
-  if (!isMainThread && testHooks.skipRuntimeInstallLock === true) return installRuntimeDistributionUnlocked(sourceRoot, options, testHooks);
+export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot, options = {}, hooks = {}) {
+  if (!isMainThread && hooks.skipRuntimeInstallLock === true) return installRuntimeDistributionUnlocked(sourceRoot, options, hooks);
   const paths = managerPaths(options);
   await ensurePrivateDirectory(paths.runtimeRoot);
-  return withRuntimeInstallLock(paths.runtimeRoot, () => installRuntimeDistributionUnlocked(sourceRoot, options, testHooks), {
-    onWait: testHooks.onInstallLockWait
+  return withRuntimeInstallLock(paths.runtimeRoot, () => installRuntimeDistributionUnlocked(sourceRoot, options, hooks), {
+    onWait: hooks.onInstallLockWait,
+    waitTimeoutMs: hooks.lockWaitTimeoutMs
   });
 }
 
-export function installRuntimeDistributionInWorker(sourceRoot = defaultSourceRoot, options = {}, { moduleUrl = import.meta.url, onInstallLockWait } = {}) {
+export function installRuntimeDistributionInWorker(sourceRoot = defaultSourceRoot, options = {}, {
+  moduleUrl = import.meta.url,
+  onInstallLockWait,
+  lockWaitTimeoutMs
+} = {}) {
   const paths = managerPaths(options);
   return ensurePrivateDirectory(paths.runtimeRoot).then(() => withRuntimeInstallLock(paths.runtimeRoot, () => {
     const worker = new Worker(runtimeInstallWorkerSource, {
@@ -457,7 +462,7 @@ export function installRuntimeDistributionInWorker(sourceRoot = defaultSourceRoo
         rejectInstall(new Error(`Runtime installation worker exited with status ${code} before returning a result.`));
       });
     });
-  }, { onWait: onInstallLockWait }));
+  }, { onWait: onInstallLockWait, waitTimeoutMs: lockWaitTimeoutMs }));
 }
 
 export async function resolveRuntimePath(runtimePath, options = {}) {

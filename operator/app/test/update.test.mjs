@@ -325,6 +325,74 @@ test('stale recovery-lock cleanup retries when a replacement owner releases its 
   }
 });
 
+test('Runtime install lock timeout reports a live owner without reclaiming it', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-lock-timeout-'));
+  t.after(() => withTimeout(rm(directory, { recursive: true, force: true }), 'lock-timeout test teardown', barrierTimeoutMs));
+  const environment = {
+    ...process.env,
+    XDG_DATA_HOME: join(directory, 'data'),
+    XDG_STATE_HOME: join(directory, 'state'),
+    XDG_CONFIG_HOME: join(directory, 'config')
+  };
+  const options = { environment, homeDirectory: directory };
+  const runtimeRoot = managerPaths(options).runtimeRoot;
+  const lockPath = join(runtimeRoot, '.runtime-install.lock');
+  let releaseOwner;
+  const ownerGate = new Promise(resolveGate => { releaseOwner = resolveGate; });
+  let signalOwnerReady;
+  const ownerReady = new Promise(resolveReady => { signalOwnerReady = resolveReady; });
+  const ownerOperation = withRuntimeInstallLock(runtimeRoot, async () => {
+    signalOwnerReady();
+    await ownerGate;
+  });
+  const ownerOutcome = ownerOperation.then(
+    value => ({ status: 'fulfilled', value }),
+    reason => ({ status: 'rejected', reason })
+  );
+
+  try {
+    await withTimeout(ownerReady, 'live install-lock owner acquisition', barrierTimeoutMs);
+    const ownerBefore = JSON.parse(await readFile(join(lockPath, 'owner.json'), 'utf8'));
+    let waitNotice;
+    await assert.rejects(installRuntimeDistribution(sourceRoot, options, {
+      lockWaitTimeoutMs: 80,
+      onInstallLockWait: notice => { waitNotice ??= notice; }
+    }), error => {
+      assert.match(error.message, /Timed out .* waiting for the Runtime installation lock/);
+      assert.match(error.message, new RegExp(`PID ${process.pid}`));
+      assert.match(error.message, /was not stopped or reclaimed/);
+      assert.match(error.message, /stop it gracefully/);
+      return true;
+    });
+    assert.equal(waitNotice.owner_pid, process.pid);
+    assert.equal(waitNotice.wait_timeout_ms, 80);
+    assert.equal(waitNotice.phase, 'install');
+
+    let workerWaitNotice;
+    await assert.rejects(installRuntimeDistributionInWorker(sourceRoot, options, {
+      lockWaitTimeoutMs: 80,
+      onInstallLockWait: notice => { workerWaitNotice ??= notice; }
+    }), error => {
+      assert.match(error.message, /Timed out .* waiting for the Runtime installation lock/);
+      assert.match(error.message, new RegExp(`PID ${process.pid}`));
+      assert.match(error.message, /was not stopped or reclaimed/);
+      return true;
+    });
+    assert.equal(workerWaitNotice.owner_pid, process.pid);
+    assert.equal(workerWaitNotice.wait_timeout_ms, 80);
+    assert.equal(workerWaitNotice.phase, 'install');
+    assert.deepEqual(JSON.parse(await readFile(join(lockPath, 'owner.json'), 'utf8')), ownerBefore);
+  } finally {
+    releaseOwner();
+    const settled = await withTimeout(ownerOutcome, 'live owner completion after timeout test', barrierTimeoutMs);
+    assert.equal(settled.status, 'fulfilled', settled.reason?.stack ?? 'live owner failed');
+  }
+
+  let acquiredAfterRelease = false;
+  await withRuntimeInstallLock(runtimeRoot, async () => { acquiredAfterRelease = true; }, { waitTimeoutMs: 100 });
+  assert.equal(acquiredAfterRelease, true);
+});
+
 test('Runtime installation lock reclaims an abandoned process owner', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-install-lock-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
