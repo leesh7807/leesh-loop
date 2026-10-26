@@ -228,6 +228,8 @@ test('rendered UI source keeps Task actions, manager hierarchy, state cues, and 
   assert.match(source, /selected\.status === 'Failed' \? 'Retry Loop' : 'Start Loop'/);
   assert.match(source, /manager-action manager-recovery-action/);
   assert.match(source, /function openLifecycleDiagnostics\(\)/);
+  assert.match(source, /function openRuntimeControls\(\)/);
+  assert.match(source, /runtimeHeadingRef\.current\?\.focus\(\{ preventScroll: true \}\)/);
   assert.match(source, /setManagementOpen\(true\)/);
   assert.match(source, /setLogsOpen\(true\)/);
   assert.match(source, /setDiagnosisOpen\(Boolean\(selected\?\.detail\)\)/);
@@ -242,6 +244,12 @@ test('rendered UI source keeps Task actions, manager hierarchy, state cues, and 
   assert.match(source, /verify which process owns/);
   assert.match(source, /Open Loop logs/);
   assert.match(source, /const runtimePanel = \(/);
+  assert.match(source, /managerRuntimeAttentionState\(runtimeReadState, runtime\)/);
+  assert.match(source, /className=\{`manager-runtime-attention/);
+  assert.match(source, /The active Runtime needs repair before a new Loop can use it/);
+  assert.match(source, /Manager needs a restart to load the active Runtime/);
+  assert.match(source, />Review Runtime<\/button>/);
+  assert.match(source, /id="manager-runtime-panel" className="manager-runtime"/);
   assert.match(source, /<details className="manager-management manager-runtime-empty" open>/);
   assert.match(source, /<summary><span>Manage Runtime<\/span>/);
   assert.match(source, /aria-label="Manager Runtime controls">\{runtimePanel\}<\/div>/);
@@ -258,6 +266,7 @@ test('rendered UI source keeps Task actions, manager hierarchy, state cues, and 
   assert.match(styles, /\.manager-status\.status-starting::before, \.manager-status\.status-stopping::before \{ background: #aa782c; \}/);
   assert.match(styles, /\.manager-status\.status-failed::before, \.manager-status\.status-unconfirmed::before \{ background: #9b4242; \}/);
   assert.match(styles, /\.manager-management > summary/);
+  assert.match(styles, /\.manager-runtime-attention \{[\s\S]*flex-wrap: wrap/);
   assert.match(styles, /\.manager-runtime-source/);
   assert.match(styles, /\.workflow-diff-line\.added \{ background: #e4eee6; \}/);
   assert.match(styles, /\.workflow-diff-line\.removed \{ background: #f1e5e5; \}/);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { logsPanelViewState, logsReadFailureState, logsReadStartState, managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from '../src/manager-read-state.js';
+import { logsPanelViewState, logsReadFailureState, logsReadStartState, managerInventoryViewState, managerRuntimeAttentionState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from '../src/manager-read-state.js';
 
 test('the Manager distinguishes an unread or failed inventory from a confirmed empty inventory', () => {
   assert.equal(managerInventoryViewState('loading', 0), 'loading');
@@ -27,6 +27,17 @@ test('the Shared Runtime distinguishes pending, failed, installed, and missing r
   assert.equal(sharedRuntimeViewState('loaded', { active: { version: '2026.10.24' } }), 'ready');
   assert.equal(sharedRuntimeViewState('loaded', { active: null, active_error: 'Runtime hash mismatch' }), 'invalid');
   assert.equal(sharedRuntimeViewState('loaded', { active: null }), 'missing');
+});
+
+test('the selected Loop surfaces only confirmed Runtime repair and Manager restart debt', () => {
+  const healthyRuntime = { active: { id: 'runtime-a' }, manager_runtime_version: 'runtime-a' };
+  assert.equal(managerRuntimeAttentionState('loading', { active_error: 'hash mismatch' }), null);
+  assert.equal(managerRuntimeAttentionState('error', { active_error: 'hash mismatch' }), null);
+  assert.equal(managerRuntimeAttentionState('loaded', { active_error: 'hash mismatch' }), 'repair');
+  assert.equal(managerRuntimeAttentionState('loaded', { ...healthyRuntime, manager_runtime_version: 'runtime-old' }), 'restart');
+  assert.equal(managerRuntimeAttentionState('loaded', { ...healthyRuntime, manager_restart_required: true }), 'restart');
+  assert.equal(managerRuntimeAttentionState('loaded', healthyRuntime), null);
+  assert.equal(managerRuntimeAttentionState('loaded', { active: null }), null);
 });
 
 test('an open Workflow comparison exposes pending and failed reads for recovery', () => {

@@ -12,7 +12,7 @@ import { createManagerInstanceListGate } from './manager-instance-list-gate.js';
 import { createManagerSelectionGate } from './manager-selection-gate.js';
 import { InstanceOperationFeedback, WorkflowOperationFeedback } from './manager-operation-feedback.js';
 import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, managerFeedbackReducer, managerOperationAnnouncement, managerOperationCompletionMessage, workflowOperationFeedbackPlacement } from './manager-feedback.js';
-import { logsPanelViewState, logsReadFailureState, logsReadStartState, managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from './manager-read-state.js';
+import { logsPanelViewState, logsReadFailureState, logsReadStartState, managerInventoryViewState, managerRuntimeAttentionState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from './manager-read-state.js';
 import { workflowUpdateEligibility } from './workflow-update-eligibility.js';
 import { workflowComparisonAfterApply } from './workflow-apply-result.js';
 import { createWorkflowDiff } from './workflow-diff.js';
@@ -747,6 +747,7 @@ function ManagerApp() {
   const logsPanelRef = useRef(null);
   const logsSummaryRef = useRef(null);
   const diagnosisSummaryRef = useRef(null);
+  const runtimeHeadingRef = useRef(null);
   const instanceListGateRef = useRef(null);
   if (!instanceListGateRef.current) instanceListGateRef.current = createManagerInstanceListGate();
   const workflowRefreshControllerRef = useRef(null);
@@ -771,6 +772,7 @@ function ManagerApp() {
   const selected = instances.find(instance => instance.id === selectedId) || null;
   const inventoryViewState = managerInventoryViewState(instanceReadState, instances.length);
   const runtimeViewState = sharedRuntimeViewState(runtimeReadState, runtime);
+  const runtimeAttention = managerRuntimeAttentionState(runtimeReadState, runtime);
   const workflowPanelState = workflowComparisonViewState(workflowReadState, Boolean(workflow), workflowOpen);
   const logsPanelState = logsPanelViewState(logsReadState, logsOpen);
   const workflowEligibility = selected ? workflowUpdateEligibility(selected) : null;
@@ -999,6 +1001,14 @@ function ManagerApp() {
     });
   }
 
+  function openRuntimeControls() {
+    setManagementOpen(true);
+    window.requestAnimationFrame(() => {
+      runtimeHeadingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      runtimeHeadingRef.current?.focus({ preventScroll: true });
+    });
+  }
+
   async function updateWorkflow() {
     if (!workflow?.changed || !workflowEligibility?.canApply) return;
     const selectionGate = selectionGateRef.current;
@@ -1061,10 +1071,10 @@ function ManagerApp() {
   const canUnregisterSelected = canUnregisterLoop(selected);
 
   const runtimePanel = (
-    <section className="manager-runtime" aria-label="Central Runtime">
+    <section id="manager-runtime-panel" className="manager-runtime" aria-label="Central Runtime">
       <div>
         <p className="eyebrow">Runtime distribution</p>
-        <h2>{runtimeViewState === 'loading'
+        <h2 ref={runtimeHeadingRef} tabIndex="-1">{runtimeViewState === 'loading'
           ? 'Loading Runtime…'
           : runtimeViewState === 'ready'
             ? `Active for new starts · ${activeRuntimeVersion}`
@@ -1119,6 +1129,12 @@ function ManagerApp() {
               )}
               <a className="manager-task-jump" href="#tasks-heading">Tasks</a>
             </div>
+            {runtimeAttention && <div className={`manager-runtime-attention${runtimeAttention === 'repair' ? ' failure' : ''}`} role="status">
+              <span>{runtimeAttention === 'repair'
+                ? 'The active Runtime needs repair before a new Loop can use it. Running Loops keep their pinned Runtime.'
+                : 'Manager needs a restart to load the active Runtime. Run leesh-loop to reopen Manager; running Loops keep their pinned Runtime.'}</span>
+              <button type="button" className="manager-action secondary manager-recovery-action" aria-controls="manager-runtime-panel" aria-expanded={managementOpen} onClick={openRuntimeControls}>Review Runtime</button>
+            </div>}
             {selected.status === 'Unconfirmed' && <p className="manager-status-guidance">Manager cannot confirm process ownership. Review the diagnosis and Loop logs, then verify which process owns {selected.port ? `port ${selected.port}` : 'the assigned port'} with local process tools before retrying. Start, stop, and unregister remain unavailable until ownership is confirmed.</p>}
             {selected.status === 'Failed' && <p className="manager-status-guidance">{managerFailedGuidance(selected)}</p>}
             {selected.detail && <details id="manager-status-diagnosis" className="manager-status-diagnosis" open={diagnosisOpen} onToggle={event => setDiagnosisOpen(event.currentTarget.open)}><summary ref={diagnosisSummaryRef}>{diagnosisOpen ? 'Hide diagnosis' : 'View diagnosis'}</summary><p className="manager-help">Confirm which process owns the assigned port before retrying lifecycle actions.</p><pre>{selected.detail}</pre>{selected.status === 'Unconfirmed' && <a className="manager-task-jump" href="#manager-logs">Open Loop logs ↓</a>}</details>}
