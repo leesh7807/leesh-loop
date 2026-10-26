@@ -255,6 +255,76 @@ test('stale recovery-lock cleanup preserves a replacement generation', async t =
   }
 });
 
+test('stale recovery-lock cleanup retries when a replacement owner releases its claimed generation', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-recovery-release-'));
+  t.after(() => withTimeout(rm(directory, { recursive: true, force: true }), 'recovery-release test teardown', barrierTimeoutMs));
+  const runtimeRoot = join(directory, 'runtimes');
+  const lockPath = join(runtimeRoot, '.runtime-install.lock');
+  const recoveryPath = `${lockPath}.recovery`;
+  await mkdir(recoveryPath, { recursive: true });
+  await writeFile(join(recoveryPath, 'owner.json'), `${JSON.stringify({
+    pid: 999999999,
+    process_start_ticks: null,
+    token: 'abandoned-recovery-owner',
+    created_at: Date.now()
+  })}\n`);
+
+  let releaseSnapshot;
+  const snapshotGate = new Promise(resolveGate => { releaseSnapshot = resolveGate; });
+  let signalSnapshot;
+  const staleSnapshotReady = new Promise(resolveSnapshot => { signalSnapshot = resolveSnapshot; });
+  let pausedSnapshot = false;
+  let releaseClaim;
+  const claimGate = new Promise(resolveGate => { releaseClaim = resolveGate; });
+  let signalClaim;
+  const claimedGenerationReady = new Promise(resolveClaim => { signalClaim = resolveClaim; });
+  let entered = false;
+  const lockOperation = withRuntimeInstallLock(runtimeRoot, async () => { entered = true; }, {
+    afterRecoveryLockSnapshot: async () => {
+      if (pausedSnapshot) return;
+      pausedSnapshot = true;
+      signalSnapshot();
+      await snapshotGate;
+    },
+    afterRecoveryLockClaim: async claimPath => {
+      signalClaim(claimPath);
+      await claimGate;
+    }
+  });
+  const lockOutcome = lockOperation.then(
+    value => ({ status: 'fulfilled', value }),
+    reason => ({ status: 'rejected', reason })
+  );
+
+  try {
+    await withTimeout(staleSnapshotReady, 'stale recovery-lock snapshot', barrierTimeoutMs);
+    await rm(recoveryPath, { recursive: true, force: true });
+    await mkdir(recoveryPath);
+    await writeFile(join(recoveryPath, 'owner.json'), `${JSON.stringify({
+      pid: process.pid,
+      process_start_ticks: null,
+      token: 'replacement-recovery-owner',
+      created_at: Date.now()
+    })}\n`);
+    releaseSnapshot();
+
+    const claimPath = await withTimeout(claimedGenerationReady, 'replacement recovery generation claim', barrierTimeoutMs);
+    assert.match(claimPath, /\.recovery-claim-/);
+    assert.equal(JSON.parse(await readFile(join(claimPath, 'owner.json'), 'utf8')).token, 'replacement-recovery-owner');
+    await rm(claimPath, { recursive: true, force: true });
+    releaseClaim();
+
+    const outcome = await withTimeout(lockOutcome, 'installer retry after recovery-owner release', barrierTimeoutMs);
+    assert.equal(outcome.status, 'fulfilled', outcome.reason?.stack ?? 'installer failed after claim release');
+    assert.equal(entered, true);
+  } finally {
+    releaseSnapshot();
+    releaseClaim();
+    await rm(recoveryPath, { recursive: true, force: true });
+    await withTimeout(lockOutcome, 'lock operation cleanup', barrierTimeoutMs).catch(() => {});
+  }
+});
+
 test('Runtime installation lock reclaims an abandoned process owner', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-install-lock-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

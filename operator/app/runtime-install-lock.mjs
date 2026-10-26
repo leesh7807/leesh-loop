@@ -90,10 +90,11 @@ async function hasActiveRecoveryClaim(lockPath) {
   return false;
 }
 
-async function reclaimStaleRecoveryLock(recoveryPath, observed) {
+async function reclaimStaleRecoveryLock(recoveryPath, observed, afterRecoveryLockClaim) {
   const claimPath = `${recoveryPath.replace(/\.recovery$/, '')}.recovery-claim-${randomUUID()}`;
   try { await rename(recoveryPath, claimPath); }
   catch (error) { if (error?.code === 'ENOENT') return false; throw error; }
+  await afterRecoveryLockClaim?.(claimPath);
 
   const claimed = await lockSnapshot(claimPath);
   const sameGeneration = sameLockGeneration(observed, claimed);
@@ -105,7 +106,11 @@ async function reclaimStaleRecoveryLock(recoveryPath, observed) {
     // generation, or leave it under its unique claim name so other installers can
     // still see and wait for its live owner.
     try { await rename(claimPath, recoveryPath); }
-    catch (error) { if (error?.code !== 'EEXIST' && error?.code !== 'ENOTEMPTY') throw error; }
+    catch (error) {
+      // The prior owner may release this exact claim while the stale snapshot is
+      // being reconciled; a missing source is then ordinary contention.
+      if (error?.code !== 'ENOENT' && error?.code !== 'EEXIST' && error?.code !== 'ENOTEMPTY') throw error;
+    }
     return false;
   }
 
@@ -121,7 +126,7 @@ async function releaseRecoveryLock(lockPath, ownerToken) {
   }
 }
 
-async function waitForRecoveryLock(lockPath, onWait, afterRecoveryLockSnapshot) {
+async function waitForRecoveryLock(lockPath, onWait, afterRecoveryLockSnapshot, afterRecoveryLockClaim) {
   if (await hasActiveRecoveryClaim(lockPath)) {
     await waitForRetry(onWait);
     return true;
@@ -135,7 +140,7 @@ async function waitForRecoveryLock(lockPath, onWait, afterRecoveryLockSnapshot) 
     await waitForRetry(onWait);
     return true;
   }
-  await reclaimStaleRecoveryLock(recoveryPath, recovery);
+  await reclaimStaleRecoveryLock(recoveryPath, recovery, afterRecoveryLockClaim);
   return true;
 }
 
@@ -185,11 +190,11 @@ async function removeStaleLock(lockPath, observed) {
   }
 }
 
-export async function withRuntimeInstallLock(runtimeRoot, action, { onWait, afterRecoveryLockSnapshot } = {}) {
+export async function withRuntimeInstallLock(runtimeRoot, action, { onWait, afterRecoveryLockSnapshot, afterRecoveryLockClaim } = {}) {
   const lockPath = join(runtimeRoot, '.runtime-install.lock');
   const owner = lockOwner();
   while (true) {
-    if (await waitForRecoveryLock(lockPath, onWait, afterRecoveryLockSnapshot)) continue;
+    if (await waitForRecoveryLock(lockPath, onWait, afterRecoveryLockSnapshot, afterRecoveryLockClaim)) continue;
     try {
       await mkdir(lockPath, { mode: 0o700 });
       await writeLockOwner(lockPath, owner);
