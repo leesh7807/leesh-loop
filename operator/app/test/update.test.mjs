@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import { activeRuntime, installRuntimeDistribution, installRuntimeDistributionInWorker, inspectRuntimeSource, listRuntimeDistributions, managerMustRestartForRuntime, publishRuntimeStage, readRuntimeRecoveryRecord, reconcileRuntimeRecoveryRecord, runtimeDiagnostic, writeRuntimeRecoveryRecord } from '../runtime-distribution.mjs';
 import { managerPaths } from '../manager-storage.mjs';
-import { hashDistribution } from '../installation-metadata.mjs';
+import { hashDistribution, readDistributionFiles } from '../installation-metadata.mjs';
 import { listRuntimeSnapshotFiles, materializeRuntimeSnapshot } from '../runtime-manifest.mjs';
 import { withRuntimeInstallLock } from '../runtime-install-lock.mjs';
 
@@ -88,6 +88,58 @@ test('source installer and Manager Worker honor the shared bounded Runtime insta
     await withTimeout(ownerOutcome, 'shared Runtime install-lock owner release', barrierTimeoutMs);
     await Promise.all([directAttempt, managerAttempt].filter(Boolean));
   }
+});
+
+test('source update reports activated Runtime when Manager startup fails afterward', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-update-manager-failure-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const environment = {
+    ...process.env,
+    HOME: directory,
+    XDG_DATA_HOME: join(directory, 'data'),
+    XDG_STATE_HOME: join(directory, 'state'),
+    XDG_CONFIG_HOME: join(directory, 'config')
+  };
+  const options = { environment, homeDirectory: directory };
+  const paths = managerPaths(options);
+  const packageManifest = JSON.parse(await readFile(join(sourceRoot, 'package.json'), 'utf8'));
+  const files = listRuntimeSnapshotFiles(sourceRoot);
+  const sourceId = hashDistribution(packageManifest.version, await readDistributionFiles(sourceRoot, files));
+  const runtimePath = join(paths.runtimeRoot, sourceId);
+  await materializeRuntimeSnapshot(sourceRoot, runtimePath);
+  assert.equal(hashDistribution(packageManifest.version, await readDistributionFiles(runtimePath, files)), sourceId);
+  await writeFile(join(runtimePath, '.distribution.json'), `${JSON.stringify({
+    schema_version: 1,
+    id: sourceId,
+    version: packageManifest.version,
+    path: runtimePath,
+    source_root: sourceRoot,
+    files,
+    installed_at: new Date().toISOString()
+  })}\n`, { mode: 0o600 });
+  await mkdir(paths.configRoot, { recursive: true });
+  await writeFile(paths.managerConfiguration, `${JSON.stringify({
+    schema_version: 1,
+    port: 0,
+    symphony_port_min: 4100,
+    symphony_port_max: 4199
+  })}\n`, { mode: 0o600 });
+
+  const cli = join(sourceRoot, 'bin/leesh-loop.mjs');
+  await assert.rejects(execFile(process.execPath, [cli, 'update'], {
+    cwd: sourceRoot,
+    env: environment,
+    timeout: 15_000
+  }), error => {
+    assert.equal(error.code, 1);
+    assert.match(error.stdout, new RegExp(`Central Runtime ${packageManifest.version} \\(${sourceId}\\) is active\\.`));
+    assert.match(error.stderr, /is active, but Manager startup or restart did not complete or could not be confirmed: Manager configuration is invalid/);
+    assert.match(error.stderr, /manager\.json/);
+    assert.match(error.stderr, /manager\.log/);
+    assert.match(error.stderr, /run `leesh-loop` to reopen Manager/);
+    return true;
+  });
+  assert.equal((await activeRuntime(options)).id, sourceId);
 });
 
 test('Runtime installs once into the central version store and a failed update preserves the active version', async t => {

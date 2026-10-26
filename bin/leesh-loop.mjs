@@ -120,17 +120,23 @@ async function main() {
     if (updated.recovered_from_invalid_active) console.log('Recovered from an invalid active Runtime selection using the validated source checkout.');
     if (updated.previous_active_error) console.log(`Previous active Runtime validation: ${updated.previous_active_error}`);
     if (updated.preserved_runtime_path) console.log(`Damaged Runtime preserved at ${updated.preserved_runtime_path}.`);
-    let manager = await ensureReadyManager();
-    if (manager.alreadyRunning) {
-      const paths = managerPaths();
-      const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
-      if (managerMustRestartForRuntime(service?.runtime_version, updated)) {
-        await managerRequest(manager, '/api/v1/manager/restart', { method: 'POST' });
-        await waitForManagerExit(service);
-        manager = await ensureManagerService({ sourceRoot });
-      }
-    }
     console.log(`Central Runtime ${updated.version} (${updated.id}) is active.`);
+    let manager;
+    try {
+      manager = await ensureReadyManager();
+      if (manager.alreadyRunning) {
+        const paths = managerPaths();
+        const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
+        if (managerMustRestartForRuntime(service?.runtime_version, updated)) {
+          await managerRequest(manager, '/api/v1/manager/restart', { method: 'POST' });
+          await waitForManagerExit(service);
+          manager = await ensureManagerService({ sourceRoot });
+        }
+      }
+    } catch (error) {
+      const paths = managerPaths();
+      throw new Error(`Runtime ${updated.version} (${updated.id}) is active, but Manager startup or restart did not complete or could not be confirmed: ${error.message}. Check Manager configuration at ${paths.managerConfiguration} and logs at ${paths.managerLog}; after resolving the issue, run \`leesh-loop\` to reopen Manager.`);
+    }
     console.log(`Manager: ${manager.url}`);
     console.log('If an existing Manager tab stops accepting requests after this update, run `leesh-loop` to reopen Manager with fresh access.');
     return;
