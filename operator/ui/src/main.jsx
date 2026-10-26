@@ -1129,10 +1129,12 @@ function ManagerApp() {
               )}
               <a className="manager-task-jump" href="#tasks-heading">Tasks</a>
             </div>
-            {runtimeAttention && <div className={`manager-runtime-attention${runtimeAttention === 'repair' ? ' failure' : ''}`} role="status">
-              <span>{runtimeAttention === 'repair'
-                ? 'The active Runtime needs repair before a new Loop can use it. Running Loops keep their pinned Runtime.'
-                : 'Manager needs a restart to load the active Runtime. Run leesh-loop to reopen Manager; running Loops keep their pinned Runtime.'}</span>
+            {runtimeAttention && <div className={`manager-runtime-attention ${runtimeAttention}`} role="status">
+              <span className="manager-runtime-attention-copy">
+                <strong>{runtimeAttention === 'repair' ? 'Runtime repair needed' : 'Manager restart required'}</strong>
+                <span>{runtimeAttention === 'repair' ? 'Repair the active Runtime before starting another Loop.' : 'Run leesh-loop to reopen Manager.'}</span>
+                <span>Running Loops keep their pinned Runtime.</span>
+              </span>
               <button type="button" className="manager-action secondary manager-recovery-action" aria-controls="manager-runtime-panel" aria-expanded={managementOpen} onClick={openRuntimeControls}>Review Runtime</button>
             </div>}
             {selected.status === 'Unconfirmed' && <p className="manager-status-guidance">Manager cannot confirm process ownership. Review the diagnosis and Loop logs, then verify which process owns {selected.port ? `port ${selected.port}` : 'the assigned port'} with local process tools before retrying. Start, stop, and unregister remain unavailable until ownership is confirmed.</p>}

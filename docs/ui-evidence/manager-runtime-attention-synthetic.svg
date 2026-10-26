@@ -13,8 +13,12 @@
       .buttonText { fill: #fff; font-size: 13px; font-weight: 650; }
       .secondary { fill: #ececec; stroke: #b9b9b9; stroke-width: 1; }
       .secondaryText { font-size: 12px; font-weight: 600; }
-      .warning { fill: #fff8f5; stroke: #a66a57; stroke-width: 1.2; }
+      .warning { fill: #f3e9e7; stroke: none; }
+      .warningRestart { fill: #f0ede6; }
+      .warningRailRepair { fill: #994c45; }
+      .warningRailRestart { fill: #80673f; }
       .warningText { fill: #633b31; font-size: 12px; }
+      .warningStatus { fill: #633b31; font-size: 13px; font-weight: 700; }
       .section { fill: #fff; stroke: #dedede; stroke-width: 1; }
       .caption { font-size: 15px; font-weight: 700; }
       .statusDot { fill: #999; }
@@ -42,11 +46,13 @@
   <text x="299" y="248" class="buttonText">Start Loop</text>
   <text x="403" y="248" class="small" text-decoration="underline">Tasks</text>
 
-  <rect x="258" y="292" width="555" height="74" rx="5" class="warning"/>
-  <text x="278" y="318" class="warningText" font-weight="700">The active Runtime needs repair before a new Loop can use it.</text>
-  <text x="278" y="339" class="warningText">Running Loops keep their pinned Runtime.</text>
-  <rect x="671" y="329" width="122" height="27" rx="4" class="secondary"/>
-  <text x="684" y="347" class="secondaryText">Review Runtime</text>
+  <rect x="258" y="292" width="555" height="86" rx="5" class="warning"/>
+  <rect x="258" y="292" width="3" height="86" class="warningRailRepair"/>
+  <text x="278" y="315" class="warningStatus">Runtime repair needed</text>
+  <text x="278" y="336" class="warningText">Repair the active Runtime before starting another Loop.</text>
+  <text x="278" y="355" class="warningText">Running Loops keep their pinned Runtime.</text>
+  <rect x="671" y="334" width="122" height="27" rx="4" class="secondary"/>
+  <text x="684" y="352" class="secondaryText">Review Runtime</text>
 
   <rect x="55" y="390" width="758" height="52" rx="4" class="section"/>
   <text x="76" y="412" class="small" font-weight="700">+ Repositories</text>
@@ -77,19 +83,19 @@
   <rect x="924" y="294" width="104" height="31" rx="4" class="button"/>
   <text x="945" y="314" class="buttonText">Start Loop</text>
   <text x="1042" y="314" class="small" text-decoration="underline">Tasks</text>
-  <rect x="924" y="340" width="342" height="95" rx="5" class="warning"/>
-  <text x="940" y="362" class="warningText" font-weight="700">Manager needs a restart to load</text>
-  <text x="940" y="380" class="warningText" font-weight="700">the active Runtime.</text>
-  <text x="940" y="399" class="tiny warningText">Run leesh-loop to reopen Manager;</text>
-  <text x="940" y="415" class="tiny warningText">running Loops keep their pinned Runtime.</text>
-  <rect x="940" y="445" width="122" height="27" rx="4" class="secondary"/>
-  <text x="953" y="463" class="secondaryText">Review Runtime</text>
-  <rect x="924" y="495" width="342" height="42" rx="4" class="section"/>
-  <text x="940" y="521" class="tiny" font-weight="700">+ Repositories · 2 managed Loops</text>
-  <rect x="924" y="550" width="342" height="76" rx="4" class="section"/>
-  <text x="940" y="576" class="tiny muted" font-weight="700">LOCAL TASK STORE</text>
-  <text x="940" y="599" class="small" font-weight="700">repo-alpha · Tasks</text>
-  <text x="940" y="617" class="tiny muted">Routine task flow remains visible.</text>
-  <rect x="924" y="641" width="342" height="31" rx="4" fill="#f6f6f6" stroke="#d7d7d7"/>
-  <text x="940" y="661" class="tiny" font-weight="700">+ Manage current Loop</text>
+  <rect x="924" y="340" width="342" height="117" rx="5" class="warning warningRestart"/>
+  <rect x="924" y="340" width="3" height="117" class="warningRailRestart"/>
+  <text x="940" y="362" class="warningStatus">Manager restart required</text>
+  <text x="940" y="381" class="warningText">Run leesh-loop to reopen Manager.</text>
+  <text x="940" y="399" class="warningText">Running Loops keep their pinned Runtime.</text>
+  <rect x="940" y="410" width="122" height="27" rx="4" class="secondary"/>
+  <text x="953" y="428" class="secondaryText">Review Runtime</text>
+  <rect x="924" y="477" width="342" height="42" rx="4" class="section"/>
+  <text x="940" y="503" class="tiny" font-weight="700">+ Repositories · 2 managed Loops</text>
+  <rect x="924" y="532" width="342" height="76" rx="4" class="section"/>
+  <text x="940" y="558" class="tiny muted" font-weight="700">LOCAL TASK STORE</text>
+  <text x="940" y="581" class="small" font-weight="700">repo-alpha · Tasks</text>
+  <text x="940" y="599" class="tiny muted">Routine task flow remains visible.</text>
+  <rect x="924" y="623" width="342" height="31" rx="4" fill="#f6f6f6" stroke="#d7d7d7"/>
+  <text x="940" y="643" class="tiny" font-weight="700">+ Manage current Loop</text>
 </svg>

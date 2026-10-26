@@ -245,9 +245,12 @@ test('rendered UI source keeps Task actions, manager hierarchy, state cues, and 
   assert.match(source, /Open Loop logs/);
   assert.match(source, /const runtimePanel = \(/);
   assert.match(source, /managerRuntimeAttentionState\(runtimeReadState, runtime\)/);
-  assert.match(source, /className=\{`manager-runtime-attention/);
-  assert.match(source, /The active Runtime needs repair before a new Loop can use it/);
-  assert.match(source, /Manager needs a restart to load the active Runtime/);
+  assert.match(source, /className=\{`manager-runtime-attention \$\{runtimeAttention\}/);
+  assert.match(source, /Runtime repair needed/);
+  assert.match(source, /Manager restart required/);
+  assert.match(source, /Repair the active Runtime before starting another Loop/);
+  assert.match(source, /Run leesh-loop to reopen Manager/);
+  assert.match(source, /Running Loops keep their pinned Runtime/);
   assert.match(source, />Review Runtime<\/button>/);
   assert.match(source, /id="manager-runtime-panel" className="manager-runtime"/);
   assert.match(source, /<details className="manager-management manager-runtime-empty" open>/);
