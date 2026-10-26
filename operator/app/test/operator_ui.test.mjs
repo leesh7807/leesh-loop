@@ -219,6 +219,9 @@ test('rendered UI source keeps Task actions, manager hierarchy, state cues, and 
   assert.match(source, /Find a task by title, identifier, or State/);
   assert.match(source, /Review selected blockers/);
   assert.match(source, /Show \{remainingBlockers.length\} more/);
+  assert.match(source, /managerStartBlockedByRuntimeRepair\(lifecycleAction, runtimeAttention\)/);
+  assert.match(source, /disabled=\{Boolean\(busy\) \|\| startBlockedByRuntimeRepair\}/);
+  assert.match(source, /manager-runtime-start-disabled/);
   assert.match(source, /className="manager-management"/);
   assert.match(source, /Add a Git repository/);
   assert.match(source, /Unregister Loop/);

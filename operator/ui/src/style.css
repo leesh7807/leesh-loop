@@ -212,6 +212,7 @@ select { min-height: 2.65rem; padding: .4rem .65rem; }
 .manager-action.secondary { background: transparent; color: #242424; }
 .manager-action.secondary:hover { background: #e9e9e9; }
 .manager-action:disabled { cursor: wait; opacity: .55; }
+.manager-action-blocked:disabled { cursor: not-allowed; }
 .manager-create { display: grid; gap: .38rem; padding: .8rem 0 .15rem; border-top: 1px solid #e0e0e0; }
 .manager-create h2, .manager-runtime h2, .manager-instance-info h2 { margin: 0 0 .28rem; font-size: 1.08rem; letter-spacing: -.02em; }
 .manager-help { max-width: 72ch; margin: 0; color: #666; font-size: .74rem; line-height: 1.5; }

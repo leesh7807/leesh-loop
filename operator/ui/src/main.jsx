@@ -6,7 +6,7 @@ import { groupTasksForOperatorDisplay } from './operator-task-display-order.js';
 import { readTaskDetailDraft } from './task-detail-draft.js';
 import { bootstrapManagerToken } from './manager-auth.js';
 import { createManagerApiFetch } from './manager-api.js';
-import { managerLifecycleAction } from './manager-lifecycle-action.js';
+import { managerLifecycleAction, managerStartBlockedByRuntimeRepair } from './manager-lifecycle-action.js';
 import { managerFailedGuidance } from './manager-failed-guidance.js';
 import { createManagerInstanceListGate } from './manager-instance-list-gate.js';
 import { createManagerSelectionGate } from './manager-selection-gate.js';
@@ -1068,6 +1068,7 @@ function ManagerApp() {
   }
 
   const lifecycleAction = managerLifecycleAction(selected?.status, selected?.can_stop);
+  const startBlockedByRuntimeRepair = managerStartBlockedByRuntimeRepair(lifecycleAction, runtimeAttention);
   const canUnregisterSelected = canUnregisterLoop(selected);
 
   const runtimePanel = (
@@ -1125,14 +1126,14 @@ function ManagerApp() {
               ) : lifecycleAction === 'stop' ? (
                 <button type="button" className="manager-action secondary" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop', operation: 'stop-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Stopping Loop' && busyOperation.instanceId === selectedId ? 'Stopping…' : 'Stop Loop'}</button>
               ) : (
-                <button type="button" className={`manager-action${selected.status === 'Failed' ? ' secondary' : ''}`} disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop', operation: 'start-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Starting Loop' && busyOperation.instanceId === selectedId ? 'Starting…' : selected.status === 'Failed' ? 'Retry Loop' : 'Start Loop'}</button>
+                <button type="button" className={`manager-action${selected.status === 'Failed' || startBlockedByRuntimeRepair ? ' secondary' : ''}${startBlockedByRuntimeRepair ? ' manager-action-blocked' : ''}`} disabled={Boolean(busy) || startBlockedByRuntimeRepair} aria-describedby={[startBlockedByRuntimeRepair ? 'manager-runtime-start-disabled' : '', busy ? 'manager-operation-pending' : ''].filter(Boolean).join(' ') || undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop', operation: 'start-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Starting Loop' && busyOperation.instanceId === selectedId ? 'Starting…' : selected.status === 'Failed' ? 'Retry Loop' : 'Start Loop'}</button>
               )}
               <a className="manager-task-jump" href="#tasks-heading">Tasks</a>
             </div>
             {runtimeAttention && <div className={`manager-runtime-attention ${runtimeAttention}`} role="status">
               <span className="manager-runtime-attention-copy">
                 <strong>{runtimeAttention === 'repair' ? 'Runtime repair needed' : 'Manager restart required'}</strong>
-                <span>{runtimeAttention === 'repair' ? 'Repair the active Runtime before starting another Loop.' : 'Run leesh-loop to reopen Manager.'}</span>
+                <span id={runtimeAttention === 'repair' ? 'manager-runtime-start-disabled' : undefined}>{runtimeAttention === 'repair' ? 'Repair the active Runtime before starting another Loop.' : 'Run leesh-loop to reopen Manager.'}</span>
                 <span>Running Loops keep their pinned Runtime.</span>
               </span>
               <button type="button" className="manager-action secondary manager-recovery-action" aria-controls="manager-runtime-panel" aria-expanded={managementOpen} onClick={openRuntimeControls}>Review Runtime</button>

@@ -11,6 +11,8 @@
       .tiny { font-size: 11px; }
       .button { fill: #252525; }
       .buttonText { fill: #fff; font-size: 13px; font-weight: 650; }
+      .buttonDisabled { fill: #e2e2e2; stroke: #b9b9b9; stroke-width: 1; }
+      .buttonDisabledText { fill: #666; font-size: 13px; font-weight: 650; }
       .secondary { fill: #ececec; stroke: #b9b9b9; stroke-width: 1; }
       .secondaryText { font-size: 12px; font-weight: 600; }
       .warning { fill: #f3e9e7; stroke: none; }
@@ -42,8 +44,8 @@
   <text x="290" y="193" class="small" font-weight="700">Stopped</text>
   <text x="362" y="193" class="small" font-weight="700">repo-alpha</text>
   <text x="278" y="213" class="tiny muted">/work/repos/repo-alpha</text>
-  <rect x="278" y="227" width="105" height="32" rx="4" class="button"/>
-  <text x="299" y="248" class="buttonText">Start Loop</text>
+  <rect x="278" y="227" width="105" height="32" rx="4" class="buttonDisabled"/>
+  <text x="299" y="248" class="buttonDisabledText">Start Loop</text>
   <text x="403" y="248" class="small" text-decoration="underline">Tasks</text>
 
   <rect x="258" y="292" width="555" height="86" rx="5" class="warning"/>

@@ -5,3 +5,7 @@ export function managerLifecycleAction(status, canStop) {
   if (status === 'Running' || (status === 'Failed' && canStop === true)) return 'stop';
   return 'start';
 }
+
+export function managerStartBlockedByRuntimeRepair(lifecycleAction, runtimeAttention) {
+  return lifecycleAction === 'start' && runtimeAttention === 'repair';
+}
