@@ -13,6 +13,18 @@ import { withRuntimeInstallLock } from '../runtime-install-lock.mjs';
 
 const execFile = promisify(execute);
 const sourceRoot = resolve(import.meta.dirname, '../../..');
+const barrierTimeoutMs = 15_000;
+const installJoinTimeoutMs = 300_000;
+
+function withTimeout(promise, label, timeoutMs) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs} ms`)), timeoutMs);
+    })
+  ]).finally(() => clearTimeout(timer));
+}
 
 async function git(cwd, ...args) {
   return execFile('git', args, { cwd, encoding: 'utf8' });
@@ -92,7 +104,7 @@ test('Runtime installs once into the central version store and a failed update p
 
 test('concurrent same-ID Runtime installers serialize before inspecting and replacing the destination', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-concurrent-recovery-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => withTimeout(rm(directory, { recursive: true, force: true }), 'concurrent installer test teardown', barrierTimeoutMs));
   const environment = {
     ...process.env,
     XDG_DATA_HOME: join(directory, 'data'),
@@ -116,28 +128,58 @@ test('concurrent same-ID Runtime installers serialize before inspecting and repl
       await firstInstallerGate;
     }
   });
-  const firstSnapshot = await firstSnapshotReady;
-  assert.equal(firstSnapshot.recoveryRecord, null);
-  assert.equal(firstSnapshot.previousActive, null);
-  assert.match(firstSnapshot.previousActiveError, /contents do not match their immutable identity/);
+  const firstInstallerOutcome = firstInstaller.then(
+    value => ({ status: 'fulfilled', value }),
+    reason => ({ status: 'rejected', reason })
+  );
 
-  let signalSecondWait;
-  const secondWaitStarted = new Promise(resolveWait => { signalSecondWait = resolveWait; });
-  const secondInstaller = installRuntimeDistributionInWorker(sourceRoot, options, { onInstallLockWait: signalSecondWait });
-  await secondWaitStarted;
+  let secondInstallerOutcome;
+  let secondInstaller;
+  let barrierError;
+  try {
+    const firstSnapshotOrExit = await withTimeout(Promise.race([
+      firstSnapshotReady.then(snapshot => ({ type: 'snapshot', snapshot })),
+      firstInstallerOutcome.then(outcome => ({ type: 'exit', outcome }))
+    ]), 'first installer snapshot', barrierTimeoutMs);
+    assert.equal(firstSnapshotOrExit.type, 'snapshot', firstSnapshotOrExit.outcome?.reason?.stack ?? 'first installer exited before exposing its recovery snapshot');
+    assert.equal(firstSnapshotOrExit.snapshot.recoveryRecord, null);
+    assert.equal(firstSnapshotOrExit.snapshot.previousActive, null);
+    assert.match(firstSnapshotOrExit.snapshot.previousActiveError, /contents do not match their immutable identity/);
 
-  continueFirstInstaller();
-  let firstResult;
-  try { firstResult = await firstInstaller; }
-  catch (error) {
-    await secondInstaller.catch(() => {});
-    throw error;
+    let signalSecondWait;
+    const secondWaitStarted = new Promise(resolveWait => { signalSecondWait = resolveWait; });
+    secondInstaller = installRuntimeDistributionInWorker(sourceRoot, options, { onInstallLockWait: signalSecondWait });
+    secondInstallerOutcome = secondInstaller.then(
+      value => ({ status: 'fulfilled', value }),
+      reason => ({ status: 'rejected', reason })
+    );
+    const secondWaitOrExit = await withTimeout(Promise.race([
+      secondWaitStarted.then(() => ({ type: 'waiting' })),
+      secondInstallerOutcome.then(outcome => ({ type: 'exit', outcome }))
+    ]), 'Worker installer lock contention signal', barrierTimeoutMs);
+    assert.equal(secondWaitOrExit.type, 'waiting', secondWaitOrExit.outcome?.reason?.stack ?? 'Worker installer exited before reporting lock contention');
+  } catch (error) {
+    barrierError = error;
+  } finally {
+    // Always let the direct installer finish, even when a contention signal fails.
+    continueFirstInstaller();
   }
+
+  const settledInstallers = await withTimeout(Promise.all([
+    firstInstallerOutcome,
+    ...(secondInstallerOutcome ? [secondInstallerOutcome] : [])
+  ]), 'installer completion after releasing the test barrier', installJoinTimeoutMs);
+  if (barrierError) throw barrierError;
+  const firstOutcome = settledInstallers[0];
+  assert.equal(firstOutcome.status, 'fulfilled', firstOutcome.reason?.stack ?? 'first installer failed');
+  const firstResult = firstOutcome.value;
   assert.equal(firstResult.repaired_distribution, true);
   assert.ok(firstResult.preserved_runtime_path);
   assert.match(await readFile(join(firstResult.preserved_runtime_path, 'operator/app/manager.mjs'), 'utf8'), /concurrent repair fixture/);
 
-  const secondResult = await secondInstaller;
+  const secondOutcome = settledInstallers[1];
+  assert.equal(secondOutcome?.status, 'fulfilled', secondOutcome?.reason?.stack ?? 'Worker installer failed');
+  const secondResult = secondOutcome.value;
   assert.equal(secondResult.recovered_from_invalid_active, false);
   assert.equal(secondResult.repaired_distribution, false);
   assert.equal(secondResult.changed, false);
@@ -145,6 +187,72 @@ test('concurrent same-ID Runtime installers serialize before inspecting and repl
   assert.equal(recovery.status, 'active');
   assert.equal(recovery.runtime_id, first.id);
   assert.equal(recovery.preserved_runtime_path, firstResult.preserved_runtime_path);
+});
+
+test('stale recovery-lock cleanup preserves a replacement generation', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-recovery-generation-'));
+  t.after(() => withTimeout(rm(directory, { recursive: true, force: true }), 'recovery-generation test teardown', barrierTimeoutMs));
+  const runtimeRoot = join(directory, 'runtimes');
+  const lockPath = join(runtimeRoot, '.runtime-install.lock');
+  const recoveryPath = `${lockPath}.recovery`;
+  await mkdir(recoveryPath, { recursive: true });
+  await writeFile(join(recoveryPath, 'owner.json'), `${JSON.stringify({
+    pid: 999999999,
+    process_start_ticks: null,
+    token: 'abandoned-recovery-owner',
+    created_at: Date.now()
+  })}\n`);
+
+  let releaseSnapshot;
+  const snapshotGate = new Promise(resolveGate => { releaseSnapshot = resolveGate; });
+  let signalSnapshot;
+  const staleSnapshotReady = new Promise(resolveSnapshot => { signalSnapshot = resolveSnapshot; });
+  let paused = false;
+  let signalWait;
+  const waitStarted = new Promise(resolveWait => { signalWait = resolveWait; });
+  let entered = false;
+  const lockOperation = withRuntimeInstallLock(runtimeRoot, async () => { entered = true; }, {
+    onWait: signalWait,
+    afterRecoveryLockSnapshot: async () => {
+      if (paused) return;
+      paused = true;
+      signalSnapshot();
+      await snapshotGate;
+    }
+  });
+  const lockOutcome = lockOperation.then(
+    value => ({ status: 'fulfilled', value }),
+    reason => ({ status: 'rejected', reason })
+  );
+
+  try {
+    await withTimeout(staleSnapshotReady, 'stale recovery-lock snapshot', barrierTimeoutMs);
+    await rm(recoveryPath, { recursive: true, force: true });
+    await mkdir(recoveryPath);
+    const replacementOwner = {
+      pid: process.pid,
+      process_start_ticks: null,
+      token: 'replacement-recovery-owner',
+      created_at: Date.now()
+    };
+    await writeFile(join(recoveryPath, 'owner.json'), `${JSON.stringify(replacementOwner)}\n`);
+    releaseSnapshot();
+
+    await withTimeout(waitStarted, 'replacement recovery-owner wait', barrierTimeoutMs);
+    assert.deepEqual(JSON.parse(await readFile(join(recoveryPath, 'owner.json'), 'utf8')), replacementOwner);
+    assert.equal(entered, false, 'installer must wait while the replacement recovery owner is live');
+    const claims = (await readdir(runtimeRoot)).filter(name => name.includes('.recovery-claim-'));
+    assert.deepEqual(claims, [], 'the replacement generation should be restored to the canonical path');
+
+    await rm(recoveryPath, { recursive: true, force: true });
+    const outcome = await withTimeout(lockOutcome, 'installer after releasing replacement recovery owner', barrierTimeoutMs);
+    assert.equal(outcome.status, 'fulfilled', outcome.reason?.stack ?? 'installer failed');
+    assert.equal(entered, true);
+  } finally {
+    releaseSnapshot();
+    await rm(recoveryPath, { recursive: true, force: true });
+    await withTimeout(lockOutcome, 'lock operation cleanup', barrierTimeoutMs).catch(() => {});
+  }
 });
 
 test('Runtime installation lock reclaims an abandoned process owner', async t => {
