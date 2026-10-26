@@ -30,6 +30,66 @@ async function git(cwd, ...args) {
   return execFile('git', args, { cwd, encoding: 'utf8' });
 }
 
+test('source installer and Manager Worker honor the shared bounded Runtime install lock', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-shared-install-lock-'));
+  t.after(() => withTimeout(rm(directory, { recursive: true, force: true }), 'shared install-lock test teardown', barrierTimeoutMs));
+  const environment = {
+    ...process.env,
+    XDG_DATA_HOME: join(directory, 'data'),
+    XDG_STATE_HOME: join(directory, 'state'),
+    XDG_CONFIG_HOME: join(directory, 'config')
+  };
+  const options = { environment, homeDirectory: directory };
+  const paths = managerPaths(options);
+  let releaseOwner;
+  const ownerGate = new Promise(resolveGate => { releaseOwner = resolveGate; });
+  let signalOwnerReady;
+  const ownerReady = new Promise(resolveReady => { signalOwnerReady = resolveReady; });
+  const owner = withRuntimeInstallLock(paths.runtimeRoot, async () => {
+    signalOwnerReady();
+    await ownerGate;
+  });
+  const ownerOutcome = owner.then(
+    value => ({ status: 'fulfilled', value }),
+    error => ({ status: 'rejected', error })
+  );
+  let directAttempt;
+  let managerAttempt;
+  try {
+    await withTimeout(ownerReady, 'shared Runtime install-lock owner acquisition', barrierTimeoutMs);
+    const ownerPath = join(paths.runtimeRoot, '.runtime-install.lock', 'owner.json');
+    const ownerRecord = JSON.parse(await readFile(ownerPath, 'utf8'));
+    const missingSource = join(directory, 'missing-source');
+    let signalDirectWait;
+    const directWait = new Promise(resolveWait => { signalDirectWait = resolveWait; });
+    let signalManagerWait;
+    const managerWait = new Promise(resolveWait => { signalManagerWait = resolveWait; });
+    const attempts = [
+      installRuntimeDistribution(missingSource, options, { lockWaitTimeoutMs: 80, onInstallLockWait: signalDirectWait }),
+      installRuntimeDistributionInWorker(missingSource, options, { lockWaitTimeoutMs: 80, onInstallLockWait: signalManagerWait })
+    ];
+    directAttempt = attempts[0].then(
+      value => ({ status: 'fulfilled', value }),
+      error => ({ status: 'rejected', error })
+    );
+    managerAttempt = attempts[1].then(
+      value => ({ status: 'fulfilled', value }),
+      error => ({ status: 'rejected', error })
+    );
+    await withTimeout(Promise.all([directWait, managerWait]), 'both Runtime entrypoints observing shared lock contention', barrierTimeoutMs);
+    const [direct, manager] = await withTimeout(Promise.all([directAttempt, managerAttempt]), 'bounded Runtime entrypoint lock waits', barrierTimeoutMs);
+    assert.equal(direct.status, 'rejected');
+    assert.match(direct.error.message, /Timed out .*Runtime installation lock/);
+    assert.equal(manager.status, 'rejected');
+    assert.match(manager.error.message, /Timed out .*Runtime installation lock/);
+    assert.deepEqual(JSON.parse(await readFile(ownerPath, 'utf8')), ownerRecord);
+  } finally {
+    releaseOwner();
+    await withTimeout(ownerOutcome, 'shared Runtime install-lock owner release', barrierTimeoutMs);
+    await Promise.all([directAttempt, managerAttempt].filter(Boolean));
+  }
+});
+
 test('Runtime installs once into the central version store and a failed update preserves the active version', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-distribution-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -102,7 +162,9 @@ test('Runtime installs once into the central version store and a failed update p
   assert.deepEqual(distributions.map(value => value.id), [first.id]);
 });
 
-test('concurrent same-ID Runtime installers serialize before inspecting and replacing the destination', async t => {
+test('concurrent same-ID Runtime installers serialize before inspecting and replacing the destination', {
+  skip: process.env.LEESH_RUNTIME_CONCURRENCY_SMOKE !== '1'
+}, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-concurrent-recovery-'));
   t.after(() => withTimeout(rm(directory, { recursive: true, force: true }), 'concurrent installer test teardown', barrierTimeoutMs));
   const environment = {

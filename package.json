@@ -11,6 +11,7 @@
     "update": "node bin/leesh-loop.mjs update",
     "list": "node bin/leesh-loop.mjs list",
     "e2e": "node local-e2e/cli.mjs run",
-    "test": "node --test operator/app/test/*.test.mjs operator/local_task_store/test/*.test.mjs operator/ui/test/*.test.js"
+    "test": "node --test operator/app/test/*.test.mjs operator/local_task_store/test/*.test.mjs operator/ui/test/*.test.js",
+    "test:runtime-install-concurrency-smoke": "LEESH_RUNTIME_CONCURRENCY_SMOKE=1 node --test --test-name-pattern='concurrent same-ID Runtime installers serialize before inspecting and replacing the destination' operator/app/test/update.test.mjs"
   }
 }
