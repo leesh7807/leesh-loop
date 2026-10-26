@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFile as execute } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { activeRuntime, installRuntimeDistribution, inspectRuntimeSource, listRuntimeDistributions, managerMustRestartForRuntime, publishRuntimeStage, readRuntimeRecoveryRecord, reconcileRuntimeRecoveryRecord, runtimeDiagnostic, writeRuntimeRecoveryRecord } from '../runtime-distribution.mjs';
+import { activeRuntime, installRuntimeDistribution, installRuntimeDistributionInWorker, inspectRuntimeSource, listRuntimeDistributions, managerMustRestartForRuntime, publishRuntimeStage, readRuntimeRecoveryRecord, reconcileRuntimeRecoveryRecord, runtimeDiagnostic, writeRuntimeRecoveryRecord } from '../runtime-distribution.mjs';
 import { managerPaths } from '../manager-storage.mjs';
 import { hashDistribution } from '../installation-metadata.mjs';
 import { listRuntimeSnapshotFiles, materializeRuntimeSnapshot } from '../runtime-manifest.mjs';
+import { withRuntimeInstallLock } from '../runtime-install-lock.mjs';
 
 const execFile = promisify(execute);
 const sourceRoot = resolve(import.meta.dirname, '../../..');
@@ -89,7 +90,7 @@ test('Runtime installs once into the central version store and a failed update p
   assert.deepEqual(distributions.map(value => value.id), [first.id]);
 });
 
-test('a concurrent same-ID installer retry retains the winner’s quarantine path', async t => {
+test('concurrent same-ID Runtime installers serialize before inspecting and replacing the destination', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-concurrent-recovery-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const environment = {
@@ -105,41 +106,60 @@ test('a concurrent same-ID installer retry retains the winner’s quarantine pat
   await writeFile(damagedFile, `${originalContents}\n// concurrent repair fixture\n`);
   await assert.rejects(activeRuntime(options), /contents do not match their immutable identity/);
 
-  let continueDelayedInstaller;
-  const delayedInstallerGate = new Promise(resolveGate => { continueDelayedInstaller = resolveGate; });
-  let signalRecoverySnapshot;
-  const recoverySnapshotReady = new Promise(resolveSnapshot => { signalRecoverySnapshot = resolveSnapshot; });
-  const delayedInstaller = installRuntimeDistribution(sourceRoot, options, {
+  let continueFirstInstaller;
+  const firstInstallerGate = new Promise(resolveGate => { continueFirstInstaller = resolveGate; });
+  let signalFirstSnapshot;
+  const firstSnapshotReady = new Promise(resolveSnapshot => { signalFirstSnapshot = resolveSnapshot; });
+  const firstInstaller = installRuntimeDistribution(sourceRoot, options, {
     afterRecoverySnapshot: async snapshot => {
-      signalRecoverySnapshot(snapshot);
-      await delayedInstallerGate;
+      signalFirstSnapshot(snapshot);
+      await firstInstallerGate;
     }
   });
-  const delayedSnapshot = await recoverySnapshotReady;
-  assert.equal(delayedSnapshot.recoveryRecord, null);
-  assert.equal(delayedSnapshot.previousActive, null);
-  assert.match(delayedSnapshot.previousActiveError, /contents do not match their immutable identity/);
+  const firstSnapshot = await firstSnapshotReady;
+  assert.equal(firstSnapshot.recoveryRecord, null);
+  assert.equal(firstSnapshot.previousActive, null);
+  assert.match(firstSnapshot.previousActiveError, /contents do not match their immutable identity/);
 
-  let winner;
-  let winnerError;
-  try { winner = await installRuntimeDistribution(sourceRoot, options); }
-  catch (error) { winnerError = error; }
-  finally { continueDelayedInstaller(); }
-  if (winnerError) {
-    await delayedInstaller.catch(() => {});
-    throw winnerError;
+  let signalSecondWait;
+  const secondWaitStarted = new Promise(resolveWait => { signalSecondWait = resolveWait; });
+  const secondInstaller = installRuntimeDistributionInWorker(sourceRoot, options, { onInstallLockWait: signalSecondWait });
+  await secondWaitStarted;
+
+  continueFirstInstaller();
+  let firstResult;
+  try { firstResult = await firstInstaller; }
+  catch (error) {
+    await secondInstaller.catch(() => {});
+    throw error;
   }
-  assert.equal(winner.repaired_distribution, true);
-  assert.ok(winner.preserved_runtime_path);
-  assert.match(await readFile(join(winner.preserved_runtime_path, 'operator/app/manager.mjs'), 'utf8'), /concurrent repair fixture/);
+  assert.equal(firstResult.repaired_distribution, true);
+  assert.ok(firstResult.preserved_runtime_path);
+  assert.match(await readFile(join(firstResult.preserved_runtime_path, 'operator/app/manager.mjs'), 'utf8'), /concurrent repair fixture/);
 
-  const delayedResult = await delayedInstaller;
-  assert.equal(delayedResult.recovered_from_invalid_active, true);
-  assert.equal(delayedResult.repaired_distribution, false);
+  const secondResult = await secondInstaller;
+  assert.equal(secondResult.recovered_from_invalid_active, false);
+  assert.equal(secondResult.repaired_distribution, false);
+  assert.equal(secondResult.changed, false);
   const recovery = (await readRuntimeRecoveryRecord(options)).record;
   assert.equal(recovery.status, 'active');
   assert.equal(recovery.runtime_id, first.id);
-  assert.equal(recovery.preserved_runtime_path, winner.preserved_runtime_path);
+  assert.equal(recovery.preserved_runtime_path, firstResult.preserved_runtime_path);
+});
+
+test('Runtime installation lock reclaims an abandoned process owner', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-install-lock-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const runtimeRoot = join(directory, 'runtimes');
+  const lockPath = join(runtimeRoot, '.runtime-install.lock');
+  await mkdir(lockPath, { recursive: true });
+  await writeFile(join(lockPath, 'owner.json'), `${JSON.stringify({ pid: 999999999, process_start_ticks: null, token: 'abandoned', created_at: Date.now() })}\n`);
+
+  let entered = false;
+  await withRuntimeInstallLock(runtimeRoot, async () => { entered = true; });
+
+  assert.equal(entered, true);
+  await assert.rejects(lstat(lockPath), { code: 'ENOENT' });
 });
 
 test('Manager restart is required when a damaged Runtime is repaired under the same identity', () => {
