@@ -481,6 +481,75 @@ test('pending Runtime recovery reconciles against a validated active distributio
   assert.equal(retained.record.preserved_runtime_path, retainedQuarantine);
 });
 
+test('Runtime recovery reconciliation cannot overwrite a newer installer record', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-reconcile-concurrent-write-'));
+  t.after(() => withTimeout(rm(directory, { recursive: true, force: true }), 'recovery-record concurrency test teardown', barrierTimeoutMs));
+  const environment = {
+    ...process.env,
+    XDG_DATA_HOME: join(directory, 'data'),
+    XDG_STATE_HOME: join(directory, 'state'),
+    XDG_CONFIG_HOME: join(directory, 'config')
+  };
+  const options = { environment, homeDirectory: directory };
+  const paths = managerPaths(options);
+  const version = '0.1.0';
+  const filename = 'runtime-fixture.mjs';
+  const contents = Buffer.from('export {};\n');
+  const mode = 0o644;
+  const idA = hashDistribution(version, [[filename, contents, mode]]);
+  const runtimePath = join(paths.runtimeRoot, idA);
+  await mkdir(runtimePath, { recursive: true });
+  await mkdir(paths.configRoot, { recursive: true });
+  await writeFile(join(runtimePath, filename), contents, { mode });
+  await chmod(join(runtimePath, filename), mode);
+  await writeFile(join(runtimePath, '.distribution.json'), `${JSON.stringify({ schema_version: 1, id: idA, version, path: runtimePath, files: [filename] })}\n`, { mode: 0o600 });
+  await writeFile(paths.activeRuntime, `${JSON.stringify({ schema_version: 1, id: idA })}\n`, { mode: 0o600 });
+  await writeRuntimeRecoveryRecord({ runtime_id: idA, status: 'activation-pending', validation_error: 'repair A', preserved_runtime_path: null }, options);
+
+  let releaseReconciliation;
+  const reconciliationGate = new Promise(resolveGate => { releaseReconciliation = resolveGate; });
+  let signalReconciliation;
+  const reconciliationReady = new Promise(resolveReady => { signalReconciliation = resolveReady; });
+  const reconciliation = reconcileRuntimeRecoveryRecord(options, {
+    afterRecoveryReconciliationSnapshot: async record => {
+      assert.equal(record.runtime_id, idA);
+      signalReconciliation();
+      await reconciliationGate;
+    }
+  });
+  let recordWrite;
+  try {
+    await withTimeout(reconciliationReady, 'recovery reconciliation snapshot', barrierTimeoutMs);
+    const idB = 'b'.repeat(64);
+    const preservedPathB = join(paths.runtimeRoot, `.damaged-${idB}-fixture`);
+    await mkdir(preservedPathB);
+    let signalRecordWriterWait;
+    const recordWriterWait = new Promise(resolveWait => { signalRecordWriterWait = resolveWait; });
+    recordWrite = writeRuntimeRecoveryRecord({
+      runtime_id: idB,
+      status: 'activation-pending',
+      validation_error: 'repair B',
+      preserved_runtime_path: preservedPathB
+    }, options, { onRecoveryRecordLockWait: signalRecordWriterWait });
+    await withTimeout(recordWriterWait, 'new installer recovery-record lock contention', barrierTimeoutMs);
+    assert.equal((await readRuntimeRecoveryRecord(options)).record.runtime_id, idA);
+
+    releaseReconciliation();
+    const [reconciled, written] = await withTimeout(Promise.all([reconciliation, recordWrite]), 'reconciliation and installer record writes', barrierTimeoutMs);
+    assert.equal(reconciled.record.status, 'active');
+    assert.equal(reconciled.record.runtime_id, idA);
+    assert.equal(written.runtime_id, idB);
+    assert.equal(written.status, 'activation-pending');
+    const finalRecord = (await readRuntimeRecoveryRecord(options)).record;
+    assert.equal(finalRecord.runtime_id, idB);
+    assert.equal(finalRecord.validation_error, 'repair B');
+    assert.equal(finalRecord.preserved_runtime_path, preservedPathB);
+  } finally {
+    releaseReconciliation();
+    if (recordWrite) await withTimeout(Promise.allSettled([reconciliation, recordWrite]), 'recovery-record writer cleanup', barrierTimeoutMs).catch(() => {});
+  }
+});
+
 test('Runtime repair intent is durable before a damaged distribution is moved', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'leesh-loop-runtime-publication-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

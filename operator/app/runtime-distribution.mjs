@@ -9,7 +9,7 @@ import { managerPaths, ensurePrivateDirectory, readJsonFile, writeAtomicJson } f
 import { listRuntimeSnapshotFiles, materializeRuntimeSnapshot } from './runtime-manifest.mjs';
 import { hashDistribution, readDistributionFiles } from './installation-metadata.mjs';
 import { prepareNpmDependencies } from './dependency-preparation.mjs';
-import { withRuntimeInstallLock } from './runtime-install-lock.mjs';
+import { withRuntimeInstallLock, withRuntimeRecoveryRecordLock } from './runtime-install-lock.mjs';
 
 const thisDirectory = new URL('.', import.meta.url);
 const defaultSourceRoot = resolve(fileURLToPath(new URL('../..', thisDirectory)));
@@ -136,7 +136,7 @@ function validPreservedRuntimePath(path, runtimeId, paths) {
   );
 }
 
-export async function writeRuntimeRecoveryRecord(record, options = {}) {
+async function writeRuntimeRecoveryRecordUnlocked(record, options = {}) {
   if (!record || !digestPattern.test(record.runtime_id) || !['activation-pending', 'active'].includes(record.status)) {
     throw new Error('Runtime recovery record is invalid');
   }
@@ -165,6 +165,15 @@ export async function writeRuntimeRecoveryRecord(record, options = {}) {
   return value;
 }
 
+export async function writeRuntimeRecoveryRecord(record, options = {}, hooks = {}) {
+  const paths = managerPaths(options);
+  await ensurePrivateDirectory(paths.runtimeRoot);
+  return withRuntimeRecoveryRecordLock(paths.runtimeRoot, () => writeRuntimeRecoveryRecordUnlocked(record, options), {
+    onWait: hooks.onRecoveryRecordLockWait,
+    waitTimeoutMs: hooks.lockWaitTimeoutMs
+  });
+}
+
 export async function readRuntimeRecoveryRecord(options = {}) {
   const paths = managerPaths(options);
   let value;
@@ -186,7 +195,7 @@ async function preservedRuntimePathIfPresent(record, options = {}) {
   return details && !details.isSymbolicLink() && details.isDirectory() ? record.preserved_runtime_path : null;
 }
 
-export async function reconcileRuntimeRecoveryRecord(options = {}) {
+async function reconcileRuntimeRecoveryRecordUnlocked(options = {}, hooks = {}) {
   const current = await readRuntimeRecoveryRecord(options);
   if (current.error || current.record?.status !== 'activation-pending') return current;
   try {
@@ -195,15 +204,25 @@ export async function reconcileRuntimeRecoveryRecord(options = {}) {
     try { active = await activeRuntime(options); }
     catch { return { record, error: null }; }
     if (active?.id !== record.runtime_id) return { record, error: null };
+    await hooks.afterRecoveryReconciliationSnapshot?.(record);
     const preservedPath = await preservedRuntimePathIfPresent(record, options);
     if (preservedPath !== record.preserved_runtime_path) {
-      record = await writeRuntimeRecoveryRecord({ ...record, preserved_runtime_path: preservedPath }, options);
+      record = await writeRuntimeRecoveryRecordUnlocked({ ...record, preserved_runtime_path: preservedPath }, options);
     }
-    record = await writeRuntimeRecoveryRecord({ ...record, status: 'active', recovered_at: new Date().toISOString() }, options);
+    record = await writeRuntimeRecoveryRecordUnlocked({ ...record, status: 'active', recovered_at: new Date().toISOString() }, options);
     return { record, error: null };
   } catch (error) {
     return { record: current.record, error: runtimeDiagnostic(error) };
   }
+}
+
+export async function reconcileRuntimeRecoveryRecord(options = {}, hooks = {}) {
+  const paths = managerPaths(options);
+  await ensurePrivateDirectory(paths.runtimeRoot);
+  return withRuntimeRecoveryRecordLock(paths.runtimeRoot, () => reconcileRuntimeRecoveryRecordUnlocked(options, hooks), {
+    onWait: hooks.onRecoveryRecordLockWait,
+    waitTimeoutMs: hooks.lockWaitTimeoutMs
+  });
 }
 
 export async function publishRuntimeStage(stage, destination, expectedId, { beforePreserve, beforeInstall } = {}) {

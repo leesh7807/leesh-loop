@@ -203,7 +203,7 @@ function formatWaitDuration(durationMs) {
   return `${Math.ceil(durationMs / 60_000)} minutes`;
 }
 
-function lockWaitTimeoutError(blocked, snapshot, waitedMs) {
+function lockWaitTimeoutError(blocked, snapshot, waitedMs, lockLabel) {
   const owner = snapshot.owner;
   const ownerAge = Number.isFinite(owner?.created_at)
     ? Date.now() - owner.created_at
@@ -211,17 +211,17 @@ function lockWaitTimeoutError(blocked, snapshot, waitedMs) {
   const ownerDescription = Number.isSafeInteger(owner?.pid)
     ? `PID ${owner.pid}, lock age ${formatWaitDuration(ownerAge)}`
     : `unidentified owner, lock age ${formatWaitDuration(ownerAge)}`;
-  return new Error(`Timed out after ${formatWaitDuration(waitedMs)} waiting for the Runtime installation lock at ${blocked.path} held by ${ownerDescription}. The lock was not stopped or reclaimed. Check whether its owner is still making progress; if confirmed stalled, stop it gracefully through its normal service or OS controls and retry. Press Ctrl-C to cancel this wait sooner.`);
+  return new Error(`Timed out after ${formatWaitDuration(waitedMs)} waiting for the ${lockLabel} at ${blocked.path} held by ${ownerDescription}. The lock was not stopped or reclaimed. Check whether its owner is still making progress; if confirmed stalled, stop it gracefully through its normal service or OS controls and retry. Press Ctrl-C to cancel this wait sooner.`);
 }
 
-export async function withRuntimeInstallLock(runtimeRoot, action, {
+async function withRuntimeLock(runtimeRoot, lockFileName, lockLabel, action, {
   onWait: onWaitCallback,
   waitTimeoutMs = defaultLockWaitTimeoutMs,
   afterRecoveryLockSnapshot,
   afterRecoveryLockClaim
 } = {}) {
-  if (!Number.isSafeInteger(waitTimeoutMs) || waitTimeoutMs < 0) throw new TypeError('Runtime installation lock wait timeout must be a non-negative integer');
-  const lockPath = join(runtimeRoot, '.runtime-install.lock');
+  if (!Number.isSafeInteger(waitTimeoutMs) || waitTimeoutMs < 0) throw new TypeError(`${lockLabel} wait timeout must be a non-negative integer`);
+  const lockPath = join(runtimeRoot, lockFileName);
   const owner = lockOwner();
   let waitStartedAt = null;
   let lastBlockedLock = null;
@@ -242,6 +242,7 @@ export async function withRuntimeInstallLock(runtimeRoot, action, {
         owner_age_ms: ownerAgeMs,
         waited_ms: now - waitStartedAt,
         wait_timeout_ms: waitTimeoutMs,
+        lock_label: lockLabel,
         phase: blocked.phase
       });
     } catch { /* diagnostic callbacks do not own or alter lock lifecycle */ }
@@ -252,7 +253,7 @@ export async function withRuntimeInstallLock(runtimeRoot, action, {
       const current = lastBlockedLock
         ? await lockSnapshot(lastBlockedLock.path).catch(() => null)
         : null;
-      if (blockedLockStillActive(current)) throw lockWaitTimeoutError(lastBlockedLock, current, Date.now() - waitStartedAt);
+      if (blockedLockStillActive(current)) throw lockWaitTimeoutError(lastBlockedLock, current, Date.now() - waitStartedAt, lockLabel);
       waitStartedAt = null;
       lastBlockedLock = null;
       lastNoticeAt = null;
@@ -284,4 +285,12 @@ export async function withRuntimeInstallLock(runtimeRoot, action, {
     const current = await lockSnapshot(lockPath).catch(() => null);
     if (current?.owner?.token === owner.token) await rm(lockPath, { recursive: true, force: true });
   }
+}
+
+export function withRuntimeInstallLock(runtimeRoot, action, options = {}) {
+  return withRuntimeLock(runtimeRoot, '.runtime-install.lock', 'Runtime installation lock', action, options);
+}
+
+export function withRuntimeRecoveryRecordLock(runtimeRoot, action, options = {}) {
+  return withRuntimeLock(runtimeRoot, '.runtime-recovery-record.lock', 'Runtime recovery-record lock', action, options);
 }
