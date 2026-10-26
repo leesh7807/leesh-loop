@@ -34,6 +34,7 @@ export function managerPaths({ environment = process.env, homeDirectory = homedi
     loopExecutionRoot: join(stateRoot, 'loops'),
     managerStateRoot: join(stateRoot, 'manager'),
     managerServiceRecord: join(stateRoot, 'manager', 'service.json'),
+    runtimeRecovery: join(stateRoot, 'manager', 'runtime-recovery.json'),
     managerToken: join(stateRoot, 'manager', 'token'),
     managerApiMaster: join(stateRoot, 'manager', 'api-master'),
     managerBrowserBootstrap: join(stateRoot, 'manager', 'browser-bootstrap.html'),
@@ -282,6 +283,17 @@ export async function createLoopInstance(repositoryPath, { sourceRoot, environme
   } finally {
     if (!committed) await rm(dataDirectory, { recursive: true, force: true });
   }
+}
+
+export async function unregisterLoopInstance(id, options = {}) {
+  if (typeof id !== 'string' || !idPattern.test(id)) throw Object.assign(new Error('Instance ID is invalid.'), { status: 400 });
+  const paths = managerPaths(options);
+  const registry = await readRegistry(paths);
+  const instance = registry.instances.find(value => value.id === id);
+  if (!instance) throw Object.assign(new Error('Loop instance was not found.'), { status: 404 });
+  registry.instances = registry.instances.filter(value => value.id !== id);
+  await writeAtomicJson(paths.instanceRegistry, registry);
+  return { ...instance };
 }
 
 export async function readInstanceWorkflow(id, { sourceRoot, ...options } = {}) {

@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 720" role="img" aria-labelledby="title desc">
+  <title id="title">Synthetic Runtime recovery attention views</title>
+  <desc id="desc">Source-based synthetic desktop repair cue and narrow-screen Manager restart cue. Not a browser capture.</desc>
+  <defs>
+    <style>
+      text { font-family: Inter, Arial, sans-serif; fill: #292929; }
+      .frame { fill: #f6f6f6; stroke: #cfcfcf; stroke-width: 1.5; }
+      .bar { fill: #fff; stroke: #d7d7d7; stroke-width: 1; }
+      .muted { fill: #747474; }
+      .small { font-size: 13px; }
+      .tiny { font-size: 11px; }
+      .button { fill: #252525; }
+      .buttonText { fill: #fff; font-size: 13px; font-weight: 650; }
+      .buttonDisabled { fill: #e2e2e2; stroke: #b9b9b9; stroke-width: 1; }
+      .buttonDisabledText { fill: #666; font-size: 13px; font-weight: 650; }
+      .secondary { fill: #ececec; stroke: #b9b9b9; stroke-width: 1; }
+      .secondaryText { font-size: 12px; font-weight: 600; }
+      .warning { fill: #f3e9e7; stroke: none; }
+      .warningRestart { fill: #f0ede6; }
+      .warningRailRepair { fill: #994c45; }
+      .warningRailRestart { fill: #80673f; }
+      .warningText { fill: #633b31; font-size: 12px; }
+      .warningStatus { fill: #633b31; font-size: 13px; font-weight: 700; }
+      .section { fill: #fff; stroke: #dedede; stroke-width: 1; }
+      .caption { font-size: 15px; font-weight: 700; }
+      .statusDot { fill: #999; }
+    </style>
+  </defs>
+  <rect width="1320" height="720" fill="#eeeeee"/>
+  <text x="28" y="30" font-size="12" font-weight="700" letter-spacing="1.1" fill="#8a493a">SYNTHETIC DESIGN REFERENCE · NOT A BROWSER CAPTURE</text>
+  <text x="28" y="56" class="small muted">Source-based composition of conditional recovery cues and the existing collapsed Manager disclosure.</text>
+
+  <text x="30" y="92" class="caption">Desktop · active Runtime needs repair</text>
+  <rect x="28" y="108" width="820" height="578" rx="9" class="frame"/>
+  <rect x="29" y="109" width="818" height="39" rx="9" fill="#e7e7e7"/>
+  <circle cx="48" cy="128" r="5" fill="#c46c60"/><circle cx="66" cy="128" r="5" fill="#c6a45c"/><circle cx="84" cy="128" r="5" fill="#70a27a"/>
+  <rect x="118" y="118" width="632" height="20" rx="5" fill="#fafafa"/>
+  <text x="130" y="132" class="tiny muted">127.0.0.1 · Leesh Loop Manager</text>
+
+  <text x="55" y="185" class="small muted" font-weight="700">LEESH LOOP</text>
+  <text x="55" y="216" font-size="27" font-weight="700">Manager</text>
+  <rect x="258" y="166" width="555" height="116" rx="5" class="bar"/>
+  <circle cx="278" cy="188" r="5" class="statusDot"/>
+  <text x="290" y="193" class="small" font-weight="700">Stopped</text>
+  <text x="362" y="193" class="small" font-weight="700">repo-alpha</text>
+  <text x="278" y="213" class="tiny muted">/work/repos/repo-alpha</text>
+  <rect x="278" y="227" width="105" height="32" rx="4" class="buttonDisabled"/>
+  <text x="299" y="248" class="buttonDisabledText">Start Loop</text>
+  <text x="403" y="248" class="small" text-decoration="underline">Tasks</text>
+
+  <rect x="258" y="292" width="555" height="86" rx="5" class="warning"/>
+  <rect x="258" y="292" width="3" height="86" class="warningRailRepair"/>
+  <text x="278" y="315" class="warningStatus">Runtime repair needed</text>
+  <text x="278" y="336" class="warningText">Repair the active Runtime before starting another Loop.</text>
+  <text x="278" y="355" class="warningText">Running Loops keep their pinned Runtime.</text>
+  <rect x="671" y="334" width="122" height="27" rx="4" class="secondary"/>
+  <text x="684" y="352" class="secondaryText">Review Runtime</text>
+
+  <rect x="55" y="390" width="758" height="52" rx="4" class="section"/>
+  <text x="76" y="412" class="small" font-weight="700">+ Repositories</text>
+  <text x="76" y="430" class="tiny muted">Current: repo-alpha · 2 managed Loops</text>
+  <rect x="55" y="455" width="758" height="184" rx="4" class="section"/>
+  <text x="76" y="482" class="tiny muted" font-weight="700">LOCAL TASK STORE</text>
+  <text x="76" y="511" font-size="21" font-weight="700">repo-alpha</text>
+  <text x="76" y="544" class="small" font-weight="700">Tasks</text>
+  <text x="76" y="567" class="small muted">Task work remains the primary surface.</text>
+  <rect x="76" y="584" width="716" height="40" rx="3" fill="#f3f3f3" stroke="#ddd"/>
+  <text x="92" y="609" class="small">Example task title · In Progress</text>
+  <rect x="55" y="650" width="758" height="25" rx="4" fill="#f6f6f6" stroke="#d7d7d7"/>
+  <text x="76" y="667" class="tiny" font-weight="700">+ Manage current Loop</text>
+  <text x="635" y="667" class="tiny muted">Runtime, Workflow, and diagnosis</text>
+
+  <text x="882" y="92" class="caption">Narrow · Manager restart required</text>
+  <rect x="900" y="108" width="390" height="578" rx="9" class="frame"/>
+  <rect x="901" y="109" width="388" height="39" rx="9" fill="#e7e7e7"/>
+  <circle cx="918" cy="128" r="5" fill="#c46c60"/><circle cx="936" cy="128" r="5" fill="#c6a45c"/><circle cx="954" cy="128" r="5" fill="#70a27a"/>
+  <rect x="977" y="118" width="280" height="20" rx="5" fill="#fafafa"/>
+  <text x="988" y="132" class="tiny muted">127.0.0.1 · Manager</text>
+  <text x="924" y="180" class="small muted" font-weight="700">LEESH LOOP</text>
+  <text x="924" y="210" font-size="25" font-weight="700">Manager</text>
+  <circle cx="930" cy="236" r="5" class="statusDot"/>
+  <text x="943" y="241" class="small" font-weight="700">Stopped</text>
+  <text x="924" y="263" class="small" font-weight="700">repo-alpha</text>
+  <text x="924" y="281" class="tiny muted">/work/repos/repo-alpha</text>
+  <rect x="924" y="294" width="104" height="31" rx="4" class="button"/>
+  <text x="945" y="314" class="buttonText">Start Loop</text>
+  <text x="1042" y="314" class="small" text-decoration="underline">Tasks</text>
+  <rect x="924" y="340" width="342" height="117" rx="5" class="warning warningRestart"/>
+  <rect x="924" y="340" width="3" height="117" class="warningRailRestart"/>
+  <text x="940" y="362" class="warningStatus">Manager restart required</text>
+  <text x="940" y="381" class="warningText">Run leesh-loop to reopen Manager.</text>
+  <text x="940" y="399" class="warningText">Running Loops keep their pinned Runtime.</text>
+  <rect x="940" y="410" width="122" height="27" rx="4" class="secondary"/>
+  <text x="953" y="428" class="secondaryText">Review Runtime</text>
+  <rect x="924" y="477" width="342" height="42" rx="4" class="section"/>
+  <text x="940" y="503" class="tiny" font-weight="700">+ Repositories · 2 managed Loops</text>
+  <rect x="924" y="532" width="342" height="76" rx="4" class="section"/>
+  <text x="940" y="558" class="tiny muted" font-weight="700">LOCAL TASK STORE</text>
+  <text x="940" y="581" class="small" font-weight="700">repo-alpha · Tasks</text>
+  <text x="940" y="599" class="tiny muted">Routine task flow remains visible.</text>
+  <rect x="924" y="623" width="342" height="31" rx="4" fill="#f6f6f6" stroke="#d7d7d7"/>
+  <text x="940" y="643" class="tiny" font-weight="700">+ Manage current Loop</text>
+</svg>

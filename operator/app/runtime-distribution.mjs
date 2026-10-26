@@ -1,14 +1,15 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { Worker } from 'node:worker_threads';
+import { isMainThread, Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import { managerPaths, ensurePrivateDirectory, readJsonFile, writeAtomicJson } from './manager-storage.mjs';
 import { listRuntimeSnapshotFiles, materializeRuntimeSnapshot } from './runtime-manifest.mjs';
 import { hashDistribution, readDistributionFiles } from './installation-metadata.mjs';
 import { prepareNpmDependencies } from './dependency-preparation.mjs';
+import { withRuntimeInstallLock, withRuntimeRecoveryRecordLock } from './runtime-install-lock.mjs';
 
 const thisDirectory = new URL('.', import.meta.url);
 const defaultSourceRoot = resolve(fileURLToPath(new URL('../..', thisDirectory)));
@@ -21,7 +22,7 @@ import(workerData.moduleUrl)
     return module.installRuntimeDistribution(workerData.sourceRoot, {
       environment: workerData.environment,
       homeDirectory: workerData.homeDirectory
-    });
+    }, { skipRuntimeInstallLock: true });
   })
   .then(result => parentPort.postMessage({ ok: true, result }), error => parentPort.postMessage({
     ok: false,
@@ -45,6 +46,11 @@ async function sourceIdentity(sourceRoot) {
   }
   const entries = await readDistributionFiles(root, files);
   return { root, version: manifest.version, files, entries, id: hashDistribution(manifest.version, entries) };
+}
+
+export async function inspectRuntimeSource(sourceRoot = defaultSourceRoot) {
+  const source = await sourceIdentity(sourceRoot);
+  return { path: source.root, id: source.id, version: source.version };
 }
 
 function runRuntimeBuild(command, args, cwd, environment, label) {
@@ -106,6 +112,179 @@ export async function activeRuntime(options = {}) {
   return { id: pointer.id, version: details.version, path: runtimePath, installed_at: details.installed_at };
 }
 
+export function runtimeDiagnostic(error) {
+  const detail = error?.message || String(error);
+  return detail.length <= 400 ? detail : `${detail.slice(0, 397)}…`;
+}
+
+export async function markManagerRestartRequiredForRuntimeRepair(runtimeId, options = {}) {
+  const paths = managerPaths(options);
+  const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
+  if (service?.runtime_version !== runtimeId) return false;
+  if (service.manager_restart_required === true) return true;
+  await writeAtomicJson(paths.managerServiceRecord, { ...service, manager_restart_required: true });
+  return true;
+}
+
+function validPreservedRuntimePath(path, runtimeId, paths) {
+  return path == null || (
+    typeof path === 'string'
+    && isAbsolute(path)
+    && resolve(path) === path
+    && dirname(path) === paths.runtimeRoot
+    && basename(path).startsWith(`.damaged-${runtimeId}-`)
+  );
+}
+
+async function writeRuntimeRecoveryRecordUnlocked(record, options = {}) {
+  if (!record || !digestPattern.test(record.runtime_id) || !['activation-pending', 'active'].includes(record.status)) {
+    throw new Error('Runtime recovery record is invalid');
+  }
+  const paths = managerPaths(options);
+  if (!validPreservedRuntimePath(record.preserved_runtime_path, record.runtime_id, paths)) {
+    throw new Error('Runtime recovery record path is invalid');
+  }
+  if (record.recovered_at != null && (typeof record.recovered_at !== 'string' || !Number.isFinite(Date.parse(record.recovered_at)))) {
+    throw new Error('Runtime recovery record timestamp is invalid');
+  }
+  const existing = await readRuntimeRecoveryRecord(options);
+  const preservedRuntimePath = record.preserved_runtime_path || (
+    existing.record?.runtime_id === record.runtime_id
+      ? await preservedRuntimePathIfPresent(existing.record, options)
+      : null
+  );
+  const value = {
+    schema_version: 1,
+    runtime_id: record.runtime_id,
+    status: record.status,
+    validation_error: record.validation_error ? runtimeDiagnostic(record.validation_error) : null,
+    preserved_runtime_path: preservedRuntimePath,
+    recovered_at: record.recovered_at ?? new Date().toISOString()
+  };
+  await writeAtomicJson(paths.runtimeRecovery, value);
+  return value;
+}
+
+export async function writeRuntimeRecoveryRecord(record, options = {}, hooks = {}) {
+  const paths = managerPaths(options);
+  await ensurePrivateDirectory(paths.runtimeRoot);
+  return withRuntimeRecoveryRecordLock(paths.runtimeRoot, () => writeRuntimeRecoveryRecordUnlocked(record, options), {
+    onWait: hooks.onRecoveryRecordLockWait,
+    waitTimeoutMs: hooks.lockWaitTimeoutMs
+  });
+}
+
+export async function readRuntimeRecoveryRecord(options = {}) {
+  const paths = managerPaths(options);
+  let value;
+  try { value = await readJsonFile(paths.runtimeRecovery, 'Runtime recovery record'); }
+  catch (error) { return { record: null, error: runtimeDiagnostic(error) }; }
+  if (!value) return { record: null, error: null };
+  const validError = value.validation_error === null || (typeof value.validation_error === 'string' && value.validation_error.length <= 400);
+  const validPath = validPreservedRuntimePath(value.preserved_runtime_path, value.runtime_id, paths);
+  const validTimestamp = typeof value.recovered_at === 'string' && Number.isFinite(Date.parse(value.recovered_at));
+  if (value.schema_version !== 1 || !digestPattern.test(value.runtime_id) || !['activation-pending', 'active'].includes(value.status) || !validError || !validPath || !validTimestamp) {
+    return { record: null, error: 'Runtime recovery record is invalid.' };
+  }
+  return { record: value, error: null };
+}
+
+async function preservedRuntimePathIfPresent(record, options = {}) {
+  if (!record?.preserved_runtime_path) return null;
+  const details = await lstat(record.preserved_runtime_path).catch(error => error?.code === 'ENOENT' ? null : Promise.reject(error));
+  return details && !details.isSymbolicLink() && details.isDirectory() ? record.preserved_runtime_path : null;
+}
+
+async function reconcileRuntimeRecoveryRecordUnlocked(options = {}, hooks = {}) {
+  const current = await readRuntimeRecoveryRecord(options);
+  if (current.error || current.record?.status !== 'activation-pending') return current;
+  try {
+    let record = current.record;
+    let active;
+    try { active = await activeRuntime(options); }
+    catch { return { record, error: null }; }
+    if (active?.id !== record.runtime_id) return { record, error: null };
+    await hooks.afterRecoveryReconciliationSnapshot?.(record);
+    const preservedPath = await preservedRuntimePathIfPresent(record, options);
+    if (preservedPath !== record.preserved_runtime_path) {
+      record = await writeRuntimeRecoveryRecordUnlocked({ ...record, preserved_runtime_path: preservedPath }, options);
+    }
+    record = await writeRuntimeRecoveryRecordUnlocked({ ...record, status: 'active', recovered_at: new Date().toISOString() }, options);
+    return { record, error: null };
+  } catch (error) {
+    return { record: current.record, error: runtimeDiagnostic(error) };
+  }
+}
+
+export async function reconcileRuntimeRecoveryRecord(options = {}, hooks = {}) {
+  const paths = managerPaths(options);
+  await ensurePrivateDirectory(paths.runtimeRoot);
+  return withRuntimeRecoveryRecordLock(paths.runtimeRoot, () => reconcileRuntimeRecoveryRecordUnlocked(options, hooks), {
+    onWait: hooks.onRecoveryRecordLockWait,
+    waitTimeoutMs: hooks.lockWaitTimeoutMs
+  });
+}
+
+export async function publishRuntimeStage(stage, destination, expectedId, { beforePreserve, beforeInstall } = {}) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let current;
+    try { current = await lstat(destination); }
+    catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      try {
+        await beforeInstall?.();
+        await rename(stage, destination);
+        return { repaired: false, preservedPath: null };
+      } catch (renameError) {
+        if (['EEXIST', 'ENOTEMPTY'].includes(renameError?.code)) continue;
+        throw renameError;
+      }
+    }
+    if (current.isSymbolicLink() || !current.isDirectory()) throw new Error(`Runtime distribution path is unsafe: ${destination}`);
+
+    let currentIsValid = false;
+    try {
+      await validateInstalledDistribution(destination, expectedId);
+      currentIsValid = true;
+    } catch { /* Replace only a real directory whose content fails validation. */ }
+    if (currentIsValid) {
+      await rm(stage, { recursive: true, force: true });
+      return { repaired: false, preservedPath: null };
+    }
+
+    const preservedPath = join(dirname(destination), `.damaged-${expectedId}-${randomUUID()}`);
+    await beforePreserve?.(preservedPath);
+    try { await rename(destination, preservedPath); }
+    catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      throw error;
+    }
+
+    try {
+      await rename(stage, destination);
+      return { repaired: true, preservedPath };
+    } catch (error) {
+      if (['EEXIST', 'ENOTEMPTY'].includes(error?.code)) {
+        try {
+          await validateInstalledDistribution(destination, expectedId);
+          await rm(stage, { recursive: true, force: true });
+          return { repaired: true, preservedPath };
+        } catch { /* A concurrent invalid destination remains a hard failure. */ }
+      }
+      try { await rename(preservedPath, destination); }
+      catch (restoreError) {
+        throw new Error(`Runtime replacement failed and the prior distribution remains preserved at ${preservedPath}; it could not be restored to ${destination}: ${restoreError.message}`, { cause: error });
+      }
+      throw error;
+    }
+  }
+  throw new Error(`Runtime distribution changed repeatedly during installation: ${destination}`);
+}
+
+export function managerMustRestartForRuntime(managerRuntimeVersion, updatedRuntime) {
+  return managerRuntimeVersion !== updatedRuntime.id || updatedRuntime.repaired_distribution === true;
+}
+
 export async function recordRuntimeSource(sourceRoot, options = {}) {
   const paths = managerPaths(options);
   const source = await sourceIdentity(sourceRoot);
@@ -134,17 +313,37 @@ export async function currentRuntimeSource(fallbackSource = defaultSourceRoot, o
   return sourcePath;
 }
 
-export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot, options = {}) {
+async function installRuntimeDistributionUnlocked(sourceRoot = defaultSourceRoot, options = {}, hooks = {}) {
   const paths = managerPaths(options);
   const source = await sourceIdentity(sourceRoot);
+  const existingRecovery = await readRuntimeRecoveryRecord(options);
+  let recoveryRecord = existingRecovery.record?.runtime_id === source.id && existingRecovery.record.status === 'activation-pending'
+    ? existingRecovery.record
+    : null;
+  let previousActive = null;
+  let recoveredFromInvalidActive = false;
+  let previousActiveError = null;
+  try { previousActive = await activeRuntime(options); }
+  catch (error) {
+    recoveredFromInvalidActive = true;
+    previousActiveError = runtimeDiagnostic(error);
+  }
+  await hooks.afterRecoverySnapshot?.({ recoveryRecord, previousActive, previousActiveError });
   await Promise.all([ensurePrivateDirectory(paths.runtimeRoot), ensurePrivateDirectory(paths.configRoot)]);
   const destination = join(paths.runtimeRoot, source.id);
-  let installed = false;
-  try { await lstat(destination); installed = true; }
-  catch (error) { if (error?.code !== 'ENOENT') throw error; }
-  if (installed) {
+  let destinationIsValid = false;
+  let destinationIsDamagedDirectory = false;
+  let restoredMissingDistribution = false;
+  try {
     await validateInstalledDistribution(destination, source.id);
-  } else {
+    destinationIsValid = true;
+  } catch {
+    const details = await lstat(destination).catch(error => error?.code === 'ENOENT' ? null : Promise.reject(error));
+    if (details && (details.isSymbolicLink() || !details.isDirectory())) throw new Error(`Runtime distribution path is unsafe: ${destination}`);
+    destinationIsDamagedDirectory = Boolean(details);
+  }
+  let repair = { repaired: false, preservedPath: null };
+  if (!destinationIsValid) {
     const stage = join(paths.runtimeRoot, `.stage-${process.pid}-${randomUUID()}`);
     await mkdir(stage, { mode: 0o700 });
     try {
@@ -157,59 +356,132 @@ export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot,
       await buildRuntimeDependencies(stage, options.environment ?? process.env, options.homeDirectory ?? homedir());
       const metadata = { schema_version: 1, id: source.id, version: source.version, path: destination, source_root: source.root, files: source.files, installed_at: new Date().toISOString() };
       await writeFile(join(stage, '.distribution.json'), `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
-      try {
-        await rename(stage, destination);
-      } catch (error) {
-        // CLI startup and another Manager request can race to install the same immutable snapshot.
-        // Reuse the winner only after validating its complete identity and metadata.
-        if (!['EEXIST', 'ENOTEMPTY'].includes(error?.code)) throw error;
-        await validateInstalledDistribution(destination, source.id);
-        await rm(stage, { recursive: true, force: true });
+      if (recoveredFromInvalidActive && !destinationIsDamagedDirectory) {
+        restoredMissingDistribution = true;
+        const priorPreservedPath = await preservedRuntimePathIfPresent(recoveryRecord, options);
+        recoveryRecord = {
+          runtime_id: source.id,
+          status: 'activation-pending',
+          validation_error: recoveryRecord?.validation_error || previousActiveError,
+          preserved_runtime_path: priorPreservedPath,
+          recovered_at: new Date().toISOString()
+        };
+        await writeRuntimeRecoveryRecord(recoveryRecord, options);
+        await markManagerRestartRequiredForRuntimeRepair(source.id, options);
       }
+      repair = await publishRuntimeStage(stage, destination, source.id, {
+        beforeInstall: async () => {
+          const managerRestartRequired = await markManagerRestartRequiredForRuntimeRepair(source.id, options);
+          if (managerRestartRequired) restoredMissingDistribution = true;
+          if (!recoveryRecord && (destinationIsDamagedDirectory || managerRestartRequired)) {
+            recoveryRecord = {
+              runtime_id: source.id,
+              status: 'activation-pending',
+              validation_error: previousActiveError,
+              preserved_runtime_path: null,
+              recovered_at: new Date().toISOString()
+            };
+            await writeRuntimeRecoveryRecord(recoveryRecord, options);
+          }
+        },
+        beforePreserve: async preservedRuntimePath => {
+          recoveryRecord = {
+            runtime_id: source.id,
+            status: 'activation-pending',
+            validation_error: previousActiveError,
+            preserved_runtime_path: preservedRuntimePath,
+            recovered_at: new Date().toISOString()
+          };
+          await writeRuntimeRecoveryRecord(recoveryRecord, options);
+          if (destinationIsDamagedDirectory) await markManagerRestartRequiredForRuntimeRepair(source.id, options);
+        }
+      });
     } catch (error) {
       await rm(stage, { recursive: true, force: true }).catch(() => {});
       throw error;
     }
   }
-  const existing = await activeRuntime(options);
+  if (!recoveryRecord && (recoveredFromInvalidActive || repair.repaired)) {
+    recoveryRecord = {
+        runtime_id: source.id,
+        status: 'activation-pending',
+        validation_error: previousActiveError,
+        preserved_runtime_path: repair.preservedPath,
+        recovered_at: new Date().toISOString()
+    };
+    await writeRuntimeRecoveryRecord(recoveryRecord, options);
+  }
   await writeAtomicJson(paths.activeRuntime, { schema_version: 1, id: source.id, activated_at: new Date().toISOString() });
-  return { ...(await activeRuntime(options)), changed: existing?.id !== source.id };
+  if (recoveryRecord) {
+    await writeRuntimeRecoveryRecord({
+      ...recoveryRecord,
+      status: 'active',
+      preserved_runtime_path: await preservedRuntimePathIfPresent(recoveryRecord, options),
+      recovered_at: new Date().toISOString()
+    }, options);
+  }
+  return {
+    ...(await activeRuntime(options)),
+    changed: recoveredFromInvalidActive || repair.repaired || previousActive?.id !== source.id,
+    recovered_from_invalid_active: recoveredFromInvalidActive,
+    previous_active_error: previousActiveError,
+    repaired_distribution: repair.repaired || restoredMissingDistribution,
+    preserved_runtime_path: repair.preservedPath,
+    recovery_status: recoveryRecord ? 'active' : null
+  };
 }
 
-export function installRuntimeDistributionInWorker(sourceRoot = defaultSourceRoot, options = {}, { moduleUrl = import.meta.url } = {}) {
-  const worker = new Worker(runtimeInstallWorkerSource, {
-    eval: true,
-    workerData: {
-      moduleUrl,
-      sourceRoot,
-      environment: { ...(options.environment ?? process.env) },
-      homeDirectory: options.homeDirectory ?? homedir()
-    }
+export async function installRuntimeDistribution(sourceRoot = defaultSourceRoot, options = {}, hooks = {}) {
+  if (!isMainThread && hooks.skipRuntimeInstallLock === true) return installRuntimeDistributionUnlocked(sourceRoot, options, hooks);
+  const paths = managerPaths(options);
+  await ensurePrivateDirectory(paths.runtimeRoot);
+  return withRuntimeInstallLock(paths.runtimeRoot, () => installRuntimeDistributionUnlocked(sourceRoot, options, hooks), {
+    onWait: hooks.onInstallLockWait,
+    waitTimeoutMs: hooks.lockWaitTimeoutMs
   });
+}
 
-  return new Promise((resolveInstall, rejectInstall) => {
-    let settled = false;
-    worker.once('message', message => {
-      settled = true;
-      if (message?.ok) {
-        resolveInstall(message.result);
-        return;
+export function installRuntimeDistributionInWorker(sourceRoot = defaultSourceRoot, options = {}, {
+  moduleUrl = import.meta.url,
+  onInstallLockWait,
+  lockWaitTimeoutMs
+} = {}) {
+  const paths = managerPaths(options);
+  return ensurePrivateDirectory(paths.runtimeRoot).then(() => withRuntimeInstallLock(paths.runtimeRoot, () => {
+    const worker = new Worker(runtimeInstallWorkerSource, {
+      eval: true,
+      workerData: {
+        moduleUrl,
+        sourceRoot,
+        environment: { ...(options.environment ?? process.env) },
+        homeDirectory: options.homeDirectory ?? homedir()
       }
-      const error = new Error(message?.error?.message || 'Runtime installation worker failed without a message.');
-      if (message?.error?.stack) error.stack = message.error.stack;
-      rejectInstall(error);
     });
-    worker.once('error', error => {
-      if (settled) return;
-      settled = true;
-      rejectInstall(error);
+
+    return new Promise((resolveInstall, rejectInstall) => {
+      let settled = false;
+      worker.once('message', message => {
+        settled = true;
+        if (message?.ok) {
+          resolveInstall(message.result);
+          return;
+        }
+        const error = new Error(message?.error?.message || 'Runtime installation worker failed without a message.');
+        if (message?.error?.stack) error.stack = message.error.stack;
+        rejectInstall(error);
+      });
+      worker.once('error', error => {
+        if (settled) return;
+        settled = true;
+        rejectInstall(error);
+      });
+      worker.once('exit', code => {
+        if (settled) return;
+        settled = true;
+        rejectInstall(new Error(`Runtime installation worker exited with status ${code} before returning a result.`));
+      });
     });
-    worker.once('exit', code => {
-      if (settled) return;
-      settled = true;
-      rejectInstall(new Error(`Runtime installation worker exited with status ${code} before returning a result.`));
-    });
-  });
+  }, { onWait: onInstallLockWait, waitTimeoutMs: lockWaitTimeoutMs }));
 }
 
 export async function resolveRuntimePath(runtimePath, options = {}) {
@@ -239,7 +511,9 @@ export async function listRuntimeDistributions(options = {}) {
       runtimes.push({ id: record.id, version: record.version, installed_at: record.installed_at });
     } catch { /* Invalid version folders are preserved for diagnosis and never activated. */ }
   }
-  const active = await activeRuntime(options);
+  let active = null;
+  try { active = await activeRuntime(options); }
+  catch { /* Invalid active selection must not hide other valid Runtime facts. */ }
   return runtimes.sort((a, b) => a.installed_at.localeCompare(b.installed_at)).map(runtime => ({ ...runtime, active: runtime.id === active?.id }));
 }
 

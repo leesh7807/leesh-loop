@@ -4,6 +4,7 @@ import { execFile as execute, execFileSync } from 'node:child_process';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { validateGitBranchName } from '../project-config.mjs';
 import { githubRepositoryTransport } from './github-repository-url.mjs';
@@ -139,7 +140,7 @@ export async function bootstrapGitTarget(repositoryUrl, baseBranch) {
   throw new Error('configured base branch creation completed without an authoritative remote readback.');
 }
 
-if (process.argv[1] && new URL(`file://${process.argv[1]}`).pathname === new URL(import.meta.url).pathname) {
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const [, , commandOrRepository, commandArgument, commandBranch] = process.argv;
   const readOnly = commandOrRepository === 'read';
   const repositoryUrl = readOnly ? commandArgument : commandOrRepository;

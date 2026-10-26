@@ -15,7 +15,15 @@ export function operatorConfigViewState(readState, config) {
 export function sharedRuntimeViewState(readState, runtime) {
   if (readState === 'loading') return 'loading';
   if (readState === 'error') return 'error';
+  if (runtime?.active_error) return 'invalid';
   return runtime?.active ? 'ready' : 'missing';
+}
+
+export function managerRuntimeAttentionState(readState, runtime) {
+  if (readState !== 'loaded') return null;
+  if (runtime?.active_error) return 'repair';
+  if (runtime?.active && (runtime.manager_restart_required || runtime.manager_runtime_version !== runtime.active.id)) return 'restart';
+  return null;
 }
 
 export function workflowComparisonViewState(readState, hasComparison, isOpen) {

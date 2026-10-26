@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { installRuntimeDistribution } from '../operator/app/runtime-distribution.mjs';
+import { installRuntimeDistribution, managerMustRestartForRuntime } from '../operator/app/runtime-distribution.mjs';
 import { managerPaths, readJsonFile } from '../operator/app/manager-storage.mjs';
 import { ensureManagerService, managerRequest } from '../operator/app/manager-service.mjs';
 
@@ -34,6 +34,19 @@ function printInstances(instances) {
   console.log(headers.map((value, index) => value.padEnd(widths[index])).join('  '));
   for (const row of rows) console.log(row.map((value, index) => String(value).padEnd(widths[index])).join('  '));
   for (const value of instances) if (value.detail) console.error(`leesh-loop: ${value.id}: ${value.detail}`);
+}
+
+function formatDuration(durationMs) {
+  const seconds = Math.max(1, Math.ceil(durationMs / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+}
+
+function reportRuntimeInstallLockWait(wait) {
+  const owner = wait.owner_pid === null ? 'an owner with unknown PID' : `PID ${wait.owner_pid}`;
+  console.error(`Waiting for the Runtime installation lock held by ${owner} (owner age ${formatDuration(wait.owner_age_ms)}; waited ${formatDuration(wait.waited_ms)} of ${formatDuration(wait.wait_timeout_ms)}). Ctrl-C cancels this wait without stopping the owner.`);
 }
 
 async function waitForManagerExit(record) {
@@ -103,18 +116,27 @@ async function main() {
     return;
   }
   if (selectedCommand === 'update' && args.length === 0) {
-    const updated = await installRuntimeDistribution(sourceRoot);
-    let manager = await ensureReadyManager();
-    if (manager.alreadyRunning) {
-      const paths = managerPaths();
-      const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
-      if (service?.runtime_version !== updated.id) {
-        await managerRequest(manager, '/api/v1/manager/restart', { method: 'POST' });
-        await waitForManagerExit(service);
-        manager = await ensureManagerService({ sourceRoot });
-      }
-    }
+    const updated = await installRuntimeDistribution(sourceRoot, {}, { onInstallLockWait: reportRuntimeInstallLockWait });
+    if (updated.recovered_from_invalid_active) console.log('Recovered from an invalid active Runtime selection using the validated source checkout.');
+    if (updated.previous_active_error) console.log(`Previous active Runtime validation: ${updated.previous_active_error}`);
+    if (updated.preserved_runtime_path) console.log(`Damaged Runtime preserved at ${updated.preserved_runtime_path}.`);
     console.log(`Central Runtime ${updated.version} (${updated.id}) is active.`);
+    let manager;
+    try {
+      manager = await ensureReadyManager();
+      if (manager.alreadyRunning) {
+        const paths = managerPaths();
+        const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
+        if (managerMustRestartForRuntime(service?.runtime_version, updated)) {
+          await managerRequest(manager, '/api/v1/manager/restart', { method: 'POST' });
+          await waitForManagerExit(service);
+          manager = await ensureManagerService({ sourceRoot });
+        }
+      }
+    } catch (error) {
+      const paths = managerPaths();
+      throw new Error(`Runtime ${updated.version} (${updated.id}) is active, but Manager startup or restart did not complete or could not be confirmed: ${error.message}. Check Manager configuration at ${paths.managerConfiguration} and logs at ${paths.managerLog}; after resolving the issue, run \`leesh-loop\` to reopen Manager.`);
+    }
     console.log(`Manager: ${manager.url}`);
     console.log('If an existing Manager tab stops accepting requests after this update, run `leesh-loop` to reopen Manager with fresh access.');
     return;

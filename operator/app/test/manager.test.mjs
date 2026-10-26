@@ -14,7 +14,8 @@ import { createOperatorUiServer } from '../operator-ui-server.mjs';
 import { hashDistribution } from '../installation-metadata.mjs';
 import { allocatePort, discoverRunningLoops, loopInstanceStatus, startLoopInstance, stopLoopInstance } from '../manager-lifecycle.mjs';
 import { createLoopInstance, listLoopInstances, managerPaths } from '../manager-storage.mjs';
-import { activeRuntime, installRuntimeDistributionInWorker } from '../runtime-distribution.mjs';
+import { activeRuntime, installRuntimeDistributionInWorker, writeRuntimeRecoveryRecord } from '../runtime-distribution.mjs';
+import { openLoopTaskStore } from '../local-task-store-runtime.mjs';
 
 const execFile = promisify(execute);
 const sourceRoot = resolve(import.meta.dirname, '../../..');
@@ -235,17 +236,26 @@ async function stopRecordedProcess(pid, startTicks, signal = 'SIGTERM') {
   assert.notEqual(processStartTicks(pid), startTicks, `process ${pid} did not exit after ${signal}`);
 }
 
-async function api(manager, path, { method = 'GET', instanceId, body, origin } = {}) {
+async function api(manager, path, { method = 'GET', instanceId, body, origin, timeoutMs } = {}) {
   const headers = { 'x-leesh-loop-token': manager.token, accept: 'application/json' };
   if (instanceId) headers['x-leesh-loop-instance-id'] = instanceId;
   if (origin) headers.origin = origin;
   const options = { method, headers };
+  if (timeoutMs !== undefined) options.signal = AbortSignal.timeout(timeoutMs);
   if (body !== undefined) {
     headers['content-type'] = 'application/json';
     options.body = JSON.stringify(body);
   }
   const response = await fetch(`${manager.url}${path}`, options);
   return { response, body: await response.json().catch(() => null) };
+}
+
+function awaitWithTimeout(operation, label, timeoutMs = 5_000) {
+  let timer;
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} did not settle within ${timeoutMs} ms`)), timeoutMs);
+  });
+  return Promise.race([operation, timeout]).finally(() => clearTimeout(timer));
 }
 
 test('managed instances share one Runtime and keep their files and Task Stores isolated', async t => {
@@ -274,6 +284,11 @@ test('managed instances share one Runtime and keep their files and Task Stores i
   assert.equal((await readdir(managerPathsForUser.runtimeRoot).catch(error => error.code === 'ENOENT' ? [] : Promise.reject(error))).length, 0);
 
   const manager = await startManagerFixture(t, paths);
+  const runtimeReadback = await api(manager, '/api/v1/runtime');
+  assert.equal(runtimeReadback.response.status, 200);
+  assert.equal(runtimeReadback.body.source.path, sourceRoot);
+  assert.equal(runtimeReadback.body.source.version, JSON.parse(await readFile(join(sourceRoot, 'package.json'), 'utf8')).version);
+  assert.match(runtimeReadback.body.source.id, /^[a-f0-9]{64}$/);
   const relativeRepository = await api(manager, '/api/v1/instances', {
     method: 'POST', origin: manager.url,
     body: { repositoryPath: 'repositories/third-project' }
@@ -323,6 +338,352 @@ test('managed instances share one Runtime and keep their files and Task Stores i
   assert.ok(!pageText.includes(manager.token));
   assert.equal(page.headers.get('x-frame-options'), 'DENY');
   assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+});
+
+test('Manager Runtime status and install action remain available with an empty registry', async t => {
+  const paths = await fixture(t);
+  let installedSource;
+  const manager = await startManagerFixture(t, paths, {
+    runtimeInstaller: async source => {
+      installedSource = source;
+      return { id: 'a'.repeat(64), version: '0.1.0', path: join(paths.directory, 'installed-runtime'), changed: true };
+    }
+  });
+
+  assert.deepEqual(await listLoopInstances(paths), []);
+  const runtime = await api(manager, '/api/v1/runtime');
+  assert.equal(runtime.response.status, 200);
+  assert.equal(runtime.body.source.path, sourceRoot);
+  assert.match(runtime.body.source.id, /^[a-f0-9]{64}$/);
+  assert.equal(runtime.body.active, null);
+  assert.equal(runtime.body.manager_runtime_version, null);
+
+  const installed = await api(manager, '/api/v1/runtime/update', { method: 'POST', origin: manager.url });
+  assert.equal(installed.response.status, 200);
+  assert.equal(installedSource, sourceRoot);
+  assert.equal(installed.body.active.id, 'a'.repeat(64));
+  assert.equal(installed.body.manager_restart_required, true);
+  assert.deepEqual(await listLoopInstances(paths), []);
+});
+
+test('Manager Runtime update can select a validated Runtime when the active distribution is invalid', async t => {
+  const paths = await fixture(t);
+  const invalidRuntime = await installTestRuntime(paths, 'corrupt-active-runtime');
+  const replacement = await installTestRuntime(paths, 'validated-replacement-runtime');
+  const activeFile = managerPaths(paths).activeRuntime;
+  await writeFile(join(invalidRuntime.path, 'runtime-fixture.mjs'), 'corrupt active contents');
+  await writeFile(activeFile, `${JSON.stringify({ schema_version: 1, id: invalidRuntime.id })}\n`);
+  await assert.rejects(activeRuntime(paths), /contents do not match/);
+
+  let installerCalled = false;
+  const manager = await startManagerFixture(t, paths, {
+    runtimeInstaller: async () => {
+      installerCalled = true;
+      await writeFile(activeFile, `${JSON.stringify({ schema_version: 1, id: replacement.id })}\n`);
+      return { ...replacement, changed: true, recovered_from_invalid_active: true };
+    }
+  });
+
+  const recovered = await api(manager, '/api/v1/runtime/update', { method: 'POST', origin: manager.url });
+  assert.equal(recovered.response.status, 200);
+  assert.equal(installerCalled, true);
+  assert.equal(recovered.body.previous, null);
+  assert.equal(recovered.body.active.id, replacement.id);
+  assert.equal(recovered.body.recovered_from_invalid_active, true);
+  assert.equal(recovered.body.manager_restart_required, true);
+  assert.equal((await activeRuntime(paths)).id, replacement.id);
+  assert.equal(await readFile(join(invalidRuntime.path, 'runtime-fixture.mjs'), 'utf8'), 'corrupt active contents');
+});
+
+test('Manager Runtime status keeps valid alternatives visible when the active distribution is invalid', async t => {
+  const paths = await fixture(t);
+  const invalidRuntime = await installTestRuntime(paths, 'invalid-active-runtime');
+  const validAlternative = await installTestRuntime(paths, 'valid-alternative-runtime');
+  const activeFile = managerPaths(paths).activeRuntime;
+  await writeFile(join(invalidRuntime.path, 'runtime-fixture.mjs'), 'corrupt active contents');
+  await writeFile(activeFile, `${JSON.stringify({ schema_version: 1, id: invalidRuntime.id })}\n`);
+
+  const manager = await startManagerFixture(t, paths);
+  const runtime = await api(manager, '/api/v1/runtime');
+
+  assert.equal(runtime.response.status, 200);
+  assert.equal(runtime.body.active, null);
+  assert.match(runtime.body.active_error, /contents do not match/);
+  assert.ok(runtime.body.distributions.some(value => value.id === validAlternative.id));
+  assert.ok(runtime.body.distributions.every(value => value.active === false));
+});
+
+test('Manager Runtime status retains a pending quarantine target until activation is confirmed', async t => {
+  const paths = await fixture(t);
+  const runtime = await installTestRuntime(paths, 'pending-runtime-recovery');
+  const managedPaths = managerPaths(paths);
+  const quarantineTarget = join(managedPaths.runtimeRoot, `.damaged-${runtime.id}-pending-fixture`);
+  await writeFile(managedPaths.activeRuntime, `${JSON.stringify({ schema_version: 1, id: 'f'.repeat(64) })}\n`, { mode: 0o600 });
+  await writeRuntimeRecoveryRecord({
+    runtime_id: runtime.id,
+    status: 'activation-pending',
+    validation_error: 'Runtime distribution contents do not match their immutable identity.',
+    preserved_runtime_path: quarantineTarget
+  }, paths);
+
+  const manager = await startManagerFixture(t, paths);
+  const status = await api(manager, '/api/v1/runtime');
+
+  assert.equal(status.response.status, 200);
+  assert.equal(status.body.active, null);
+  assert.equal(status.body.last_recovery.status, 'activation-pending');
+  assert.equal(status.body.last_recovery.preserved_runtime_path, quarantineTarget);
+  await assert.rejects(lstat(quarantineTarget), { code: 'ENOENT' });
+  assert.equal((await readFile(managedPaths.runtimeRecovery, 'utf8')).includes(quarantineTarget), true);
+});
+
+test('same-ID Runtime recovery retry preserves its quarantined path and Manager restart requirement', async t => {
+  const paths = await fixture(t);
+  const runtime = await installTestRuntime(paths, 'same-id-runtime-repair');
+  const managedPaths = managerPaths(paths);
+  const preservedRuntimePath = join(managedPaths.runtimeRoot, `.damaged-${runtime.id}-repair-fixture`);
+  await mkdir(preservedRuntimePath, { recursive: true });
+  await writeFile(join(preservedRuntimePath, 'runtime-fixture.mjs'), 'corrupt prior distribution');
+  await writeFile(managedPaths.activeRuntime, `${JSON.stringify({ schema_version: 1, id: 'f'.repeat(64) })}\n`, { mode: 0o600 });
+  await writeRuntimeRecoveryRecord({
+    runtime_id: runtime.id,
+    status: 'activation-pending',
+    validation_error: 'Runtime distribution contents do not match their immutable identity.',
+    preserved_runtime_path: preservedRuntimePath
+  }, paths);
+  await mkdir(managedPaths.managerStateRoot, { recursive: true });
+  const manager = await startManagerFixture(t, paths, {
+    runtimeId: runtime.id,
+    runtimeInstaller: async () => {
+      await writeFile(managedPaths.activeRuntime, `${JSON.stringify({ schema_version: 1, id: runtime.id })}\n`, { mode: 0o600 });
+      return {
+        ...runtime,
+        changed: true,
+        recovered_from_invalid_active: true,
+        previous_active_error: 'Runtime distribution contents do not match their immutable identity.',
+        repaired_distribution: false,
+        preserved_runtime_path: null
+      };
+    }
+  });
+  await writeFile(managedPaths.managerApiMaster, `${'a'.repeat(64)}\n`, { mode: 0o600 });
+  await writeFile(managedPaths.managerConfiguration, `${JSON.stringify({ schema_version: 1, port: manager.port, symphony_port_min: 4200, symphony_port_max: 4209 })}\n`, { mode: 0o600 });
+  await writeFile(managedPaths.managerServiceRecord, `${JSON.stringify({
+    schema_version: 1,
+    pid: process.pid,
+    process_start_ticks: processStartTicks(process.pid),
+    host: '127.0.0.1',
+    port: manager.port,
+    runtime_path: runtime.path,
+    runtime_version: runtime.id,
+    manager_restart_required: true
+  })}\n`, { mode: 0o600 });
+
+  const recovered = await api(manager, '/api/v1/runtime/update', { method: 'POST', origin: manager.url });
+  assert.equal(recovered.response.status, 200);
+  assert.equal(recovered.body.active.id, runtime.id);
+  assert.equal(recovered.body.manager_runtime_version, runtime.id);
+  assert.equal(recovered.body.manager_restart_required, true);
+  assert.equal(recovered.body.repaired_distribution, false);
+  assert.equal(recovered.body.preserved_runtime_path, preservedRuntimePath);
+  assert.match(recovered.body.active_runtime_error, /ENOENT/);
+
+  const service = JSON.parse(await readFile(managedPaths.managerServiceRecord, 'utf8'));
+  assert.equal(service.runtime_version, runtime.id);
+  assert.equal(service.manager_restart_required, true);
+  const readback = await api(manager, '/api/v1/runtime');
+  assert.equal(readback.body.manager_restart_required, true);
+  assert.equal(readback.body.last_recovery.runtime_id, runtime.id);
+  assert.equal(readback.body.last_recovery.status, 'active');
+  assert.equal(readback.body.last_recovery.validation_error, 'Runtime distribution contents do not match their immutable identity.');
+  assert.equal(readback.body.last_recovery.preserved_runtime_path, preservedRuntimePath);
+
+  const reopen = await ensureManagerService({ sourceRoot, environment: paths.environment, homeDirectory: paths.homeDirectory });
+  assert.equal(reopen.alreadyRunning, true);
+  assert.equal(reopen.managerRestartRequired, true);
+
+  delete service.manager_restart_required;
+  await writeFile(managedPaths.managerServiceRecord, `${JSON.stringify(service)}\n`, { mode: 0o600 });
+  const afterManagerReopen = await api(manager, '/api/v1/runtime');
+  assert.equal(afterManagerReopen.body.manager_restart_required, false);
+  assert.equal(afterManagerReopen.body.last_recovery.preserved_runtime_path, preservedRuntimePath);
+});
+
+test('Manager unregisters a Stopped or confirmed process-absent Failed instance and preserves its repository and Task Store', async t => {
+  const paths = await fixture(t);
+  const repositoryRoot = join(paths.directory, 'repositories');
+  const firstRoot = await makeRepository(repositoryRoot, 'unregister-first');
+  const secondRoot = await makeRepository(repositoryRoot, 'unregister-second');
+  const first = await createLoopInstance(firstRoot, { sourceRoot, ...paths });
+  const second = await createLoopInstance(secondRoot, { sourceRoot, ...paths });
+  const manager = await startManagerFixture(t, paths);
+
+  const firstPublication = await api(manager, '/api/v1/publish', {
+    method: 'POST', instanceId: first.id, origin: manager.url,
+    body: { plan: '# Preserve first task\n\n## Objective\nKeep this task after unregistration.', state: 'Ready' }
+  });
+  const secondPublication = await api(manager, '/api/v1/publish', {
+    method: 'POST', instanceId: second.id, origin: manager.url,
+    body: { plan: '# Preserve second task\n\n## Objective\nKeep this other instance isolated.', state: 'Ready' }
+  });
+  assert.equal(firstPublication.response.status, 201);
+  assert.equal(secondPublication.response.status, 201);
+  assert.equal((await api(manager, '/api/v1/tasks', { instanceId: first.id })).response.status, 200);
+  assert.equal((await api(manager, '/api/v1/tasks', { instanceId: second.id })).response.status, 200);
+
+  const executionDirectory = join(managerPaths(paths).loopExecutionRoot, first.id);
+  await mkdir(executionDirectory, { recursive: true });
+  const executionPath = join(executionDirectory, 'execution.json');
+  await writeFile(executionPath, `${JSON.stringify({
+    schema_version: 1,
+    id: first.id,
+    status: 'Starting',
+    started_at: new Date().toISOString(),
+    port: 4181
+  })}\n`);
+  const refused = await api(manager, `/api/v1/instances/${first.id}`, { method: 'DELETE', origin: manager.url });
+  assert.equal(refused.response.status, 409);
+  assert.match(refused.body.error, /confirms a Failed Loop has no active processes/);
+  assert.equal((await listLoopInstances(paths)).length, 2);
+
+  await writeFile(executionPath, `${JSON.stringify({
+    schema_version: 1,
+    id: first.id,
+    status: 'Failed',
+    detail: 'startup failed while the recorded launcher is still present',
+    launcher_pid: process.pid
+  })}\n`);
+  const uncertainFailure = await api(manager, `/api/v1/instances/${first.id}`);
+  assert.equal(uncertainFailure.body.instance.status, 'Failed');
+  assert.equal(uncertainFailure.body.instance.can_update_workflow, undefined);
+  assert.equal(uncertainFailure.body.instance.process_absence_confirmed, undefined);
+  const refusedFailed = await api(manager, `/api/v1/instances/${first.id}`, { method: 'DELETE', origin: manager.url });
+  assert.equal(refusedFailed.response.status, 409);
+  assert.match(refusedFailed.body.error, /Current status: Failed/);
+  assert.equal((await listLoopInstances(paths)).length, 2);
+
+  await writeFile(executionPath, `${JSON.stringify({ schema_version: 1, id: first.id, status: 'Failed', detail: 'startup failed before a process was launched' })}\n`);
+  const confirmedFailure = await api(manager, `/api/v1/instances/${first.id}`);
+  assert.equal(confirmedFailure.body.instance.status, 'Failed');
+  assert.equal(confirmedFailure.body.instance.can_update_workflow, true);
+  assert.equal(confirmedFailure.body.instance.process_absence_confirmed, true);
+  const removed = await api(manager, `/api/v1/instances/${first.id}`, { method: 'DELETE', origin: manager.url });
+  assert.equal(removed.response.status, 200);
+  assert.equal(removed.body.repository_preserved, true);
+  assert.equal(removed.body.data_preserved, true);
+  assert.equal(removed.body.instance.id, first.id);
+  assert.equal(removed.body.instance.data_directory, first.data_directory);
+  assert.deepEqual((await listLoopInstances(paths)).map(value => value.id), [second.id]);
+
+  assert.equal(await readFile(join(firstRoot, 'README.md'), 'utf8'), '# unregister-first\n');
+  assert.match(await readFile(join(first.data_directory, 'WORKFLOW.md'), 'utf8'), /Repository workflow/);
+  const preservedStore = await openLoopTaskStore(join(first.data_directory, 'state'));
+  try {
+    assert.deepEqual(preservedStore.listTasks().map(task => task.id), [firstPublication.body.page_id]);
+  } finally { preservedStore.close(); }
+  const removedStoreRequest = await api(manager, '/api/v1/tasks', { instanceId: first.id });
+  assert.equal(removedStoreRequest.response.status, 404);
+  const otherTasks = await api(manager, '/api/v1/tasks', { instanceId: second.id });
+  assert.deepEqual(otherTasks.body.tasks.map(task => task.id), [secondPublication.body.page_id]);
+  const remainingStatus = await api(manager, `/api/v1/instances/${second.id}`);
+  assert.equal(remainingStatus.body.instance.status, 'Stopped');
+
+  const reRegistered = await api(manager, '/api/v1/instances', {
+    method: 'POST', origin: manager.url, body: { repositoryPath: firstRoot }
+  });
+  assert.equal(reRegistered.response.status, 201);
+  assert.notEqual(reRegistered.body.instance.id, first.id);
+  assert.equal(reRegistered.body.instance.repository_root, firstRoot);
+  assert.notEqual(reRegistered.body.instance.data_directory, first.data_directory);
+  assert.deepEqual((await listLoopInstances(paths)).map(value => value.id).sort(), [second.id, reRegistered.body.instance.id].sort());
+});
+
+test('Manager drains an in-flight Task request before unregistering its instance', async t => {
+  const paths = await fixture(t);
+  const repositoryRoot = join(paths.directory, 'repositories');
+  const repository = await makeRepository(repositoryRoot, 'unregister-drains-task-request');
+  const otherRepository = await makeRepository(repositoryRoot, 'register-during-unregister-drain');
+  const instance = await createLoopInstance(repository, { sourceRoot, ...paths });
+  let allowStoreOpen;
+  let signalStoreOpen;
+  const storeOpen = new Promise(resolve => { signalStoreOpen = resolve; });
+  const storeOpenGate = new Promise(resolve => { allowStoreOpen = resolve; });
+  let storeClosed = false;
+  const pendingOperations = [];
+  const track = operation => {
+    pendingOperations.push(operation);
+    void operation.catch(() => {});
+    return operation;
+  };
+  const manager = await startManagerFixture(t, paths, {
+    taskStoreOpener: async stateDirectory => {
+      const store = await openLoopTaskStore(stateDirectory);
+      signalStoreOpen();
+      await storeOpenGate;
+      const close = store.close.bind(store);
+      store.close = async () => {
+        storeClosed = true;
+        await close();
+      };
+      return store;
+    }
+  });
+
+  try {
+    const taskRead = track(api(manager, '/api/v1/tasks', { instanceId: instance.id }));
+    await awaitWithTimeout(storeOpen, 'Loop A Task Store opener held-open signal');
+    let unregisterFinished = false;
+    const unregister = track(api(manager, `/api/v1/instances/${instance.id}`, { method: 'DELETE', origin: manager.url })
+      .then(result => { unregisterFinished = true; return result; }));
+    let unregisterReservation;
+    const reservationDeadline = Date.now() + 5_000;
+    while (!unregisterReservation && Date.now() < reservationDeadline) {
+      try {
+        const currentTaskRequest = await api(manager, '/api/v1/tasks', { instanceId: instance.id, timeoutMs: 250 });
+        if (currentTaskRequest.response.status === 409) unregisterReservation = currentTaskRequest;
+      } catch (error) {
+        if (!['AbortError', 'TimeoutError'].includes(error?.name)) throw error;
+      }
+      if (!unregisterReservation) await new Promise(resolveSleep => setTimeout(resolveSleep, 10));
+    }
+    assert.ok(unregisterReservation, 'a fresh Task request must observe the unregister reservation before testing independent registry progress');
+    assert.match(unregisterReservation.body.error, /being unregistered/);
+    assert.equal(unregisterFinished, false, 'unregistration must wait for a Task request that already acquired the instance context');
+
+    const registration = track(api(manager, '/api/v1/instances', {
+      method: 'POST', origin: manager.url, body: { repositoryPath: otherRepository }
+    }));
+    let registrationTimeout;
+    const registrationWhileDrainWaits = await Promise.race([
+      registration.then(result => ({ completed: true, result })),
+      new Promise(resolveTimeout => { registrationTimeout = setTimeout(() => resolveTimeout({ completed: false }), 5_000); })
+    ]);
+    clearTimeout(registrationTimeout);
+
+    allowStoreOpen();
+    const [read, removed, registered] = await Promise.all([
+      awaitWithTimeout(taskRead, 'Loop A held Task request'),
+      awaitWithTimeout(unregister, 'Loop A unregister after Task drain'),
+      awaitWithTimeout(registration, 'Loop B registration after Task drain')
+    ]);
+    assert.equal(read.response.status, 200, JSON.stringify(read.body));
+    assert.equal(removed.response.status, 200);
+    assert.equal(registrationWhileDrainWaits.completed, true, 'an unrelated repository registration must not wait for this Loop Task drain');
+    assert.equal(registrationWhileDrainWaits.result.response.status, 201);
+    assert.equal(registered.response.status, 201);
+    assert.equal(storeClosed, true);
+    assert.deepEqual((await listLoopInstances(paths)).map(value => value.id), [registered.body.instance.id]);
+    assert.equal((await api(manager, '/api/v1/tasks', { instanceId: registered.body.instance.id, timeoutMs: 5_000 })).response.status, 200);
+    assert.equal(await readFile(join(instance.data_directory, 'WORKFLOW.md'), 'utf8').then(value => value.includes('Repository workflow')), true);
+  } finally {
+    allowStoreOpen();
+    let cleanupTimeout;
+    await Promise.race([
+      Promise.allSettled(pendingOperations),
+      new Promise(resolveTimeout => { cleanupTimeout = setTimeout(resolveTimeout, 5_000); })
+    ]);
+    clearTimeout(cleanupTimeout);
+  }
 });
 
 test('Manager log reads return bounded tails and preserve the other log when one is large', async t => {
@@ -516,6 +877,7 @@ test('web Runtime installation runs on a worker while the Manager serves other r
   paths.environment.LEESH_LOOP_TEST_RUNTIME_WORKER_MARKER = workerStartedPath;
   await writeFile(installerModulePath, `
 import { writeFileSync } from 'node:fs';
+import '${pathToFileURL(join(sourceRoot, 'operator/app/runtime-distribution.mjs')).href}';
 
 export function installRuntimeDistribution(sourceRoot, { environment }) {
   writeFileSync(environment.LEESH_LOOP_TEST_RUNTIME_WORKER_MARKER, 'started');
@@ -1317,6 +1679,9 @@ test('unexpected Loop exits report Failed while a confirmed stop reports Stopped
   const expected = await loopInstanceStatus(stopping.id, paths);
   assert.equal(unexpected.status, 'Failed');
   assert.match(unexpected.detail, /without a confirmed stop request/);
+  assert.equal(unexpected.can_update_workflow, undefined);
+  assert.equal(unexpected.process_absence_confirmed, undefined);
+  assert.equal(unexpected.can_stop, undefined);
   assert.equal(JSON.parse(await readFile(join(managerPaths(paths).loopExecutionRoot, running.id, 'execution.json'), 'utf8')).status, 'Failed');
   assert.equal(expected.status, 'Stopped');
   assert.equal(JSON.parse(await readFile(join(managerPaths(paths).loopExecutionRoot, stopping.id, 'execution.json'), 'utf8')).status, 'Stopped');
@@ -1639,6 +2004,7 @@ test('Workflow repair is available after a failed launcher exits and remains blo
   const failedStatus = failedList.body.instances.find(value => value.id === failed.id);
   assert.equal(failedStatus.status, 'Failed');
   assert.equal(failedStatus.can_update_workflow, true);
+  assert.equal(failedStatus.process_absence_confirmed, true);
   const failedComparison = await api(manager, `/api/v1/instances/${failed.id}/workflow`);
   const repaired = await api(manager, `/api/v1/instances/${failed.id}/workflow`, {
     method: 'PUT', origin: manager.url,
@@ -1682,6 +2048,7 @@ test('Workflow repair is available after a failed launcher exits and remains blo
   const activeStatus = activeList.body.instances.find(value => value.id === activeFailure.id);
   assert.equal(activeStatus.status, 'Unconfirmed');
   assert.equal(activeStatus.can_update_workflow, undefined);
+  assert.equal(activeStatus.process_absence_confirmed, undefined);
   const activeComparison = await api(manager, `/api/v1/instances/${activeFailure.id}/workflow`);
   const refused = await api(manager, `/api/v1/instances/${activeFailure.id}/workflow`, {
     method: 'PUT', origin: manager.url,
@@ -1745,6 +2112,7 @@ test('Workflow repair recovers a confirmed-exited pre-ready runtime without its 
   const status = listed.body.instances.find(value => value.id === instance.id);
   assert.equal(status.status, 'Failed');
   assert.equal(status.can_update_workflow, true);
+  assert.equal(status.process_absence_confirmed, true);
 
   const workflowPath = join(instance.data_directory, 'WORKFLOW.md');
   const current = `${await readFile(workflowPath, 'utf8')}\nKeep this pre-ready repair input.\n`;

@@ -202,7 +202,7 @@ test('Local Task mutations reject cross-origin browser requests and non-JSON bod
   assert.equal(sameOriginState.body.task.state, 'Human Review');
 });
 
-test('rendered UI source keeps Local task navigation, human review actions, and neutral responsive styles', async () => {
+test('rendered UI source keeps Task actions, manager hierarchy, state cues, and responsive styles', async () => {
   const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
   const styles = await readFile(join(root, 'operator/ui/src/style.css'), 'utf8');
   assert.match(source, /Human Review/);
@@ -219,26 +219,69 @@ test('rendered UI source keeps Local task navigation, human review actions, and 
   assert.match(source, /Find a task by title, identifier, or State/);
   assert.match(source, /Review selected blockers/);
   assert.match(source, /Show \{remainingBlockers.length\} more/);
+  assert.match(source, /managerStartBlockedByRuntimeRepair\(lifecycleAction, runtimeAttention\)/);
+  assert.match(source, /disabled=\{Boolean\(busy\) \|\| startBlockedByRuntimeRepair\}/);
+  assert.match(source, /manager-runtime-start-disabled/);
+  assert.match(source, /className="manager-management"/);
+  assert.match(source, /Add a Git repository/);
+  assert.match(source, /Unregister Loop/);
+  assert.match(source, /Available when Manager confirms Stopped, or confirms a Failed Loop has no active process/i);
+  assert.match(source, /Review failure/);
+  assert.match(source, /Review ownership/);
+  assert.match(source, /selected\.status === 'Failed' \? 'Retry Loop' : 'Start Loop'/);
+  assert.match(source, /manager-action manager-recovery-action/);
+  assert.match(source, /function openLifecycleDiagnostics\(\)/);
+  assert.match(source, /function openRuntimeControls\(\)/);
+  assert.match(source, /runtimeHeadingRef\.current\?\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(source, /setManagementOpen\(true\)/);
+  assert.match(source, /setLogsOpen\(true\)/);
+  assert.match(source, /setDiagnosisOpen\(Boolean\(selected\?\.detail\)\)/);
+  assert.match(source, /if \(selected\?\.status === 'Unconfirmed' && selected\.detail\)/);
+  assert.match(source, /diagnosisSummaryRef\.current\?\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(source, /scrollIntoView\(\{ behavior: 'smooth', block: 'nearest' \}\)/);
+  assert.match(source, /aria-controls=\{selected\.detail \? 'manager-status-diagnosis manager-logs' : 'manager-logs'\}/);
+  assert.match(source, /Lifecycle actions wait for confirmed process ownership/);
+  assert.match(source, /managerFailedGuidance\(selected\)/);
+  assert.doesNotMatch(source, /Startup failed and no active Loop process is confirmed/);
+  assert.doesNotMatch(source, /The Loop failed to start\. Review its diagnosis and logs before retrying\./);
+  assert.match(source, /verify which process owns/);
+  assert.match(source, /Open Loop logs/);
+  assert.match(source, /const runtimePanel = \(/);
+  assert.match(source, /managerRuntimeAttentionState\(runtimeReadState, runtime\)/);
+  assert.match(source, /className=\{`manager-runtime-attention \$\{runtimeAttention\}/);
+  assert.match(source, /Runtime repair needed/);
+  assert.match(source, /Manager restart required/);
+  assert.match(source, /Repair the active Runtime before starting another Loop/);
+  assert.match(source, /Run leesh-loop to reopen Manager/);
+  assert.match(source, /Running Loops keep their pinned Runtime/);
+  assert.match(source, />Review Runtime<\/button>/);
+  assert.match(source, /id="manager-runtime-panel" className="manager-runtime"/);
+  assert.match(source, /<details className="manager-management manager-runtime-empty" open>/);
+  assert.match(source, /<summary><span>Manage Runtime<\/span>/);
+  assert.match(source, /aria-label="Manager Runtime controls">\{runtimePanel\}<\/div>/);
+  assert.match(source, /\{runtimePanel\}/);
+  assert.match(source, /Active for new starts/);
+  assert.match(source, /Other validated Runtime distributions/);
+  assert.match(source, /Last Runtime recovery details/);
+  assert.match(source, /runtime\.last_recovery\.status === 'active' \? 'Damaged Runtime preserved at' : 'Planned quarantine path'/);
+  assert.match(styles, /\.manager-runtime-recovery code \{ white-space: pre-wrap; overflow-wrap: anywhere; \}/);
   assert.doesNotMatch(source, /Notion|Symphony Dashboard|notionTasksUrl/);
   assert.match(styles, /@media \(max-width: 960px\)/);
   assert.match(styles, /\.state-toolbar \{ position: sticky/);
   assert.match(styles, /\.manager-status\.status-running::before \{ background: #347a54; \}/);
   assert.match(styles, /\.manager-status\.status-starting::before, \.manager-status\.status-stopping::before \{ background: #aa782c; \}/);
   assert.match(styles, /\.manager-status\.status-failed::before, \.manager-status\.status-unconfirmed::before \{ background: #9b4242; \}/);
-  const neutralStyles = styles.replaceAll(/#(?:347a54|aa782c|9b4242)\b/gi, '#777');
-  const colors = [...neutralStyles.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(match => match[0]);
-  assert.ok(colors.length > 0);
-  assert.ok(colors.every(value => {
-    const hex = value.slice(1);
-    const normalized = hex.length === 3 ? [...hex].map(char => char + char).join('') : hex.slice(0, 6);
-    return normalized.slice(0, 2) === normalized.slice(2, 4) && normalized.slice(2, 4) === normalized.slice(4, 6);
-  }), `expected grayscale-only CSS colors, received: ${colors.join(', ')}`);
+  assert.match(styles, /\.manager-management > summary/);
+  assert.match(styles, /\.manager-runtime-attention \{[\s\S]*flex-wrap: wrap/);
+  assert.match(styles, /\.manager-runtime-source/);
+  assert.match(styles, /\.workflow-diff-line\.added \{ background: #e4eee6; \}/);
+  assert.match(styles, /\.workflow-diff-line\.removed \{ background: #f1e5e5; \}/);
 });
 
 test('Task detail and list wire the tested serialized refresh queue', async () => {
   const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
   const detail = source.slice(source.indexOf('function TaskDetail'), source.indexOf('function App'));
-  const app = source.slice(source.indexOf('function OperatorApp()'));
+  const app = source.slice(source.indexOf('function OperatorApp('));
 
   assert.match(detail, /detailRefreshQueue = useRef\(null\)/);
   assert.match(detail, /detailRefreshQueue\.current = createSerializedRefreshQueue\(\)/);

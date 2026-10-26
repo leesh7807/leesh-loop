@@ -6,15 +6,19 @@ import { groupTasksForOperatorDisplay } from './operator-task-display-order.js';
 import { readTaskDetailDraft } from './task-detail-draft.js';
 import { bootstrapManagerToken } from './manager-auth.js';
 import { createManagerApiFetch } from './manager-api.js';
-import { managerLifecycleAction } from './manager-lifecycle-action.js';
+import { managerLifecycleAction, managerStartBlockedByRuntimeRepair } from './manager-lifecycle-action.js';
+import { managerFailedGuidance } from './manager-failed-guidance.js';
 import { createManagerInstanceListGate } from './manager-instance-list-gate.js';
 import { createManagerSelectionGate } from './manager-selection-gate.js';
 import { InstanceOperationFeedback, WorkflowOperationFeedback } from './manager-operation-feedback.js';
 import { initialInstanceOperationFeedback, initialManagerFeedback, instanceOperationFeedbackFor, instanceOperationFeedbackReducer, managerFeedbackReducer, managerOperationAnnouncement, managerOperationCompletionMessage, workflowOperationFeedbackPlacement } from './manager-feedback.js';
-import { logsPanelViewState, logsReadFailureState, logsReadStartState, managerInventoryViewState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from './manager-read-state.js';
+import { logsPanelViewState, logsReadFailureState, logsReadStartState, managerInventoryViewState, managerRuntimeAttentionState, operatorConfigViewState, readFailureState, sharedRuntimeViewState, workflowComparisonViewState } from './manager-read-state.js';
 import { workflowUpdateEligibility } from './workflow-update-eligibility.js';
 import { workflowComparisonAfterApply } from './workflow-apply-result.js';
 import { createWorkflowDiff } from './workflow-diff.js';
+import { runtimeLabel } from './runtime-label.js';
+import { canUnregisterLoop } from './manager-unregister-eligibility.js';
+import { runtimeUpdateCompletionMessage } from './manager-runtime-feedback.js';
 import './style.css';
 
 const REFRESH_INTERVAL_MS = 7500;
@@ -740,6 +744,10 @@ function ManagerApp() {
   });
   const selectionGateRef = useRef(null);
   if (!selectionGateRef.current) selectionGateRef.current = createManagerSelectionGate(selectedId);
+  const logsPanelRef = useRef(null);
+  const logsSummaryRef = useRef(null);
+  const diagnosisSummaryRef = useRef(null);
+  const runtimeHeadingRef = useRef(null);
   const instanceListGateRef = useRef(null);
   if (!instanceListGateRef.current) instanceListGateRef.current = createManagerInstanceListGate();
   const workflowRefreshControllerRef = useRef(null);
@@ -753,6 +761,8 @@ function ManagerApp() {
   const [logsReadState, setLogsReadState] = useState('idle');
   const [workflowOpen, setWorkflowOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
+  const [managementOpen, setManagementOpen] = useState(false);
+  const [diagnosisOpen, setDiagnosisOpen] = useState(false);
   const [busy, setBusy] = useState('');
   const [busyOperation, setBusyOperation] = useState(null);
   const [feedback, dispatchFeedback] = useReducer(managerFeedbackReducer, initialManagerFeedback);
@@ -762,6 +772,7 @@ function ManagerApp() {
   const selected = instances.find(instance => instance.id === selectedId) || null;
   const inventoryViewState = managerInventoryViewState(instanceReadState, instances.length);
   const runtimeViewState = sharedRuntimeViewState(runtimeReadState, runtime);
+  const runtimeAttention = managerRuntimeAttentionState(runtimeReadState, runtime);
   const workflowPanelState = workflowComparisonViewState(workflowReadState, Boolean(workflow), workflowOpen);
   const logsPanelState = logsPanelViewState(logsReadState, logsOpen);
   const workflowEligibility = selected ? workflowUpdateEligibility(selected) : null;
@@ -775,9 +786,9 @@ function ManagerApp() {
     ...busyOperation,
     repositoryName: busyOperationInstance?.repository_name || busyOperation.instanceId
   });
-  const selectedRuntimeVersion = runtime?.distributions?.find(distribution => distribution.id === selected?.runtime_version)?.version
-    || selected?.runtime_version?.slice(0, 12)
-    || '—';
+  const selectedRuntimeVersion = runtimeLabel(selected?.runtime_version, runtime?.distributions);
+  const managerRuntimeVersion = runtimeLabel(runtime?.manager_runtime_version, runtime?.distributions);
+  const activeRuntimeVersion = runtimeLabel(runtime?.active?.id, runtime?.distributions);
 
   const selectInstance = useCallback(instanceId => {
     const selectionGate = selectionGateRef.current;
@@ -908,12 +919,13 @@ function ManagerApp() {
         method,
         ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       }));
-      const restartRequired = path === '/api/v1/runtime/update' && result.manager_restart_required;
-      const message = result.instance
-        ? `${result.instance.repository_name || result.instance.id}: ${result.instance.status}.`
-        : restartRequired
-          ? 'Runtime updated. Run leesh-loop in a terminal to reopen Manager with fresh access. This tab loses access after restart; running Loops keep their selected Runtime.'
-          : managerOperationCompletionMessage(operation);
+      const message = operation === 'unregister-instance'
+        ? `${result.instance.repository_name} was removed from Manager. Its Git repository and Loop data remain at ${result.instance.data_directory}.`
+        : path === '/api/v1/runtime/update'
+          ? runtimeUpdateCompletionMessage(result, managerRuntimeVersion)
+          : result.instance
+            ? `${result.instance.repository_name || result.instance.id}: ${result.instance.status}.`
+            : managerOperationCompletionMessage(operation);
       if (scopedInstanceId) {
         const scopedMessage = managerOperationCompletionMessage(operation, result.instance);
         dispatchInstanceOperationFeedback({ type: 'success', instanceId: scopedInstanceId, target, message: scopedMessage });
@@ -939,7 +951,7 @@ function ManagerApp() {
     if (!repositoryPath.trim()) return;
     setBusy('Creating Loop');
     setBusyOperation({ label: 'Creating Loop', instanceId: '' });
-    dispatchFeedback({ type: 'operation-started', target: 'create' });
+    dispatchFeedback({ type: 'operation-started', target: 'instances' });
     try {
       const result = await readManagerJson(await apiFetch('/api/v1/instances', {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ repositoryPath: repositoryPath.trim() })
@@ -949,14 +961,52 @@ function ManagerApp() {
       setRepositoryPath('');
       selectInstance(id);
       try { window.localStorage.setItem(MANAGER_SELECTION_KEY, id); } catch { /* Selection remains in React state. */ }
-      dispatchFeedback({ type: 'operation-success', target: 'create', message: `Created ${result.instance.repository_name}.` });
+      dispatchFeedback({ type: 'operation-success', target: 'instances', message: `Added ${result.instance.repository_name} to Manager. Its separate Workflow, Task Store and workspaces are stored under this user's Leesh Loop data.` });
       await refreshInstances();
     } catch (requestError) {
-      dispatchFeedback({ type: 'operation-error', target: 'create', message: requestError.message || 'Could not create the Loop instance.' });
+      dispatchFeedback({ type: 'operation-error', target: 'instances', message: requestError.message || 'Could not add the Git repository to Manager.' });
     } finally {
       setBusy('');
       setBusyOperation(null);
     }
+  }
+
+  async function unregisterSelected() {
+    if (!selected || !canUnregisterLoop(selected) || busy) return;
+    const instance = selected;
+    const confirmed = window.confirm(
+      `Unregister ${instance.repository_name} from Manager?\n\nManager confirms this Loop is ${instance.status === 'Stopped' ? 'Stopped' : 'Failed with no active process'}. This removes only its management entry. The Git repository and existing Workflow, Task Store, and workspace data stay on disk at ${instance.data_directory}.`
+    );
+    if (!confirmed) return;
+    await perform(`/api/v1/instances/${encodeURIComponent(instance.id)}`, {
+      method: 'DELETE',
+      label: 'Unregistering Loop',
+      operation: 'unregister-instance',
+      target: 'instances'
+    });
+  }
+
+  function openLifecycleDiagnostics() {
+    setManagementOpen(true);
+    setLogsOpen(true);
+    setDiagnosisOpen(Boolean(selected?.detail));
+    window.requestAnimationFrame(() => {
+      if (selected?.status === 'Unconfirmed' && selected.detail) {
+        diagnosisSummaryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        diagnosisSummaryRef.current?.focus({ preventScroll: true });
+      } else {
+        logsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        logsSummaryRef.current?.focus({ preventScroll: true });
+      }
+    });
+  }
+
+  function openRuntimeControls() {
+    setManagementOpen(true);
+    window.requestAnimationFrame(() => {
+      runtimeHeadingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      runtimeHeadingRef.current?.focus({ preventScroll: true });
+    });
   }
 
   async function updateWorkflow() {
@@ -1018,6 +1068,41 @@ function ManagerApp() {
   }
 
   const lifecycleAction = managerLifecycleAction(selected?.status, selected?.can_stop);
+  const startBlockedByRuntimeRepair = managerStartBlockedByRuntimeRepair(lifecycleAction, runtimeAttention);
+  const canUnregisterSelected = canUnregisterLoop(selected);
+
+  const runtimePanel = (
+    <section id="manager-runtime-panel" className="manager-runtime" aria-label="Central Runtime">
+      <div>
+        <p className="eyebrow">Runtime distribution</p>
+        <h2 ref={runtimeHeadingRef} tabIndex="-1">{runtimeViewState === 'loading'
+          ? 'Loading Runtime…'
+          : runtimeViewState === 'ready'
+            ? `Active for new starts · ${activeRuntimeVersion}`
+            : runtimeViewState === 'missing' ? 'Runtime not installed' : runtimeViewState === 'invalid' ? 'Active Runtime needs repair' : 'Runtime unavailable'}</h2>
+        <p className="manager-help">Updating installs the Runtime from this checkout for future Loop starts. Running Loops keep their pinned Runtime, and Workflow files are changed only by the separate Workflow action below.</p>
+        {runtime?.source?.path && <p className="manager-runtime-source">Source checkout <strong>v{runtime.source.version}</strong> · <code title={runtime.source.id}>{runtime.source.id.slice(0, 12)}</code><span>{runtime.source.path}</span></p>}
+        {runtime?.source?.error && <p className="inline-message failure" role="status">Runtime source checkout is unavailable: {runtime.source.error}</p>}
+        {runtime?.active_error && <p className="inline-message failure" role="status">The active Runtime could not be validated: {runtime.active_error} Install source Runtime to repair it.</p>}
+        {runtime?.active_error && <p className="manager-help">Other validated Runtime distributions: {runtime.distributions?.length ? runtime.distributions.map(value => runtimeLabel(value.id, runtime.distributions)).join(', ') : 'none available'}.</p>}
+        {runtime?.recovery_error && <p className="inline-message failure" role="status">Last Runtime recovery details are unavailable: {runtime.recovery_error}</p>}
+        {runtime?.last_recovery && <details className="manager-runtime-recovery">
+          <summary>Last Runtime recovery details</summary>
+          {runtime.last_recovery.status === 'active'
+            ? <p className="manager-help">Runtime {runtimeLabel(runtime.last_recovery.runtime_id, runtime.distributions)} was activated at {runtime.last_recovery.recovered_at}.</p>
+            : <p className="inline-message failure" role="status">Runtime recovery has not confirmed activation yet. If this remains after the update completes, install source Runtime again.</p>}
+          {runtime.last_recovery.validation_error && <p className="manager-help">Previous validation: {runtime.last_recovery.validation_error}</p>}
+          {runtime.last_recovery.preserved_runtime_path && <p className="manager-help">{runtime.last_recovery.status === 'active' ? 'Damaged Runtime preserved at' : 'Planned quarantine path'} <code>{runtime.last_recovery.preserved_runtime_path}</code></p>}
+        </details>}
+        <p className="manager-runtime-versions">Manager service <strong title={runtime?.manager_runtime_version || undefined}>{managerRuntimeVersion}</strong><span>·</span> selected Loop <strong title={selected?.runtime_version || undefined}>{selected ? selectedRuntimeVersion : 'None'}</strong></p>
+        {runtime?.active && (runtime.manager_restart_required || runtime.manager_runtime_version !== runtime.active.id) && <p className="inline-message" role="status">New starts use Runtime {activeRuntimeVersion}; Manager still requires a restart to load the active Runtime. Run <code>leesh-loop</code> to reopen Manager. Running Loops continue on their selected versions.</p>}
+      </div>
+      <div className="manager-runtime-action">
+        <button className="manager-action secondary" type="button" disabled={Boolean(busy) || runtimeReadState === 'loading'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform('/api/v1/runtime/update', { label: 'Updating Runtime', operation: 'update-runtime', target: 'runtime' })}>{busy === 'Updating Runtime' ? 'Installing…' : 'Install source Runtime'}</button>
+        <ManagerFeedback feedback={feedback} target="runtime" />
+      </div>
+    </section>
+  );
 
   return (
     <div className="manager-shell">
@@ -1025,92 +1110,119 @@ function ManagerApp() {
         <div className="manager-brand"><p className="eyebrow">Leesh Loop</p><h1>Manager</h1></div>
         {selected && (
           <div className="manager-lifecycle">
-            <span className={`manager-status status-${selected.status.toLowerCase()}`}>{selected.status}</span>
-            <span className="manager-lifecycle-target">{selected.repository_name}</span>
-            {lifecycleAction === 'pending' ? (
-              <span className="manager-lifecycle-pending" role="status">Stop available when ready</span>
-            ) : lifecycleAction === 'stopping' ? (
-              <span className="manager-lifecycle-pending" role="status">Stopping…</span>
-            ) : lifecycleAction === 'stop' ? (
-              <button type="button" className="manager-action secondary" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop', operation: 'stop-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Stopping Loop' && busyOperation.instanceId === selectedId ? 'Stopping…' : 'Stop Loop'}</button>
-            ) : (
-              <button type="button" className="manager-action" disabled={Boolean(busy) || selected.status === 'Unconfirmed'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop', operation: 'start-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Starting Loop' && busyOperation.instanceId === selectedId ? 'Starting…' : 'Start Loop'}</button>
-            )}
-            <a className="manager-task-jump" href="#tasks-heading">View tasks</a>
-            {selected.detail && <p className="inline-message failure manager-lifecycle-detail" role="status">{selected.detail}</p>}
+            <div className="manager-current-instance">
+              <span className={`manager-status status-${selected.status.toLowerCase()}`}>{selected.status}</span>
+              <span className="manager-lifecycle-target">{selected.repository_name}</span>
+              <span className="manager-current-path">{selected.repository_root}</span>
+            </div>
+            <div className="manager-lifecycle-actions">
+              {(selected.status === 'Failed' || selected.status === 'Unconfirmed') && <button type="button" className="manager-action manager-recovery-action" aria-controls={selected.detail ? 'manager-status-diagnosis manager-logs' : 'manager-logs'} aria-expanded={managementOpen && logsOpen && (!selected.detail || diagnosisOpen)} onClick={openLifecycleDiagnostics}>{selected.status === 'Unconfirmed' ? 'Review ownership' : 'Review failure'}</button>}
+              {lifecycleAction === 'unconfirmed' ? (
+                <span className="manager-lifecycle-pending" role="status">Lifecycle actions wait for confirmed process ownership.</span>
+              ) : lifecycleAction === 'pending' ? (
+                <span className="manager-lifecycle-pending" role="status">Stop becomes available when startup is ready.</span>
+              ) : lifecycleAction === 'stopping' ? (
+                <span className="manager-lifecycle-pending" role="status">Stopping Loop…</span>
+              ) : lifecycleAction === 'stop' ? (
+                <button type="button" className="manager-action secondary" disabled={Boolean(busy)} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/stop`, { label: 'Stopping Loop', operation: 'stop-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Stopping Loop' && busyOperation.instanceId === selectedId ? 'Stopping…' : 'Stop Loop'}</button>
+              ) : (
+                <button type="button" className={`manager-action${selected.status === 'Failed' || startBlockedByRuntimeRepair ? ' secondary' : ''}${startBlockedByRuntimeRepair ? ' manager-action-blocked' : ''}`} disabled={Boolean(busy) || startBlockedByRuntimeRepair} aria-describedby={[startBlockedByRuntimeRepair ? 'manager-runtime-start-disabled' : '', busy ? 'manager-operation-pending' : ''].filter(Boolean).join(' ') || undefined} onClick={() => void perform(`/api/v1/instances/${encodeURIComponent(selectedId)}/start`, { label: 'Starting Loop', operation: 'start-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Starting Loop' && busyOperation.instanceId === selectedId ? 'Starting…' : selected.status === 'Failed' ? 'Retry Loop' : 'Start Loop'}</button>
+              )}
+              <a className="manager-task-jump" href="#tasks-heading">Tasks</a>
+            </div>
+            {runtimeAttention && <div className={`manager-runtime-attention ${runtimeAttention}`} role="status">
+              <span className="manager-runtime-attention-copy">
+                <strong>{runtimeAttention === 'repair' ? 'Runtime repair needed' : 'Manager restart required'}</strong>
+                <span id={runtimeAttention === 'repair' ? 'manager-runtime-start-disabled' : undefined}>{runtimeAttention === 'repair' ? 'Repair the active Runtime before starting another Loop.' : 'Run leesh-loop to reopen Manager.'}</span>
+                <span>Running Loops keep their pinned Runtime.</span>
+              </span>
+              <button type="button" className="manager-action secondary manager-recovery-action" aria-controls="manager-runtime-panel" aria-expanded={managementOpen} onClick={openRuntimeControls}>Review Runtime</button>
+            </div>}
+            {selected.status === 'Unconfirmed' && <p className="manager-status-guidance">Manager cannot confirm process ownership. Review the diagnosis and Loop logs, then verify which process owns {selected.port ? `port ${selected.port}` : 'the assigned port'} with local process tools before retrying. Start, stop, and unregister remain unavailable until ownership is confirmed.</p>}
+            {selected.status === 'Failed' && <p className="manager-status-guidance">{managerFailedGuidance(selected)}</p>}
+            {selected.detail && <details id="manager-status-diagnosis" className="manager-status-diagnosis" open={diagnosisOpen} onToggle={event => setDiagnosisOpen(event.currentTarget.open)}><summary ref={diagnosisSummaryRef}>{diagnosisOpen ? 'Hide diagnosis' : 'View diagnosis'}</summary><p className="manager-help">Confirm which process owns the assigned port before retrying lifecycle actions.</p><pre>{selected.detail}</pre>{selected.status === 'Unconfirmed' && <a className="manager-task-jump" href="#manager-logs">Open Loop logs ↓</a>}</details>}
             <ManagerFeedback feedback={feedback} target="lifecycle" />
             <InstanceOperationFeedback feedback={selectedScopedLifecycleFeedback} target="lifecycle" />
             <WorkflowOperationFeedback feedback={selectedScopedWorkflowFeedback} placement={scopedWorkflowFeedbackPlacement === 'header' ? 'header' : null} />
           </div>
         )}
         {busyOperationMessage && <p className="inline-message manager-operation-pending" id="manager-operation-pending" role="status">{busyOperationMessage}</p>}
+        <ManagerFeedback feedback={feedback} target="instances" />
       </header>
 
-      <section className="manager-instances" aria-labelledby="managed-instances-heading">
-        <div className="manager-instances-heading">
-          <h2 id="managed-instances-heading">Loop instances</h2>
-          <span>{inventoryViewState === 'list' || inventoryViewState === 'empty'
-            ? `${instances.length} ${instances.length === 1 ? 'instance' : 'instances'}`
-            : inventoryViewState === 'loading' ? 'Loading…' : 'Unavailable'}</span>
-        </div>
-        {inventoryViewState === 'list' ? (
-          <div className="manager-instance-list">
-            {instances.map(instance => (
-              <button type="button" className={`manager-instance-choice${selectedId === instance.id ? ' selected' : ''}`} key={instance.id}
-                aria-pressed={selectedId === instance.id}
-                onClick={() => {
-                  selectInstance(instance.id);
-                  try { window.localStorage.setItem(MANAGER_SELECTION_KEY, instance.id); } catch { /* Selection remains in React state. */ }
-                }}>
-                <span className="manager-instance-choice-title">{instance.repository_name}</span>
-                <span className={`manager-status status-${instance.status.toLowerCase()}`}>{instance.status}</span>
-                <span className="manager-instance-choice-path">{instance.repository_root}</span>
-              </button>
-            ))}
+      <details className="manager-instances" open={!selected}>
+        <summary className="manager-instances-summary">
+          <span>Repositories</span>
+          <span>{selected ? `Current: ${selected.repository_name} · ` : ''}{inventoryViewState === 'list' || inventoryViewState === 'empty'
+            ? `${instances.length} managed ${instances.length === 1 ? 'Loop' : 'Loops'}`
+            : inventoryViewState === 'loading' ? 'Loading managed Loops…' : 'Unavailable'}</span>
+        </summary>
+        <div className="manager-instances-content">
+          <div className="manager-instances-heading">
+            <h2 id="managed-instances-heading">Switch Loop</h2>
+            <span>Select a repository to open its Tasks and execution state.</span>
           </div>
-        ) : inventoryViewState === 'loading'
-          ? <p className="manager-empty" role="status">Loading managed Loops…</p>
-          : inventoryViewState === 'empty'
-            ? <p className="manager-empty">No managed Loops yet. Add a Git repository below to create one.</p>
-            : null}
-        <ManagerFeedback feedback={feedback} target="instances" />
-      </section>
-
-      <section className="manager-console" aria-label="Loop Manager controls">
-        <details className="manager-create-details">
-          <summary>Add a Git repository</summary>
+          {inventoryViewState === 'list' ? (
+            <div className="manager-instance-list">
+              {instances.map(instance => (
+                <button type="button" className={`manager-instance-choice${selectedId === instance.id ? ' selected' : ''}`} key={instance.id}
+                  aria-pressed={selectedId === instance.id}
+                  onClick={() => {
+                    selectInstance(instance.id);
+                    try { window.localStorage.setItem(MANAGER_SELECTION_KEY, instance.id); } catch { /* Selection remains in React state. */ }
+                  }}>
+                  <span className="manager-instance-choice-title">{instance.repository_name}</span>
+                  <span className={`manager-status status-${instance.status.toLowerCase()}`}>{instance.status}</span>
+                  <span className="manager-instance-choice-path">{instance.repository_root}</span>
+                </button>
+              ))}
+            </div>
+          ) : inventoryViewState === 'loading'
+            ? <p className="manager-empty" role="status">Loading managed Loops…</p>
+            : inventoryViewState === 'empty'
+              ? <p className="manager-empty">No managed Loops yet. Add an existing local Git repository below.</p>
+              : <p className="manager-empty failure" role="alert">The Manager could not load its repository list. Refresh the page to retry.</p>}
           <form className="manager-create" onSubmit={createInstance}>
-            <p className="manager-help">Use a local repository root. Init checks the Git upstream and keeps settings, Workflow, Task Store, and workspaces in this user's Leesh Loop data.</p>
-            <label htmlFor="repository-path">Repository path</label>
+            <h2>Add a Git repository</h2>
+            <p className="manager-help">Enter the absolute path to an existing local Git repository with a configured upstream. Manager creates a separate Workflow, Task Store, and workspace under this user's Leesh Loop data; the repository itself is left unchanged.</p>
+            <label htmlFor="repository-path">Local repository path</label>
             <div className="manager-input-row">
               <input id="repository-path" type="text" value={repositoryPath} onChange={event => setRepositoryPath(event.target.value)} placeholder="/home/you/projects/repository" autoComplete="off" spellCheck="false" aria-describedby={busy ? 'manager-operation-pending' : undefined} disabled={Boolean(busy)} required />
-              <button className="manager-action" type="submit" disabled={Boolean(busy) || !repositoryPath.trim()} aria-describedby={busy ? 'manager-operation-pending' : undefined}>{busy === 'Creating Loop' ? 'Creating…' : 'Create Loop'}</button>
+              <button className="manager-action" type="submit" disabled={Boolean(busy) || !repositoryPath.trim()} aria-describedby={busy ? 'manager-operation-pending' : undefined}>{busy === 'Creating Loop' ? 'Adding…' : 'Add Loop'}</button>
             </div>
-            <ManagerFeedback feedback={feedback} target="create" />
           </form>
+        </div>
+      </details>
+
+      {selected ? <OperatorApp key={selectedId} instanceId={selectedId} /> : null}
+
+      {!selected && (
+        <details className="manager-management manager-runtime-empty" open>
+          <summary><span>Manage Runtime</span><span>Source, installed Runtime, and Manager version</span></summary>
+          <div className="manager-console" aria-label="Manager Runtime controls">{runtimePanel}</div>
         </details>
+      )}
 
-        <section className="manager-runtime" aria-label="Central Runtime">
-          <div><p className="eyebrow">Shared Runtime</p><h2>{runtimeViewState === 'loading'
-            ? 'Loading Runtime…'
-            : runtimeViewState === 'ready'
-              ? `Version ${runtime.active.version}`
-              : runtimeViewState === 'missing' ? 'Runtime not installed' : 'Runtime unavailable'}</h2><p className="manager-help">New Loop starts use this immutable Runtime distribution. Running Loops keep their selected version.</p>{runtime?.active && runtime.manager_runtime_version !== runtime.active.id && <p className="inline-message" role="status">The Manager uses an older Runtime. Run <code>leesh-loop</code> to reopen Manager with fresh access.</p>}</div>
-          <div className="manager-runtime-action">
-            <button className="manager-action secondary" type="button" disabled={Boolean(busy) || runtimeReadState === 'loading'} aria-describedby={busy ? 'manager-operation-pending' : undefined} onClick={() => void perform('/api/v1/runtime/update', { label: 'Updating Runtime', operation: 'update-runtime', target: 'runtime' })}>{busy === 'Updating Runtime' ? 'Updating…' : 'Update Runtime'}</button>
-            <ManagerFeedback feedback={feedback} target="runtime" />
-          </div>
-        </section>
+      {selected && (
+        <details className="manager-management" open={managementOpen} onToggle={event => setManagementOpen(event.currentTarget.open)}>
+          <summary><span>Manage current Loop</span><span>Runtime, Workflow, and diagnosis</span></summary>
+          <div className="manager-console" aria-label="Loop Manager controls">
+            {runtimePanel}
 
-        {selected && (
-          <section className="manager-instance-info" aria-label="Selected Loop details">
-            <div><p className="eyebrow">Selected Loop</p><h2>{selected.repository_name}</h2><p className="manager-repository-path">{selected.repository_root}</p></div>
-            <div className="manager-instance-meta"><span>Base branch <strong>{selected.base_branch}</strong></span><span>Internal port <strong>{selected.port || '—'}</strong></span><span>Runtime <strong title={selected.runtime_version || undefined}>{selectedRuntimeVersion}</strong></span></div>
-          </section>
-        )}
+            <section className="manager-instance-info" aria-label="Selected Loop details">
+              <div><p className="eyebrow">Selected Loop</p><h2>{selected.repository_name}</h2><p className="manager-repository-path">{selected.repository_root}</p></div>
+              <div className="manager-instance-meta">
+                <span>Base branch <strong>{selected.base_branch}</strong></span>
+                <span>Internal port <strong>{selected.port || '—'}</strong></span>
+                <span>Runtime <strong title={selected.runtime_version || undefined}>{selectedRuntimeVersion}</strong></span>
+              </div>
+              <div className="manager-unregister">
+                <button type="button" className="manager-action secondary" disabled={Boolean(busy) || !canUnregisterSelected} aria-describedby={!canUnregisterSelected ? 'manager-unregister-guidance' : busy ? 'manager-operation-pending' : undefined} onClick={() => void unregisterSelected()}>{busyOperation?.label === 'Unregistering Loop' && busyOperation.instanceId === '' ? 'Unregistering…' : 'Unregister Loop'}</button>
+                <p className="manager-help" id="manager-unregister-guidance">Available when Manager confirms Stopped, or confirms a Failed Loop has no active process. Unregistering removes the registry entry; it does not stop a process or delete the Git repository, Workflow, Task Store, or workspace.</p>
+              </div>
+            </section>
 
-        {selected && (
-          <div className={`manager-folders${workflowOpen ? ' manager-folders-workflow-open' : ''}`}>
+            <div className={`manager-folders${workflowOpen ? ' manager-folders-workflow-open' : ''}`}>
             <details open={workflowOpen} onToggle={event => setWorkflowOpen(event.currentTarget.open)}>
               <summary><span>Workflow</span><span>{workflow ? (workflow.changed ? 'Update available' : 'Current') : 'Compare with template'}</span></summary>
               <ManagerFeedback feedback={feedback} target="workflow" />
@@ -1131,8 +1243,8 @@ function ManagerApp() {
                 </div>
               )}
             </details>
-            <details open={logsOpen} onToggle={event => setLogsOpen(event.currentTarget.open)}>
-              <summary><span>Loop logs</span><span>View startup and Symphony output</span></summary>
+            <details id="manager-logs" ref={logsPanelRef} open={logsOpen} onToggle={event => setLogsOpen(event.currentTarget.open)}>
+              <summary ref={logsSummaryRef}><span>Loop logs</span><span>View startup and Symphony output</span></summary>
               {logsOpen && <ManagerFeedback feedback={feedback} target="logs" />}
               {logsOpen && logsPanelState === 'loading' && <p className="manager-help workflow-read-state" role="status">Loading Loop logs…</p>}
               {logsOpen && logsPanelState === 'refreshing' && <p className="manager-help workflow-read-state" role="status">Refreshing logs; showing the last successful response until it completes.</p>}
@@ -1145,11 +1257,9 @@ function ManagerApp() {
               {logsOpen && ['loaded', 'refreshing', 'stale-error'].includes(logsPanelState) && <pre className="manager-logs">{logs || 'No Loop logs are available yet.'}</pre>}
             </details>
           </div>
-        )}
-        {!selected && inventoryViewState === 'empty' && <p className="manager-empty">Create an instance from a Git repository to see its tasks and lifecycle here.</p>}
-      </section>
-
-      {selected ? <OperatorApp key={selectedId} instanceId={selectedId} /> : null}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

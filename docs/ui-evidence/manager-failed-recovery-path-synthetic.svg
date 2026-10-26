@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="1160" viewBox="0 0 1040 1160" role="img" aria-labelledby="title description">
+  <title id="title">Synthetic Manager Failed-state recovery path</title>
+  <desc id="description">A synthetic full-page flow map showing the Failed header action, intervening Task workspace, and opened Manager Logs after choosing Review failure. It is not a browser capture.</desc>
+  <defs>
+    <style>
+      .text { font-family: Inter, ui-sans-serif, system-ui, sans-serif; fill: #282724; }
+      .muted { fill: #716e68; }
+      .tiny { font-size: 13px; }
+      .small { font-size: 15px; }
+      .body { font-size: 17px; }
+      .heading { font-size: 23px; font-weight: 650; }
+      .title { font-size: 31px; font-weight: 700; }
+      .card { fill: #fff; stroke: #dedbd4; stroke-width: 1.5; }
+      .soft { fill: #f8f7f4; stroke: #e3e0d9; stroke-width: 1.2; }
+      .rule { stroke: #e4e1da; stroke-width: 1.2; }
+      .button { fill: #fff; stroke: #c9c5bc; stroke-width: 1.4; }
+      .primary-button { fill: #292824; stroke: #292824; stroke-width: 1.4; }
+      .failure { fill: #7f3434; }
+      .button-label { fill: #282724; }
+      .primary-label { fill: #fff; }
+      .route { fill: none; stroke: #8b6a32; stroke-width: 2.2; stroke-dasharray: 7 6; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#8b6a32"/>
+    </marker>
+  </defs>
+  <rect width="1040" height="1160" fill="#f3f1ec"/>
+  <text x="30" y="34" class="text tiny" font-weight="700" letter-spacing="1.2">SYNTHETIC FULL-PAGE FLOW MAP · FAILED RECOVERY</text>
+  <text x="30" y="57" class="text tiny muted">Reconstructed from post-review JSX/CSS. Not a browser capture. The dashed route shows the Review failure action.</text>
+  <rect x="20" y="78" width="1000" height="1050" rx="18" fill="#fbfaf8" stroke="#d8d5ce" stroke-width="1.5"/>
+
+  <text x="54" y="128" class="text tiny muted" letter-spacing="1.2">LEESH LOOP</text>
+  <text x="54" y="163" class="text title">Manager</text>
+  <rect x="254" y="112" width="82" height="30" rx="15" fill="#f7e7e4"/>
+  <circle cx="270" cy="127" r="5" fill="#9b4242"/>
+  <text x="283" y="133" class="text small" font-weight="650">Failed</text>
+  <text x="355" y="134" class="text body" font-weight="650">payments-service</text>
+  <text x="355" y="158" class="text small muted">/work/projects/payments-service</text>
+  <text x="54" y="195" class="text small failure">The Loop failed and no active process remains. Review diagnosis and logs before restarting.</text>
+  <rect x="54" y="210" width="154" height="36" rx="8" class="primary-button"/>
+  <text x="131" y="233" text-anchor="middle" class="text small primary-label" font-weight="650">Review failure</text>
+  <rect x="220" y="210" width="136" height="36" rx="8" class="button"/>
+  <text x="288" y="233" text-anchor="middle" class="text small button-label" font-weight="650">Retry Loop</text>
+  <text x="377" y="233" class="text small" font-weight="650">Tasks ↓</text>
+
+  <rect x="50" y="270" width="940" height="295" rx="12" class="card"/>
+  <text x="75" y="309" class="text heading">Tasks</text>
+  <text x="965" y="309" text-anchor="end" class="text small muted">payments-service · 3 tasks</text>
+  <rect x="75" y="329" width="540" height="38" rx="8" class="soft"/>
+  <text x="93" y="354" class="text small muted">Find a task by title, identifier, or State</text>
+  <text x="76" y="398" class="text tiny muted" font-weight="700" letter-spacing=".8">IN PROGRESS</text>
+  <rect x="75" y="411" width="880" height="54" rx="8" class="soft"/>
+  <text x="94" y="435" class="text body" font-weight="650">Reconcile nightly payment exports</text>
+  <text x="94" y="455" class="text tiny muted">PLAN-24 · Updated 14 minutes ago</text>
+  <rect x="75" y="476" width="880" height="54" rx="8" class="soft"/>
+  <text x="94" y="500" class="text body" font-weight="650">Add idempotency key to refund endpoint</text>
+  <text x="94" y="520" class="text tiny muted">PLAN-31 · Updated yesterday</text>
+
+  <rect x="50" y="592" width="940" height="478" rx="12" class="card"/>
+  <path d="M72 623 l7 7 7-7" fill="none" stroke="#55524d" stroke-width="2"/>
+  <text x="101" y="632" class="text body" font-weight="650">Manage current Loop</text>
+  <text x="965" y="632" text-anchor="end" class="text small muted">Runtime, Workflow, and diagnosis</text>
+  <line x1="68" y1="651" x2="972" y2="651" class="rule"/>
+  <text x="75" y="682" class="text tiny muted" letter-spacing="1">RUNTIME DISTRIBUTION</text>
+  <text x="75" y="710" class="text small" font-weight="650">Active for new starts · 0.1.0 · 7c21a0f97b12</text>
+  <text x="75" y="733" class="text tiny muted">Running Loops keep their pinned Runtime. Workflow files change only by the separate action.</text>
+  <line x1="75" y1="750" x2="965" y2="750" class="rule"/>
+  <text x="75" y="778" class="text tiny muted" letter-spacing="1">SELECTED LOOP</text>
+  <text x="75" y="808" class="text heading">payments-service</text>
+  <rect x="760" y="777" width="196" height="38" rx="8" class="button"/>
+  <text x="858" y="802" text-anchor="middle" class="text small" font-weight="650">Unregister Loop</text>
+  <text x="75" y="835" class="text tiny muted">Available only because Manager confirms Failed process absence; data remains on disk.</text>
+  <line x1="75" y1="853" x2="965" y2="853" class="rule"/>
+  <text x="75" y="882" class="text small" font-weight="650">Workflow</text>
+  <text x="965" y="882" text-anchor="end" class="text tiny muted">Compare or repair the selected Loop</text>
+  <rect x="68" y="898" width="904" height="151" rx="8" fill="#f8f7f4" stroke="#c9c5bc" stroke-width="1.3"/>
+  <path d="M86 920 l6 6 6-6" fill="none" stroke="#55524d" stroke-width="2"/>
+  <text x="109" y="929" class="text small" font-weight="650">Loop logs · expanded by Review failure</text>
+  <text x="91" y="962" class="text tiny muted">View startup and Symphony output</text>
+  <rect x="91" y="978" width="858" height="51" rx="6" fill="#ececec"/>
+  <text x="108" y="1000" class="text tiny" font-family="monospace">Startup failed before the Loop became ready.</text>
+  <text x="108" y="1018" class="text tiny muted" font-family="monospace">Detailed process ownership and recovery evidence remains available.</text>
+
+  <path d="M420 232 L1005 232 L1005 1002 L949 1002" class="route"/>
+</svg>

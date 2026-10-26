@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="670" viewBox="0 0 1040 670" role="img" aria-labelledby="title description">
+  <title id="title">Synthetic Manager Runtime recovery readback after restart</title>
+  <desc id="description">A synthetic reconstruction of the Manager after reopening from a same-ID Runtime repair. The current Manager no longer needs a restart, while the prior validation reason and preserved damaged path remain discoverable. Not a browser capture.</desc>
+  <defs>
+    <style>
+      .text { font-family: Inter, ui-sans-serif, system-ui, sans-serif; fill: #282724; }
+      .muted { fill: #716e68; }
+      .tiny { font-size: 13px; }
+      .small { font-size: 15px; }
+      .body { font-size: 17px; }
+      .heading { font-size: 23px; font-weight: 650; }
+      .title { font-size: 31px; font-weight: 700; }
+      .card { fill: #fff; stroke: #dedbd4; stroke-width: 1.5; }
+      .soft { fill: #f8f7f4; stroke: #e3e0d9; stroke-width: 1.2; }
+      .rule { stroke: #e4e1da; stroke-width: 1.2; }
+    </style>
+  </defs>
+  <rect width="1040" height="670" fill="#f3f1ec"/>
+  <text x="30" y="34" class="text tiny" font-weight="700" letter-spacing="1.2">SYNTHETIC VISUAL REVIEW FIXTURE · POST-RESTART READBACK</text>
+  <text x="30" y="57" class="text tiny muted">Reconstructed from Manager JSX/API and tests. IDs, path, and timestamp are illustrative; not a browser capture.</text>
+  <rect x="20" y="78" width="1000" height="565" rx="18" fill="#fbfaf8" stroke="#d8d5ce" stroke-width="1.5"/>
+  <text x="54" y="126" class="text tiny muted" letter-spacing="1.2">LEESH LOOP</text>
+  <text x="54" y="162" class="text title">Manager</text>
+  <text x="54" y="190" class="text small muted">Selected Loop · Stopped · /work/demo-service</text>
+
+  <rect x="50" y="216" width="940" height="394" rx="12" class="card"/>
+  <text x="75" y="250" class="text tiny muted" letter-spacing="1">AFTER MANAGER REOPEN</text>
+  <text x="75" y="283" class="text tiny muted" letter-spacing="1">RUNTIME DISTRIBUTION</text>
+  <text x="75" y="316" class="text heading">Active for new starts · 0.1.0 · c0ffee123456</text>
+  <text x="75" y="350" class="text tiny muted">Source checkout <tspan class="text" font-weight="650">v0.1.0 · c0ffee123456</tspan></text>
+  <text x="75" y="374" class="text tiny muted">Manager service <tspan class="text" font-weight="650">v0.1.0 · c0ffee123456</tspan> · selected Loop <tspan class="text" font-weight="650">v0.9.0 · deadbeefcafe</tspan></text>
+  <line x1="75" y1="398" x2="965" y2="398" class="rule"/>
+  <rect x="75" y="422" width="890" height="153" rx="8" class="soft"/>
+  <text x="96" y="455" class="text body" font-weight="650">⌄  Last Runtime recovery details</text>
+  <text x="116" y="487" class="text small">Runtime 0.1.0 · c0ffee123456 was activated on 2026-10-25 21:44 UTC.</text>
+  <text x="116" y="514" class="text small">Previous validation: contents do not match their immutable identity.</text>
+  <text x="116" y="541" class="text small">Damaged Runtime preserved at:</text>
+  <text x="116" y="563" class="text tiny" font-family="monospace">/home/example/.local/share/leesh-loop/runtimes/.damaged-c0ffee123456-…</text>
+  <text x="75" y="594" class="text tiny muted">The restart requirement is cleared; recovery provenance remains available after refresh.</text>
+</svg>
