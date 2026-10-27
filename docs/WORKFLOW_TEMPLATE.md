@@ -19,6 +19,15 @@ This is a continuation or retry. Reconcile current State, Plan, workspace/Git, W
 
 Read the repository-owned `AGENTS.md` when present, then follow this file as the complete worker execution contract. Do not require another workflow or template file at runtime.
 
+## Workpad language
+
+```yaml
+workpad:
+  language: ko
+```
+
+Write all Workpad entries in `workpad.language`, including explanatory content within structured or protocol-like records. Preserve exact technical identifiers, protocol tokens, field names, commands, paths, and quotations.
+
 ## Accepted execution input
 
 Use the immutable Accepted Plan as the task's execution input.
@@ -41,7 +50,7 @@ Work in the Symphony-provided workspace and modify only the target repository un
 
 Use `chatgpt-shot submit "<prompt>"` and `chatgpt-shot jobs <job-id>` for independent review. Service administration is outside the worker's authority.
 
-Use the Local Task surface for the Accepted Plan, Workpad, State changes, and comments. Follow repository-owned workflow or task instructions for Workpad language; if none exists, use the language of the task. Preserve code, commands, identifiers, paths, API names, and quotations verbatim where accuracy requires it. Carry forward relevant Workpad context across work units and use bound task tools rather than direct Store access.
+Use the Local Task surface for the Accepted Plan, Workpad, State changes, and comments. Preserve code, commands, identifiers, paths, API names, and quotations verbatim where accuracy requires it. Carry forward relevant Workpad context across work units and use bound task tools rather than direct Store access.
 
 If task-bound access fails, preserve recoverable workspace changes and report the concrete blocker. Confirm task mutations before reporting success.
 
@@ -82,7 +91,7 @@ Interpret comments using current user intent, the Accepted Plan, and completed w
 
 Resume `Blocked By` work in the preserved workspace. Before further implementation, fetch the configured remote base and rebase the task branch, resolving conflicts within the accepted scope. Continue the existing unfinished review pass and Review Confidence where applicable.
 
-Use Human Review for a verified delivery, a required human decision, or inability to complete independent review. Before pausing, record a readable summary of what exists, relevant validation and decisions, unfinished work, and the action required. Record the *exact* delivery identity when one exists:
+Use Human Review for a verified delivery, a required human decision, or inability to complete independent review. Before pausing, record a readable summary of what exists, relevant validation and decisions, and unfinished work. Record the *exact* delivery identity when one exists:
 
 ```text
 Human Review
@@ -90,6 +99,15 @@ reason: review | blocker
 delivered_pr: <PR URL or number | none>
 delivered_head: <HEAD | none>
 ```
+
+For `reason: blocker`, append these two fields to the Human Review handoff:
+
+```text
+막힌 이유: <condition preventing progress and its consequence>
+사람에게 요구하는 행동: <required human action | 없음>
+```
+
+Distinguish human decisions or actions from worker recovery tasks. Use `없음` when no human action is required. Preserve worker continuation details in Workpad.
 
 Record the handoff, enter `Human Review`, and verify State. On failure, inspect current State before retrying. Present the delivery PR/HEAD when available. Interpret `Merging` as approval of the uniquely identified handoff. Interpret brief approval comments against the recorded handoff, documenting the understood target in Workpad. A return to `In Progress` preserves valid work and resumes normal comment handling.
 
@@ -143,7 +161,7 @@ If the PR was already merged on retry, verify the same identities and remote-bas
 
 After verified merge, delete the Approved PR's remote source branch when safe. A branch-cleanup failure alone does not block `Done`. Then transition `Merging` → `Done` and verify State.
 
-Treat ambiguous authorization, PR/base/head mismatch, unauthorized changes, unresolved conflicts, decisions outside approval, validation or access failure, and uncertain merge outcomes as human-required blockers. Record the evidence, required action, and remaining work, preserving delivery and approval identities; enter `Human Review` with `reason: blocker`.
+Treat ambiguous authorization, PR/base/head mismatch, unauthorized changes, unresolved conflicts, decisions outside approval, validation or access failure, and uncertain merge outcomes as human-required blockers. Record the evidence and remaining work, preserving delivery and approval identities; enter `Human Review` with `reason: blocker` using the blocker handoff format above.
 
 ## Independent `chatgpt-shot` delivery review
 
@@ -359,7 +377,7 @@ After resolving an accepted material finding, lower a secondary perspective by 0
 
 ### Completion, blockers, and new passes
 
-Record each completed Review Job once in Workpad with its result, disposition, verification, and relevant PR/HEAD/Job ID; include updated Confidence for four-perspective jobs only. If both attempts fail, leave the affected perspective's confidence unchanged when applicable, record one blocker with the failure and required action, and use Human Review. Reviewability Preparation uses the same recording and failure rules without a confidence value.
+Record each completed Review Job once in Workpad with its result, disposition, verification, and relevant PR/HEAD/Job ID; include updated Confidence for four-perspective jobs only. If both attempts fail, leave the affected perspective's confidence unchanged when applicable, record one blocker with the failure and relevant recovery context, and use Human Review with the blocker handoff format above. Reviewability Preparation uses the same recording and failure rules without a confidence value.
 
 The four-perspective review is complete only when:
 
