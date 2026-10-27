@@ -12,7 +12,13 @@ The gated Task first wrote `continuity-phase: before-manager-stop` and waited fo
 
 This direct active-Worker run resolves the earlier reviewability gap that an inactive or failed Loop had been used for Manager stop/reopen evidence. It verifies one isolated Codex Worker task across Manager shutdown and reentry; it does not generalize to every Worker failure or Runtime update scenario.
 
-## Artifact identity
+## Design finding follow-up at PR #122 HEAD `bc32a53b5f26a964c2d5e4c32b2687964417db45`
+
+The latest UI changes make unfinished `Backlog` tasks visible in Work and scope the selected project's Loop status, attention message, and controls out of System. Workpad sequence 28 records direct observation of those states in Chrome at `http://127.0.0.1:45741/` with Runtime `ff1e7e64a2269e0a01c0299e33992fb92abc3f9859d1b012de0ac0170398b41c`. The Work view showed the Backlog heading and Task card without a disclosure; System retained the project selector and shared Runtime/Manager controls without the project Loop status or controls.
+
+That observation did not produce a screenshot file in this repository. The existing saved Manager screenshots in this document were captured from UI source HEADs `60979699` or `7f3098a`, before this Design follow-up; neither set proves the appearance of HEAD `bc32a53`. No synthetic screenshot is used as a substitute. Exact-HEAD visual evidence remains incomplete for independent review.
+
+## Artifact identity for the original Manager captures below
 
 - UI source HEAD: `7f3098a` (`Fix narrow Manager viewport overflow`)
 - Active Runtime and Manager Runtime: `0a4af8cf626b3451dea49c8ab706148634299140da3b29c267162e4da9c8a227` (`0.1.0`)
