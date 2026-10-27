@@ -192,7 +192,7 @@ function TaskSurface({ tasks, selectedTaskId, loading, error, refreshedAt, onRet
       ) : <p className="group-empty">No tasks</p>}
     </section>
   );
-  const otherCount = groups.remainingTasks.length;
+  const pastTaskCount = groups.pastTasks.length;
 
   return (
     <aside className="task-surface" aria-labelledby="tasks-heading" aria-busy={loading && !refreshedAt}>
@@ -218,12 +218,13 @@ function TaskSurface({ tasks, selectedTaskId, loading, error, refreshedAt, onRet
         <div className="task-groups">
           {groups.humanReview.length > 0 && taskGroup('Human Review', groups.humanReview, 'review-work')}
           {groups.activeWork.length > 0 && taskGroup('Active work', groups.activeWork, 'active-work')}
-          <details className="remaining-tasks">
-            <summary><span>Other tasks</span><span className="task-group-count">{otherCount}</span></summary>
-            {groups.remainingTasks.length
-              ? <div className="task-list">{groups.remainingTasks.map(task => <TaskCard key={task.id} task={task} selected={task.id === selectedTaskId} onSelect={onSelect} />)}</div>
-              : <p className="group-empty">No other tasks</p>}
-          </details>
+          {groups.backlog.length > 0 && taskGroup('Backlog', groups.backlog, 'backlog-work')}
+          {pastTaskCount > 0 && (
+            <details className="past-tasks">
+              <summary><span>Past tasks</span><span className="task-group-count">{pastTaskCount}</span></summary>
+              <div className="task-list">{groups.pastTasks.map(task => <TaskCard key={task.id} task={task} selected={task.id === selectedTaskId} onSelect={onSelect} />)}</div>
+            </details>
+          )}
         </div>
       )}
     </aside>
@@ -1189,9 +1190,9 @@ function ManagerApp() {
               }}>
                 {instances.map(instance => <option key={instance.id} value={instance.id}>{instance.repository_name} — {instance.repository_root}</option>)}
               </select>
-              <span className={'manager-status status-' + selected.status.toLowerCase()}>{selected.status}</span>
+              {view !== 'system' && <span className={'manager-status status-' + selected.status.toLowerCase()}>{selected.status}</span>}
               <span className="manager-context-path">{selected.repository_root}</span>
-              {lifecycleAction === 'stop' ? (
+              {view !== 'system' && (lifecycleAction === 'stop' ? (
                 <button className="manager-action secondary" type="button" disabled={Boolean(busy)} onClick={() => void perform('/api/v1/instances/' + encodeURIComponent(selectedId) + '/stop', { label: 'Stopping Loop', operation: 'stop-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Stopping Loop' && busyOperation.instanceId === selectedId ? 'Stopping…' : 'Stop Loop'}</button>
               ) : lifecycleAction === 'unconfirmed' ? (
                 <span className="manager-lifecycle-pending">Process ownership needs review</span>
@@ -1199,7 +1200,7 @@ function ManagerApp() {
                 <span className="manager-lifecycle-pending">{lifecycleAction === 'stopping' ? 'Stopping Loop…' : 'Loop is starting'}</span>
               ) : (
                 <button className="manager-action" type="button" disabled={Boolean(busy) || startBlockedByRuntimeRepair} aria-describedby={startBlockedByRuntimeRepair ? 'manager-runtime-start-disabled' : undefined} onClick={() => void perform('/api/v1/instances/' + encodeURIComponent(selectedId) + '/start', { label: 'Starting Loop', operation: 'start-loop', target: 'lifecycle', instanceId: selectedId })}>{busyOperation?.label === 'Starting Loop' && busyOperation.instanceId === selectedId ? 'Starting…' : selected.status === 'Failed' ? 'Retry Loop' : 'Start Loop'}</button>
-              )}
+              ))}
             </>
           ) : (
             <span className="manager-empty-context">{inventoryViewState === 'loading' ? 'Loading projects…' : 'No project selected'}</span>
@@ -1209,7 +1210,7 @@ function ManagerApp() {
         {busyOperationMessage && <p className="inline-message manager-operation-pending" id="manager-operation-pending" role="status">{busyOperationMessage}</p>}
       </header>
 
-      {selected && (selected.status === 'Unconfirmed' || selected.status === 'Failed' || runtimeAttention) && (
+      {view !== 'system' && selected && (selected.status === 'Unconfirmed' || selected.status === 'Failed' || runtimeAttention) && (
         <section className="manager-attention" role="status">
           <div>
             <strong>{selected.status === 'Unconfirmed' ? 'Loop ownership needs review' : selected.status === 'Failed' ? 'Loop failed to start or stopped unexpectedly' : runtimeAttention === 'repair' ? 'Runtime repair needed' : 'Manager restart needed'}</strong>
