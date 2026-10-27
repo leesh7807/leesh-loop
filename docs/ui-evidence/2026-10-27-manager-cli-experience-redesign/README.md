@@ -1,5 +1,17 @@
 # Manager and CLI redesign evidence
 
+## Latest direct Loop and Worker continuity evidence
+
+The new `worker-continuity/` record captures the final local source checkout at HEAD `60979699b09ec74e5f1faaf12bb8f34a067d268d` using Runtime `050b74f7e1e1c7cf4af9d572a3f9e983838e076c3787ee1d830821171cc6c59d`. The two JPGs are screenshots taken directly from the actual Chrome Manager UI after Manager reentry; they show the same selected project and the completed Task with both Workpad records. The screenshots are 1217×570 browser pixels.
+
+An isolated XDG profile registered a temporary Git repository through `node bin/leesh-loop.mjs add`, started its Loop, and published the continuity Task from the actual Manager UI. The environment's installed `chatgpt-shot` interface exposes only `submit` and `jobs`, so `skip_external_readiness = true` was set only in this disposable instance. The same real Worker service passed an authenticated loopback health check and smoke Job `878d826a-b1e8-4049-a741-b0cc95990f99` (`completed`, result `READY`). No production readiness setting or UI was changed.
+
+The gated Task first wrote `continuity-phase: before-manager-stop` and waited for an external signal. Before stopping Manager, OS readback confirmed Manager PID `54054`/start ticks `421868`, Loop PID `61800`/start ticks `462641`, and actual Codex Worker PID `62628`/start ticks `465564`; an active `sleep` child showed the Worker was waiting. `node bin/leesh-loop.mjs manager stop` reported `Manager Service stopped. Running Loops and Workers continue independently.` and `Continuing: repository (...)`. While Manager was stopped, its service record was absent and port `45738` refused connections. The same Loop and Codex Worker process identities remained live. Read-only SQLite showed the first Workpad entry and the Task still available in the per-instance Store. Only then was the external signal created; the live Worker added `continuity-phase: after-manager-stop` and set the Task to `Done` while Manager was still unavailable.
+
+`node bin/leesh-loop.mjs list` then restarted Manager and returned the project as `Running`. Authenticated Manager API readback reported the same Loop PID/start identity and Task State `Done`. Reloading the existing Chrome tab reauthenticated successfully, restored the selected project and Task, and rendered both Workpad entries. Sanitized process/API/SQLite readbacks are in `worker-continuity/pre-stop.json`, `manager-down.json`, `worker-progress-while-manager-down.json`, and `manager-reentry.json`.
+
+This direct active-Worker run resolves the earlier reviewability gap that an inactive or failed Loop had been used for Manager stop/reopen evidence. It verifies one isolated Codex Worker task across Manager shutdown and reentry; it does not generalize to every Worker failure or Runtime update scenario.
+
 ## Artifact identity
 
 - UI source HEAD: `7f3098a` (`Fix narrow Manager viewport overflow`)
@@ -35,17 +47,15 @@ From the actual CLI entry point and isolated profile:
 
 An intermediate Runtime update was first attempted from a process namespace that could not verify the old Manager process identity; the CLI refused to signal an unconfirmed process. After confirming by Manager API that the only Loop was failed with no process present, the Manager was stopped through its authenticated local stop endpoint, the port closure was read back, and the CLI reopened it. The final source HEAD was then checked again with the CLI Manager stop/readback/reopen sequence above.
 
-## Loop-start limit
+## Earlier failed setup attempts (historical; superseded by the direct run above)
 
-The actual CLI `start` command reached the isolated project and reported `Loop Starting on port 45500`. The subsequent `list` and Manager API readback showed `Failed`, `process_absence_confirmed: true`, and the setup cause: `chatgpt-shot could not resolve its Operator configuration path`. The isolated XDG profile intentionally contained no Operator credentials. No real user credentials were copied into it, and no dummy Worker was substituted. Therefore Manager stop/reopen and Task Store continuity are directly observed, but continuity of an actively processing Loop or Worker was not exercised.
-
-The Manager/browser stop flow does not claim Worker continuity. Active Loop continuity after Manager stop remains unverified and requires an isolated profile with an authorized real Operator configuration before that verification can run.
+An earlier isolated CLI `start` reported `chatgpt-shot could not resolve its Operator configuration path` because that attempt had no resolvable Operator configuration. It had no active Worker and provided no continuity evidence. The later isolated run above verified the real service separately and exercised an actual Codex Worker; use its newer evidence for the current result.
 
 ## Verification boundary
 
-- Directly observed: actual Chrome Projects, Work/Task, Plan publication, and System screens; 320 CSS-pixel layout measurements; CLI Manager stop and reopen; HTTP and service-record readback; persisted project and Task selection after browser reload.
+- Directly observed: actual Chrome Projects, Work/Task, Plan publication, and System screens; 320 CSS-pixel layout measurements; CLI Manager stop and reopen both with no active Loop (earlier run) and with an active Codex Worker (latest run); HTTP, process identity, SQLite, and service-record readback; persisted project and Task selection after browser reload.
 - Test-verified at UI source HEAD `7f3098a`: `npm run build --prefix operator/ui` succeeded and UI tests passed 70/70.
 - Earlier full repository suite at source HEAD `5bc8ef1ca401f788aff3f7e23894f544b3ff5821`: 204 passed, 1 skipped, 0 failed. The CSS correction was then covered by the UI build, UI tests, and direct browser observation above.
-- Not exercised: an active Loop/Worker during Manager shutdown or restart; a real external Operator request from the isolated test project.
+- Not exercised: a real external Operator request from the isolated test project. Active Loop/Worker continuation across Manager shutdown and reentry is directly observed in the later `worker-continuity/` record above.
 
-The initial Reviewability Preparation at PR #122 HEAD `9d57653f9c1e48e60d9dcff1f90c15dd2a21071e` returned findings for missing final UI captures and unverified active-Loop continuity. The final captures above address the missing visual evidence. The active-Loop limitation remains explicit and must be reassessed by the independent preparation reviewer for the new delivery HEAD.
+The initial Reviewability Preparation at PR #122 HEAD `9d57653f9c1e48e60d9dcff1f90c15dd2a21071e` returned findings for missing final UI captures and unverified active-Loop continuity. Final captures and the active Worker run above address those evidence gaps. The independent preparation reviewer must assess these artifacts against the exact updated PR HEAD.
