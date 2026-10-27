@@ -137,6 +137,43 @@ export async function getLoopInstance(id, options = {}) {
   return { ...instance, project_file: join(instance.data_directory, 'project.toml'), state_directory: join(instance.data_directory, 'state'), workspace_root: join(instance.data_directory, 'workspaces') };
 }
 
+export async function resolveManagedProject({ repositoryName, repositoryPath }, options = {}) {
+  const hasName = typeof repositoryName === 'string' && repositoryName.trim().length > 0;
+  const hasPath = typeof repositoryPath === 'string' && repositoryPath.trim().length > 0;
+  if (hasName === hasPath) {
+    throw Object.assign(new Error('Select a project by repository name or repository path.'), { status: 400 });
+  }
+
+  const instances = await listLoopInstances(options);
+  let matches;
+  if (hasName) {
+    matches = instances.filter(instance => instance.repository_name === repositoryName);
+    if (matches.length > 1) {
+      const paths = matches.map(instance => instance.repository_root).sort();
+      throw Object.assign(new Error(`Project name "${repositoryName}" matches multiple repositories. Select one by repository path: ${paths.join(', ')}`), { status: 409 });
+    }
+  } else {
+    if (!isAbsolute(repositoryPath) || repositoryPath.includes('\0')) {
+      throw Object.assign(new Error('Repository path must be an absolute local path.'), { status: 400 });
+    }
+    let canonicalPath;
+    try { canonicalPath = await realpath(repositoryPath); }
+    catch (error) {
+      if (missing(error)) throw Object.assign(new Error(`No managed Loop uses repository path ${repositoryPath}.`), { status: 404 });
+      throw error;
+    }
+    matches = instances.filter(instance => resolve(instance.repository_root) === canonicalPath);
+  }
+
+  if (matches.length === 0) {
+    throw Object.assign(new Error(hasName
+      ? `No managed Loop has repository name "${repositoryName}".`
+      : `No managed Loop uses repository path ${repositoryPath}.`), { status: 404 });
+  }
+  if (matches.length !== 1) throw Object.assign(new Error('The selected repository does not resolve to one managed Loop.'), { status: 409 });
+  return getLoopInstance(matches[0].id, options);
+}
+
 export async function validateManagedInstanceStateDirectory(instance, config) {
   const stateDirectory = resolve(config.state_directory || '');
   const expectedStateDirectory = resolve(instance.state_directory);

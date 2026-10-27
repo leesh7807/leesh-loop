@@ -224,6 +224,15 @@ test('rendered UI source keeps Task actions, manager hierarchy, state cues, and 
   assert.match(source, /manager-runtime-start-disabled/);
   assert.match(source, /className="manager-management"/);
   assert.match(source, /Add a Git repository/);
+  assert.match(source, /function ProjectWorkerSettings\(/);
+  assert.match(source, /project-worker-settings\?/);
+  assert.match(source, /JSON\.stringify\(\{ \[key\]: value \}\)/);
+  assert.match(source, /saveSetting\(key, null\)/);
+  assert.match(source, /Changes apply on the next Loop start/);
+  assert.match(source, /Manager confirms this Loop has no active process/);
+  assert.match(source, /Review the Loop diagnosis and resolve process ownership/);
+  assert.match(styles, /\.project-worker-setting-controls \{ display: grid/);
+  assert.match(styles, /\.project-worker-settings/);
   assert.match(source, /Unregister Loop/);
   assert.match(source, /Available when Manager confirms Stopped, or confirms a Failed Loop has no active process/i);
   assert.match(source, /Review failure/);

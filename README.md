@@ -25,6 +25,20 @@ leesh-loop stop <instance-id>
 leesh-loop update
 ```
 
+## Project Worker settings
+
+Inspect a project's optional Codex model and reasoning-effort overrides in the selected Loop's **Manage current Loop → Codex Worker settings** panel. The same operation is available from the CLI by unique project name or repository path; from inside a managed repository, the project argument can be omitted:
+
+```bash
+leesh-loop settings
+leesh-loop settings my-repository
+leesh-loop settings /path/to/my-repository --set codex_model=gpt-6.1-sol
+leesh-loop settings my-repository --set codex_reasoning_effort=high
+leesh-loop settings my-repository --clear codex_model
+```
+
+Use `--clear` independently for either `codex_model` or `codex_reasoning_effort`; an unset value restores Codex's default for that setting. If a repository name matches multiple projects, select one by its repository path. Manager accepts changes only after it confirms the Loop is Stopped or Failed with no active process. Saved settings apply on the next Loop start and do not change a running Worker.
+
 Closing the browser does not stop the Manager or a Loop. Restarting the Manager does not stop a running Loop or its Worker Session. The Manager rediscovers a Loop from its execution record, process identity, readiness files, and runtime endpoint; uncertain ownership is shown as `Unconfirmed` and is not acted on.
 
 ## Data and updates
