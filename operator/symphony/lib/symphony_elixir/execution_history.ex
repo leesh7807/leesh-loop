@@ -39,11 +39,7 @@ defmodule SymphonyElixir.ExecutionHistory do
   end
 
   @spec list(Path.t()) :: {:ok, [map()]} | {:error, term()}
-  def list(path) when is_binary(path) do
-    with {:ok, records} <- read_records(path) do
-      {:ok, records}
-    end
-  end
+  def list(path) when is_binary(path), do: read_records(path)
 
   @spec list(Path.t(), String.t() | nil) :: {:ok, [map()]} | {:error, term()}
   def list(path, issue_identifier) when is_binary(path) do
@@ -105,22 +101,31 @@ defmodule SymphonyElixir.ExecutionHistory do
   end
 
   defp decode_records(contents) do
-    with {:ok, %{"schema_version" => @schema_version, "executions" => records}}
-         when is_list(records) <- Jason.decode(contents) do
-      records
-      |> Enum.reduce_while({:ok, []}, fn record, {:ok, acc} ->
-        case decode_record(record) do
-          {:ok, decoded} -> {:cont, {:ok, [decoded | acc]}}
-          {:error, reason} -> {:halt, {:error, {:invalid_record, reason}}}
-        end
-      end)
-      |> case do
-        {:ok, decoded} -> {:ok, Enum.reverse(decoded)}
-        error -> error
-      end
-    else
-      {:ok, _} -> {:error, :unsupported_schema}
-      {:error, reason} -> {:error, {:invalid_json, reason}}
+    case Jason.decode(contents) do
+      {:ok, %{"schema_version" => @schema_version, "executions" => records}} when is_list(records) ->
+        decode_records_list(records)
+
+      {:ok, _} ->
+        {:error, :unsupported_schema}
+
+      {:error, reason} ->
+        {:error, {:invalid_json, reason}}
+    end
+  end
+
+  defp decode_records_list(records) do
+    records
+    |> Enum.reduce_while({:ok, []}, &decode_record_acc/2)
+    |> case do
+      {:ok, decoded} -> {:ok, Enum.reverse(decoded)}
+      error -> error
+    end
+  end
+
+  defp decode_record_acc(record, {:ok, acc}) do
+    case decode_record(record) do
+      {:ok, decoded} -> {:cont, {:ok, [decoded | acc]}}
+      {:error, reason} -> {:halt, {:error, {:invalid_record, reason}}}
     end
   end
 
@@ -176,11 +181,7 @@ defmodule SymphonyElixir.ExecutionHistory do
 
   defp write_synced(path, contents) do
     with {:ok, file} <- File.open(path, [:write, :binary, :exclusive]) do
-      result =
-        with :ok <- IO.binwrite(file, contents),
-             :ok <- :file.sync(file) do
-          :ok
-        end
+      result = with :ok <- IO.binwrite(file, contents), do: :file.sync(file)
 
       close_result = File.close(file)
 

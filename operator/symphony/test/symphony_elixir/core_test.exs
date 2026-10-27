@@ -1093,7 +1093,13 @@ defmodule SymphonyElixir.CoreTest do
     Process.sleep(50)
     state = :sys.get_state(pid)
 
-    assert %{attempt: 3, scheduled_at_ms: scheduled_at_ms, due_at_ms: due_at_ms, identifier: "MT-559", error: "agent exited: :boom"} = state.retry_attempts[issue_id]
+    assert %{
+             attempt: 3,
+             scheduled_at_ms: scheduled_at_ms,
+             due_at_ms: due_at_ms,
+             identifier: "MT-559",
+             error: "agent exited: :boom"
+           } = state.retry_attempts[issue_id]
 
     assert_due_at_matches_scheduling(due_at_ms, scheduled_at_ms, 40_000)
   end
@@ -1132,7 +1138,13 @@ defmodule SymphonyElixir.CoreTest do
     Process.sleep(50)
     state = :sys.get_state(pid)
 
-    assert %{attempt: 1, scheduled_at_ms: scheduled_at_ms, due_at_ms: due_at_ms, identifier: "MT-560", error: "agent exited: :boom"} = state.retry_attempts[issue_id]
+    assert %{
+             attempt: 1,
+             scheduled_at_ms: scheduled_at_ms,
+             due_at_ms: due_at_ms,
+             identifier: "MT-560",
+             error: "agent exited: :boom"
+           } = state.retry_attempts[issue_id]
 
     assert_due_at_matches_scheduling(due_at_ms, scheduled_at_ms, 10_000)
   end

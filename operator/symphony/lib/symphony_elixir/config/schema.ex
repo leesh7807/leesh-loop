@@ -267,7 +267,11 @@ defmodule SymphonyElixir.Config.Schema do
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
       schema
-      |> cast(attrs, [:dashboard_enabled, :refresh_ms, :render_interval_ms, :execution_history_retention], empty_values: [])
+      |> cast(
+        attrs,
+        [:dashboard_enabled, :refresh_ms, :render_interval_ms, :execution_history_retention],
+        empty_values: []
+      )
       |> validate_number(:refresh_ms, greater_than: 0)
       |> validate_number(:render_interval_ms, greater_than: 0)
       |> validate_number(:execution_history_retention, greater_than: 0)

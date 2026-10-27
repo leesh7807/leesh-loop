@@ -13,7 +13,15 @@ defmodule SymphonyElixir.ExecutionHistoryTest do
     initial = execution("execution-1", "2026-09-27T10:00:00Z", "running")
     assert :ok = ExecutionHistory.upsert(path, initial, 20)
 
-    updated = %{initial | worker_host: "worker-a", workspace_path: "/workspaces/PLAN-1", session_id: "thread-1", turn_count: 2, tokens: %{input_tokens: 10, output_tokens: 20, total_tokens: 30}}
+    updated = %{
+      initial
+      | worker_host: "worker-a",
+        workspace_path: "/workspaces/PLAN-1",
+        session_id: "thread-1",
+        turn_count: 2,
+        tokens: %{input_tokens: 10, output_tokens: 20, total_tokens: 30}
+    }
+
     assert :ok = ExecutionHistory.upsert(path, updated, 20)
 
     assert {:ok, [persisted]} = ExecutionHistory.list(path, "PLAN-1")

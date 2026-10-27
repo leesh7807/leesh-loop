@@ -1491,9 +1491,16 @@ defmodule SymphonyElixir.Orchestrator do
         {:reply, {:ok, issue}, state}
 
       _ ->
-        case Enum.find(state.dispatch_inputs, fn {_issue_id, %Issue{identifier: identifier}} -> identifier == issue_identifier end) do
-          {_issue_id, %Issue{} = issue} -> {:reply, {:ok, issue}, state}
-          _ -> {:reply, {:error, :not_found}, state}
+        issue =
+          Enum.find_value(state.dispatch_inputs, fn
+            {_issue_id, %Issue{identifier: ^issue_identifier} = issue} -> issue
+            _ -> nil
+          end)
+
+        if issue do
+          {:reply, {:ok, issue}, state}
+        else
+          {:reply, {:error, :not_found}, state}
         end
     end
   end
