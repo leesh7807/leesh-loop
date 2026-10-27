@@ -5,13 +5,14 @@ import { constants, readFileSync } from 'node:fs';
 import { lstat, open, readFile, truncate, unlink } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { applyInstanceWorkflow, managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readInstanceWorkflow, readJsonFile, unregisterLoopInstance, validateManagedInstanceStateDirectory, writeAtomic, writeAtomicJson } from './manager-storage.mjs';
+import { applyInstanceWorkflow, managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readInstanceWorkflow, readJsonFile, unregisterLoopInstance, validateManagedInstanceStateDirectory, writeAtomicJson } from './manager-storage.mjs';
 import { discoverRunningLoops, loopInstanceStatus, readLoopLogs, startLoopInstance, stopLoopInstance } from './manager-lifecycle.mjs';
 import { activeRuntime, currentRuntimeSource, inspectRuntimeSource, installRuntimeDistribution, installRuntimeDistributionInWorker, listRuntimeDistributions, managerMustRestartForRuntime, reconcileRuntimeRecoveryRecord, recordRuntimeSource, runtimeDiagnostic } from './runtime-distribution.mjs';
 import { openLoopTaskStore } from './local-task-store-runtime.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
 import { createOperatorUiServer } from './operator-ui-server.mjs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { resolveTargetRepository } from './git-target.mjs';
 
 const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -130,7 +131,18 @@ function equalToken(received, expected) {
   return first.length === second.length && timingSafeEqual(first, second);
 }
 
-export function createManagerController({ runtimeRoot, token, port, sourceRoot = process.env.LEESH_LOOP_RUNTIME_SOURCE || runtimeRoot, environment = process.env, homeDirectory = homedir(), lifecycle = {}, runtimeInstaller = installRuntimeDistributionInWorker, taskStoreOpener = openLoopTaskStore } = {}) {
+function allowedManagerHosts(port) {
+  return new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]);
+}
+
+function isLoopbackAddress(address) {
+  if (typeof address !== 'string') return false;
+  if (address === '::1') return true;
+  const ipv4 = address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address;
+  return /^127(?:\.\d{1,3}){3}$/.test(ipv4);
+}
+
+export function createManagerController({ runtimeRoot, token, port, sourceRoot = process.env.LEESH_LOOP_RUNTIME_SOURCE || runtimeRoot, environment = process.env, homeDirectory = homedir(), lifecycle = {}, runtimeInstaller = installRuntimeDistributionInWorker, taskStoreOpener = openLoopTaskStore, managerShutdown = () => process.kill(process.pid, 'SIGTERM') } = {}) {
   const runtime = resolve(runtimeRoot);
   const paths = managerPaths({ environment, homeDirectory });
   const taskStores = new Map();
@@ -287,6 +299,26 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
   async function handleRequest(request, response, url) {
     const configuration = await readManagerConfiguration({ environment, homeDirectory });
     const pathname = url.pathname;
+    if (pathname === '/api/v1/session' && request.method === 'GET') {
+      respond(response, 200, { token });
+      return true;
+    }
+    if (pathname === '/api/v1/repositories/preview' && request.method === 'POST') {
+      const submitted = await requestJson(request);
+      const target = await resolveTargetRepository(requireRepositoryPath(submitted?.repositoryPath));
+      const registered = (await listLoopInstances({ environment, homeDirectory }))
+        .find(instance => instance.repository_root === target.repositoryRoot);
+      respond(response, 200, {
+        repository: {
+          name: target.repositoryName,
+          root: target.repositoryRoot,
+          upstream: `${target.remoteName}/${target.upstreamBranch}`,
+          url: target.remoteUrl
+        },
+        already_managed: registered ? { name: registered.repository_name, root: registered.repository_root } : null
+      });
+      return true;
+    }
     if (pathname === '/api/v1/manager' && request.method === 'GET') {
       const active = await activeRuntime({ environment, homeDirectory });
       const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
@@ -443,19 +475,47 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
       restart.unref();
       return true;
     }
+    if (pathname === '/api/v1/manager/stop' && request.method === 'POST') {
+      respond(response, 202, { accepted: true, loops_continue: true, detail: 'Manager is stopping. Running Loops and Workers continue.' });
+      const shutdown = setTimeout(managerShutdown, 300);
+      shutdown.unref();
+      return true;
+    }
     return false;
   }
 
   return {
     token,
-    expectedHost: `127.0.0.1:${port}`,
+    isAllowedHost(host) { return allowedManagerHosts(port).has(host); },
+    async authorizeBrowserSession(request) {
+      const host = request.headers.host;
+      if (!allowedManagerHosts(port).has(host) || !isLoopbackAddress(request.socket?.remoteAddress)) return false;
+      const origin = request.headers.origin;
+      if (origin && origin !== `http://${host}`) return false;
+      if (request.headers['sec-fetch-site'] !== 'same-origin'
+        || request.headers['sec-fetch-mode'] !== 'cors'
+        || request.headers['sec-fetch-dest'] !== 'empty') return false;
+      return true;
+    },
+    authorizationFailureStatus(request) {
+      const host = request.headers.host;
+      if (!allowedManagerHosts(port).has(host) || !isLoopbackAddress(request.socket?.remoteAddress)) return 403;
+      if (request.headers['sec-fetch-site'] && request.headers['sec-fetch-site'] !== 'same-origin') return 403;
+      const origin = request.headers.origin;
+      if (origin) {
+        try { if (new URL(origin).origin !== `http://${host}`) return 403; }
+        catch { return 403; }
+      }
+      return 401;
+    },
     async authorize(request) {
-      if (request.headers.host !== `127.0.0.1:${port}`) return false;
+      const host = request.headers.host;
+      if (!allowedManagerHosts(port).has(host) || !isLoopbackAddress(request.socket?.remoteAddress)) return false;
       if (!equalToken(request.headers['x-leesh-loop-token'], token)) return false;
       if (request.headers['sec-fetch-site'] && request.headers['sec-fetch-site'] !== 'same-origin') return false;
       const origin = request.headers.origin;
       if (origin) {
-        try { if (new URL(origin).origin !== `http://127.0.0.1:${port}`) return false; }
+        try { if (new URL(origin).origin !== `http://${host}`) return false; }
         catch { return false; }
       }
       return true;
@@ -482,17 +542,31 @@ export async function startManagerServer({ runtimeRoot, environment = process.en
     server.once('error', rejectListen);
     server.listen(config.port, '127.0.0.1', resolveListen);
   });
+  const servers = [server];
+  const ipv6Server = await createOperatorUiServer(dependencies);
+  try {
+    await new Promise((resolveListen, rejectListen) => {
+      ipv6Server.once('error', rejectListen);
+      ipv6Server.listen({ port: config.port, host: '::1', ipv6Only: true }, resolveListen);
+    });
+    servers.push(ipv6Server);
+  } catch {
+    // localhost may resolve to IPv4 on systems without an IPv6 loopback.
+  }
   const ticks = processStartTicks(process.pid);
   if (!ticks) {
-    server.close();
+    for (const listener of servers) listener.close();
     throw new Error(`could not record Manager process identity for PID ${process.pid}`);
   }
+  const hosts = ['127.0.0.1', 'localhost'];
+  if (servers.length > 1) hosts.push('::1');
   await ensurePrivateDirectory(paths.managerStateRoot);
   await writeAtomicJson(paths.managerServiceRecord, {
     schema_version: 1,
     pid: process.pid,
     process_start_ticks: ticks,
     host: '127.0.0.1',
+    hosts,
     port: config.port,
     runtime_path: runtime,
     runtime_version: active?.id ?? null,
@@ -501,7 +575,7 @@ export async function startManagerServer({ runtimeRoot, environment = process.en
   server.once('close', () => {
     void controller.closeTaskStores().catch(error => console.error('Manager Task Store shutdown failed:', error));
   });
-  return { server, url: `http://127.0.0.1:${config.port}`, token, record: paths.managerServiceRecord };
+  return { server, servers, url: `http://127.0.0.1:${config.port}`, token, record: paths.managerServiceRecord };
 }
 
 async function managerHealth(baseUrl, token) {
@@ -512,16 +586,9 @@ async function managerHealth(baseUrl, token) {
   } catch { return null; }
 }
 
-export function managerBrowserBootstrapHtml(baseUrl, token) {
-  const browserUrl = new URL(baseUrl);
-  browserUrl.hash = new URLSearchParams({ 'manager-token': token }).toString();
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; base-uri 'none'"></head><body><script>location.replace(${JSON.stringify(browserUrl.toString())});</script></body></html>`;
-}
-
-async function openManagerBrowser(baseUrl, token, environment, paths) {
-  await writeAtomic(paths.managerBrowserBootstrap, managerBrowserBootstrapHtml(baseUrl, token), 0o600);
+async function openManagerBrowser(baseUrl, environment) {
   const command = environment.LEESH_LOOP_BROWSER_COMMAND || 'xdg-open';
-  const browser = spawn(command, [pathToFileURL(paths.managerBrowserBootstrap).toString()], { detached: true, stdio: 'ignore' });
+  const browser = spawn(command, [baseUrl], { detached: true, stdio: 'ignore' });
   return await new Promise(resolveLaunch => {
     let acknowledgementTimer;
     const finish = result => {
@@ -540,11 +607,11 @@ async function openManagerBrowser(baseUrl, token, environment, paths) {
   });
 }
 
-function browserLaunchDetails(result, paths) {
+function browserLaunchDetails(result, baseUrl) {
   return result?.error
     ? {
         browserLaunchError: result.error,
-        browserBootstrapUrl: pathToFileURL(paths.managerBrowserBootstrap).toString()
+        browserUrl: baseUrl
       }
     : {};
 }
@@ -572,7 +639,7 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
     if (live) {
       const health = await managerHealth(baseUrl, token);
       if (health?.status === 'Running') {
-        const browserResult = openBrowser ? await openManagerBrowser(baseUrl, token, environment, paths) : null;
+        const browserResult = openBrowser ? await openManagerBrowser(baseUrl, environment) : null;
         return {
           url: baseUrl,
           token,
@@ -580,7 +647,7 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
           runtime: active,
           managerRestartRequired: record.manager_restart_required === true,
           alreadyRunning: true,
-          ...browserLaunchDetails(browserResult, paths)
+          ...browserLaunchDetails(browserResult, baseUrl)
         };
       }
       let compatiblePrevious = null;
@@ -645,12 +712,12 @@ export async function ensureManagerService({ sourceRoot, openBrowser = false, en
   }
   const health = await managerHealth(baseUrl, token);
   if (!health) throw new Error(`Manager service did not become ready at ${baseUrl}.`);
-  const browserResult = openBrowser ? await openManagerBrowser(baseUrl, token, environment, paths) : null;
-  return { url: baseUrl, token, port: config.port, runtime: active, alreadyRunning: false, ...browserLaunchDetails(browserResult, paths) };
+  const browserResult = openBrowser ? await openManagerBrowser(baseUrl, environment) : null;
+  return { url: baseUrl, token, port: config.port, runtime: active, alreadyRunning: false, ...browserLaunchDetails(browserResult, baseUrl) };
 }
 
 export async function managerRequest(manager, path, { method = 'GET', body, instanceId } = {}) {
-  if (manager.managerRestartRequired && path !== '/api/v1/manager/restart') {
+  if (manager.managerRestartRequired && !['/api/v1/manager/restart', '/api/v1/manager/stop'].includes(path)) {
     throw new Error('The previous Manager credential may only be used to restart that Manager.');
   }
   const headers = { accept: 'application/json', 'x-leesh-loop-token': manager.token };
@@ -664,4 +731,48 @@ export async function managerRequest(manager, path, { method = 'GET', body, inst
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || `Manager request failed with HTTP ${response.status}.`);
   return result;
+}
+
+export async function stopManagerService({ environment = process.env, homeDirectory = homedir(), timeoutMs = 10_000 } = {}) {
+  const paths = managerPaths({ environment, homeDirectory });
+  const service = await readJsonFile(paths.managerServiceRecord, 'Manager service record');
+  if (!service) return { alreadyStopped: true, loops: [] };
+  if (!Number.isSafeInteger(service.pid) || service.pid <= 0 || !Number.isInteger(service.port)
+    || service.port < 1 || service.port > 65535 || service.host !== '127.0.0.1'
+    || typeof service.process_start_ticks !== 'string' || !service.runtime_version) {
+    throw new Error('Manager process identity is incomplete; refusing to stop any process.');
+  }
+  if (!processAlive(service.pid)) return { alreadyStopped: true, loops: [] };
+  const startTicks = processStartTicks(service.pid);
+  if (!startTicks || startTicks !== service.process_start_ticks) {
+    throw new Error('Manager process identity could not be confirmed; refusing to stop any process.');
+  }
+  let masterToken;
+  try {
+    const details = await lstat(paths.managerApiMaster);
+    if (details.isSymbolicLink() || !details.isFile() || (details.mode & 0o077) !== 0) throw new Error('Manager API credential permissions are invalid.');
+    masterToken = (await readFile(paths.managerApiMaster, 'utf8')).trim();
+  } catch (error) {
+    if (error?.code === 'ENOENT') throw new Error('Manager API credential is missing; refusing to signal the running process.');
+    throw error;
+  }
+  if (!/^[a-f0-9]{64}$/.test(masterToken)) throw new Error('Manager API credential is invalid; refusing to signal the running process.');
+  const manager = {
+    url: `http://127.0.0.1:${service.port}`,
+    token: managerApiToken(masterToken, service.runtime_version),
+    managerRestartRequired: false
+  };
+  if ((await managerHealth(manager.url, manager.token))?.status !== 'Running') {
+    throw new Error('Manager process identity could not be confirmed over HTTP; no process was stopped.');
+  }
+  const { instances } = await managerRequest(manager, '/api/v1/instances');
+  await managerRequest(manager, '/api/v1/manager/stop', { method: 'POST' });
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!processAlive(service.pid) || processStartTicks(service.pid) !== service.process_start_ticks) {
+      return { stopped: true, loops: instances };
+    }
+    await sleep(100);
+  }
+  throw new Error('Manager acknowledged shutdown but its confirmed process did not exit. Running Loops were not signalled.');
 }

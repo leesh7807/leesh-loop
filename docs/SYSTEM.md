@@ -2,11 +2,11 @@
 
 ## Process and data boundaries
 
-The Manager Service, Manager UI, and each Loop Process have independent lifecycles. The UI is served by one loopback Manager address. The Manager starts and stops Loop Processes but does not relay Worker activity. A Loop uses its own Symphony, Local Task Store, workspace root, settings, and `WORKFLOW.md`; it continues task processing if the Manager or browser closes.
+The Manager Service, Manager UI, and each Loop Process have independent lifecycles. The UI is served on IPv4 and IPv6 loopback where available, so `127.0.0.1` and `localhost` reach the same local Manager. The Manager starts and stops Loop Processes but does not relay Worker activity. A Loop uses its own Symphony, Local Task Store, workspace root, settings, and `WORKFLOW.md`; it continues task processing if the Manager or browser closes. `leesh-loop manager stop` stops only the Manager Service after verifying its process identity and authenticated API response; it does not stop a Loop or Worker.
 
 The Manager's process records are advisory until verified against the operating system and the Loop's own readiness data. A Loop is `Running` only when its PID start identity, runtime ownership record, dispatch acknowledgement, assigned dashboard address, and runtime status endpoint agree. PID reuse, missing records, incomplete startup, and ownership mismatches are surfaced as `Unconfirmed` or `Failed`; the Manager does not signal an unverified process.
 
-The Manager binds to `127.0.0.1`. It checks the exact Host, a private random token, Origin, and Fetch Metadata on API requests. It exposes named instance, process, Runtime, Workflow, and Task operations, never a shell command endpoint. Task Store operations open the selected instance's SQLite database and retain the existing Local Publisher and Store contracts.
+The Manager binds only to loopback addresses and accepts the exact `127.0.0.1`, `localhost`, or `[::1]` Host for its configured port. API requests require a private Runtime-bound token and same-origin checks; the browser obtains that token through a same-origin request protected by Origin and Fetch Metadata. The token is kept in page memory, refreshed after an authorization failure, and is not placed in a local file bootstrap or browser storage. The Manager exposes named project, process, Runtime, Workflow, and Task operations, never a shell command endpoint. Task Store operations open the selected instance's SQLite database and retain the existing Local Publisher and Store contracts.
 
 ## User directories
 
@@ -25,7 +25,9 @@ The registry is a new source of truth. Existing per-project registries are not i
 
 ## Instance creation and worker configuration
 
-`leesh-loop init` and the Manager UI call the same Manager Service operation. The CLI resolves the current Git branch's configured upstream URL and branch; the UI validates the submitted local Git repository and resolves the same project identity. Duplicate repository roots are rejected. Neither path can specify arbitrary shell text.
+`leesh-loop add [path]`, the compatibility command `leesh-loop init`, and the Manager UI call the same Manager Service validation and registration operation. The CLI and UI can check a repository path before registration. Both resolve the Git branch's configured upstream URL and branch; duplicate repository roots are rejected with the existing project path. `start` and `stop` resolve a unique project name or repository path, defaulting to the current directory when omitted; duplicate names require a path. Neither path can specify arbitrary shell text.
+
+`leesh-loop stop --all` lists and stops active project Loops through the same per-project lifecycle API. It reports Loops with unconfirmed process ownership and leaves them untouched. It does not stop Manager Service. `leesh-loop manager stop` verifies the service record's PID and start identity and confirms the authenticated Manager endpoint before requesting shutdown; if either check is uncertain it does not signal a process. The Manager closes its Task Store connections on exit and leaves Loop processes running.
 
 An instance's `project.toml` records its repository URL/base branch, workflow path, workspace root, Store state directory, and optional Codex/workspace-file settings. Internal Symphony ports are assigned from the user-configured Manager range, default `4100`–`4199`; the Manager UI defaults to port `4320`. The Manager probes the OS socket table for an available port and tracks active assignments. The per-project `ui_port`/`symphony_port` settings are not part of new instance configuration.
 

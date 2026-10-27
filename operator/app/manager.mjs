@@ -11,8 +11,10 @@ async function serve() {
   const shutdown = async () => {
     if (closing) return;
     closing = true;
-    started.server.close();
-    started.server.closeAllConnections();
+    for (const server of started.servers || [started.server]) {
+      server.close();
+      server.closeAllConnections();
+    }
     const current = await readJsonFile(started.record, 'Manager service record').catch(() => null);
     if (current?.pid === process.pid) await unlink(started.record).catch(error => { if (error?.code !== 'ENOENT') throw error; });
   };

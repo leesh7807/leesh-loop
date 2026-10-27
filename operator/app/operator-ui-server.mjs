@@ -114,14 +114,20 @@ export async function createOperatorUiServer({ root, config, stateDirectory, tas
     let releaseTaskContext = null;
     try {
       if (managerController) {
-        response.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+        response.setHeader('Content-Security-Policy', "default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
         response.setHeader('X-Frame-Options', 'DENY');
+        response.setHeader('X-Content-Type-Options', 'nosniff');
+        response.setHeader('Referrer-Policy', 'no-referrer');
       }
-      if (managerController && request.headers.host !== managerController.expectedHost) {
+      if (managerController && !managerController.isAllowedHost(request.headers.host)) {
         throw Object.assign(new Error('Manager requests must use its loopback address.'), { status: 403 });
       }
-      if (managerController && url.pathname.startsWith('/api/v1/') && !(await managerController.authorize(request))) {
-        throw Object.assign(new Error('Manager authorization failed.'), { status: 403 });
+      if (managerController && url.pathname === '/api/v1/session') {
+        if (request.method !== 'GET' || !(await managerController.authorizeBrowserSession(request))) {
+          throw Object.assign(new Error('Open Manager directly from this local address to establish a session.'), { status: 403 });
+        }
+      } else if (managerController && url.pathname.startsWith('/api/v1/') && !(await managerController.authorize(request))) {
+        throw Object.assign(new Error('Manager session expired. Refresh this page to reconnect; if it persists, run `leesh-loop`.'), { status: managerController.authorizationFailureStatus(request) });
       }
       if (MUTATING_METHODS.has(request.method) && url.pathname.startsWith('/api/v1/')) {
         requireLocalSameOriginMutation(request);

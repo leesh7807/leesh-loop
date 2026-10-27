@@ -1,10 +1,11 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { installRuntimeDistribution, managerMustRestartForRuntime } from '../operator/app/runtime-distribution.mjs';
 import { managerPaths, readJsonFile } from '../operator/app/manager-storage.mjs';
-import { ensureManagerService, managerRequest } from '../operator/app/manager-service.mjs';
+import { ensureManagerService, managerRequest, stopManagerService } from '../operator/app/manager-service.mjs';
 
 const cliPath = realpathSync(fileURLToPath(import.meta.url));
 const distributionRoot = resolve(dirname(cliPath), '..');
@@ -16,24 +17,69 @@ try {
 const usage = [
   'Usage:',
   '  leesh-loop                 Open the central Manager UI',
-  '  leesh-loop init            Create a managed Loop for this Git repository',
+  '  leesh-loop add [path]      Add a local Git project (default: current directory)',
+  '  leesh-loop init            Add the current Git project (compatibility alias)',
   '  leesh-loop update          Install and activate the central Runtime',
-  '  leesh-loop list            List managed Loop instances',
-  '  leesh-loop start <id>      Start one managed Loop instance',
-  '  leesh-loop stop <id>       Stop one managed Loop instance'
+  '  leesh-loop list            List managed projects and Loop states',
+  '  leesh-loop start [project] Start a project Loop (default: current directory)',
+  '  leesh-loop stop [project]  Stop a project Loop (default: current directory)',
+  '  leesh-loop stop --all      Stop all active project Loops',
+  '  leesh-loop manager stop    Stop Manager Service; running Loops continue',
+  '',
+  'Use a project name or repository path. If names are duplicated, use the full path.'
 ].join('\n');
 
 function printInstances(instances) {
   if (instances.length === 0) {
-    console.log('No managed Loop instances are registered.');
+    console.log('No Git projects are registered. Add one with `leesh-loop add <path>` or from Manager.');
     return;
   }
-  const rows = instances.map(value => [value.id, value.repository_name, value.status, value.repository_root]);
-  const headers = ['ID', 'REPOSITORY', 'STATUS', 'PATH'];
+  const rows = instances.map(value => [value.repository_name, value.status, value.repository_root]);
+  const headers = ['PROJECT', 'LOOP', 'REPOSITORY PATH'];
   const widths = headers.map((header, index) => Math.max(header.length, ...rows.map(row => String(row[index]).length)));
   console.log(headers.map((value, index) => value.padEnd(widths[index])).join('  '));
   for (const row of rows) console.log(row.map((value, index) => String(value).padEnd(widths[index])).join('  '));
-  for (const value of instances) if (value.detail) console.error(`leesh-loop: ${value.id}: ${value.detail}`);
+  for (const value of instances) if (value.detail) console.error(`leesh-loop: ${value.repository_name} (${value.repository_root}): ${value.detail}`);
+}
+
+function resolveManagedProject(instances, requested) {
+  const target = requested || process.cwd();
+  const byId = instances.find(instance => instance.id === target);
+  if (byId) return byId;
+
+  const hasPathSyntax = !requested || target === '.' || target === '..' || target.includes('/') || target.includes('\\');
+  const named = instances.filter(instance => instance.repository_name === target);
+  if (!hasPathSyntax && named.length === 1) return named[0];
+  if (!hasPathSyntax && named.length > 1) {
+    throw new Error(`Project name '${target}' is ambiguous. Use its full repository path:\n${named.map(instance => `  ${instance.repository_root}`).join('\n')}`);
+  }
+
+  let path = resolve(target);
+  try { path = realpathSync(path); } catch { /* A missing path is reported as an unregistered project below. */ }
+  let repositoryRoot = path;
+  try {
+    repositoryRoot = realpathSync(execFileSync('git', ['-C', path, 'rev-parse', '--show-toplevel'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']
+    }).trim());
+  } catch { /* Non-Git directories can still be matched by their registered path. */ }
+  const byPath = instances.find(instance => instance.repository_root === path || instance.repository_root === repositoryRoot);
+  if (byPath) return byPath;
+
+  if (named.length === 1) return named[0];
+  throw new Error(`No managed Git project matches '${target}'. Run \`leesh-loop list\` to see registered project names and paths.`);
+}
+
+function reportAddedProject(instance, manager) {
+  console.log(`Added project ${instance.repository_name}.`);
+  console.log(`Repository: ${instance.repository_root}`);
+  console.log(`Loop: ${instance.status}`);
+  console.log(`Manager: ${manager.url}`);
+}
+
+function reportLoopStatus(project, instance) {
+  const name = project.repository_name || instance.repository_name || project.id;
+  const repositoryRoot = project.repository_root || instance.repository_root;
+  console.log(`${name} at ${repositoryRoot}: Loop ${instance.status}${instance.port ? ` on port ${instance.port}` : ''}.`);
 }
 
 function formatDuration(durationMs) {
@@ -78,23 +124,41 @@ async function main() {
     return;
   }
   const selectedCommand = command || 'open';
+  if (selectedCommand === 'manager' && args[0] === 'stop' && args.length === 1) {
+    const result = await stopManagerService();
+    if (result.alreadyStopped) {
+      console.log('Manager Service is already stopped. No Loop process was changed.');
+      return;
+    }
+    const continuing = result.loops.filter(instance => ['Running', 'Starting', 'Stopping'].includes(instance.status));
+    const unconfirmed = result.loops.filter(instance => instance.status === 'Unconfirmed');
+    console.log('Manager Service stopped. Running Loops and Workers continue independently.');
+    if (continuing.length) console.log(`Continuing: ${continuing.map(instance => `${instance.repository_name} (${instance.repository_root})`).join(', ')}`);
+    if (unconfirmed.length) console.log(`Loop ownership needs review: ${unconfirmed.map(instance => `${instance.repository_name} (${instance.repository_root})`).join(', ')}. Manager stopped without changing those Loops.`);
+    if (!continuing.length && !unconfirmed.length) console.log('No active Loops were running.');
+    return;
+  }
   if (selectedCommand === 'open' && args.length === 0) {
     const manager = await ensureReadyManager({ openBrowser: true });
     if (manager.browserLaunchError) {
       console.error(`leesh-loop: Manager is running at ${manager.url}, but the browser could not be opened: ${manager.browserLaunchError}`);
-      console.error(`Open this private bootstrap file in a browser to sign in: ${manager.browserBootstrapUrl}`);
+      console.error(`Open this local address in a browser: ${manager.browserUrl}`);
       process.exitCode = 1;
       return;
     }
     console.log(`Leesh Loop Manager: ${manager.url}`);
     return;
   }
-  if (selectedCommand === 'init' && args.length === 0) {
+  if ((selectedCommand === 'add' && args.length <= 1) || (selectedCommand === 'init' && args.length === 0)) {
+    const repositoryPath = resolve(args[0] || process.cwd());
     const manager = await ensureReadyManager();
-    const result = await managerRequest(manager, '/api/v1/instances', { method: 'POST', body: { repositoryPath: process.cwd() } });
-    console.log(`Leesh Loop instance created: ${result.instance.repository_name} (${result.instance.id})`);
-    console.log(`Repository: ${result.instance.repository_root}`);
-    console.log(`Manager: ${manager.url}`);
+    const preview = await managerRequest(manager, '/api/v1/repositories/preview', { method: 'POST', body: { repositoryPath } });
+    if (preview.already_managed) throw new Error(`${preview.repository.name} at ${preview.repository.root} is already registered. Use 'leesh-loop start ${preview.repository.root}' to open its Loop.`);
+    console.log(`Project: ${preview.repository.name}`);
+    console.log(`Repository: ${preview.repository.root}`);
+    console.log(`Git upstream: ${preview.repository.upstream} (${preview.repository.url})`);
+    const result = await managerRequest(manager, '/api/v1/instances', { method: 'POST', body: { repositoryPath } });
+    reportAddedProject(result.instance, manager);
     return;
   }
   if (selectedCommand === 'list' && args.length === 0) {
@@ -103,16 +167,44 @@ async function main() {
     printInstances(result.instances);
     return;
   }
-  if (selectedCommand === 'start' && args.length === 1) {
+  if (selectedCommand === 'start' && args.length <= 1) {
     const manager = await ensureReadyManager();
-    const result = await managerRequest(manager, `/api/v1/instances/${encodeURIComponent(args[0])}/start`, { method: 'POST' });
-    console.log(`Loop ${result.instance.id}: ${result.instance.status}${result.instance.port ? ` on port ${result.instance.port}` : ''}`);
+    const { instances } = await managerRequest(manager, '/api/v1/instances');
+    const project = resolveManagedProject(instances, args[0]);
+    const result = await managerRequest(manager, `/api/v1/instances/${encodeURIComponent(project.id)}/start`, { method: 'POST' });
+    reportLoopStatus(project, result.instance);
     return;
   }
-  if (selectedCommand === 'stop' && args.length === 1) {
+  if (selectedCommand === 'stop' && args.length === 1 && args[0] === '--all') {
     const manager = await ensureReadyManager();
-    const result = await managerRequest(manager, `/api/v1/instances/${encodeURIComponent(args[0])}/stop`, { method: 'POST' });
-    console.log(`Loop ${result.instance.id}: ${result.instance.status}`);
+    const { instances } = await managerRequest(manager, '/api/v1/instances');
+    const active = instances.filter(instance => ['Running', 'Starting', 'Stopping'].includes(instance.status));
+    const unconfirmed = instances.filter(instance => instance.status === 'Unconfirmed');
+    if (active.length === 0 && unconfirmed.length === 0) {
+      console.log('No active project Loops to stop.');
+      return;
+    }
+    if (active.length) console.log(`Stopping ${active.length} project Loop(s): ${active.map(instance => `${instance.repository_name} (${instance.repository_root})`).join(', ')}`);
+    const failures = unconfirmed.map(instance => `${instance.repository_name} (${instance.repository_root}): process ownership is unconfirmed; inspect this Loop with 'leesh-loop list' and retry after Manager confirms its state`);
+    for (const failure of failures) console.error(`Could not stop ${failure}`);
+    for (const instance of active) {
+      try {
+        const result = await managerRequest(manager, `/api/v1/instances/${encodeURIComponent(instance.id)}/stop`, { method: 'POST' });
+        reportLoopStatus(instance, result.instance);
+      } catch (error) {
+        failures.push(`${instance.repository_name} (${instance.repository_root}): ${error.message}`);
+        console.error(`Could not stop ${failures.at(-1)}`);
+      }
+    }
+    if (failures.length) process.exitCode = 1;
+    return;
+  }
+  if (selectedCommand === 'stop' && args.length <= 1) {
+    const manager = await ensureReadyManager();
+    const { instances } = await managerRequest(manager, '/api/v1/instances');
+    const project = resolveManagedProject(instances, args[0]);
+    const result = await managerRequest(manager, `/api/v1/instances/${encodeURIComponent(project.id)}/stop`, { method: 'POST' });
+    reportLoopStatus(project, result.instance);
     return;
   }
   if (selectedCommand === 'update' && args.length === 0) {

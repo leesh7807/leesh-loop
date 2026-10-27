@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { createManagerController, ensureManagerService, managerApiToken, managerBrowserBootstrapHtml, managerRequest } from '../manager-service.mjs';
+import { createManagerController, ensureManagerService, managerApiToken, managerRequest } from '../manager-service.mjs';
 import { createOperatorUiServer } from '../operator-ui-server.mjs';
 import { hashDistribution } from '../installation-metadata.mjs';
 import { allocatePort, discoverRunningLoops, loopInstanceStatus, startLoopInstance, stopLoopInstance } from '../manager-lifecycle.mjs';
@@ -63,7 +63,7 @@ async function fixture(t) {
   return { directory, environment, homeDirectory: directory };
 }
 
-async function startManagerFixture(t, paths, { runtimeId, lifecycle, sourceRoot: managerSourceRoot = sourceRoot, runtimeInstaller, taskStoreOpener } = {}) {
+async function startManagerFixture(t, paths, { runtimeId, lifecycle, sourceRoot: managerSourceRoot = sourceRoot, runtimeInstaller, taskStoreOpener, managerShutdown } = {}) {
   const reservation = createHttpServer();
   await new Promise((resolveListen, rejectListen) => {
     reservation.once('error', rejectListen);
@@ -86,6 +86,7 @@ async function startManagerFixture(t, paths, { runtimeId, lifecycle, sourceRoot:
     homeDirectory: paths.homeDirectory,
     lifecycle,
     runtimeInstaller,
+    managerShutdown,
     taskStoreOpener
   });
   const server = await createOperatorUiServer({ root, managerController, managerToken: token, managerPort: port });
@@ -321,7 +322,7 @@ test('managed instances share one Runtime and keep their files and Task Stores i
   assert.equal(secondTasks.body.tasks[0].state, 'Backlog');
 
   const wrongToken = await fetch(`${manager.url}/api/v1/instances`, { headers: { host: `127.0.0.1:${manager.port}` } });
-  assert.equal(wrongToken.status, 403);
+  assert.equal(wrongToken.status, 401);
   const crossOrigin = await api(manager, `/api/v1/tasks/${encodeURIComponent(publishedFirst.body.page_id)}/state`, {
     method: 'PUT', instanceId: first.id, origin: 'http://outside.example', body: { state: 'Cancelled' }
   });
@@ -833,10 +834,10 @@ test('concurrent first-use config and task reads share and close one Task Store'
   assert.equal(closes, 1);
 });
 
-test('Manager Host validation rejects an unauthorized Host header', async t => {
+test('Manager accepts localhost for local use and rejects an unapproved Host header', async t => {
   const paths = await fixture(t);
   const manager = await startManagerFixture(t, paths);
-  const response = await new Promise((resolveResponse, rejectResponse) => {
+  const localResponse = await new Promise((resolveResponse, rejectResponse) => {
     const request = httpRequest({
       hostname: '127.0.0.1',
       port: manager.port,
@@ -847,7 +848,19 @@ test('Manager Host validation rejects an unauthorized Host header', async t => {
     request.once('error', rejectResponse);
     request.end();
   });
-  assert.equal(response.statusCode, 403);
+  assert.equal(localResponse.statusCode, 200);
+  const reboundResponse = await new Promise((resolveResponse, rejectResponse) => {
+    const request = httpRequest({
+      hostname: '127.0.0.1',
+      port: manager.port,
+      path: '/api/v1/manager',
+      method: 'GET',
+      headers: { host: `attacker.example:${manager.port}`, 'x-leesh-loop-token': manager.token }
+    }, resolveResponse);
+    request.once('error', rejectResponse);
+    request.end();
+  });
+  assert.equal(reboundResponse.statusCode, 403);
 });
 
 test('Manager API token is bound to the immutable Runtime and rejects the persisted master token', async t => {
@@ -861,7 +874,7 @@ test('Manager API token is bound to the immutable Runtime and rejects the persis
     environment: paths.environment,
     homeDirectory: paths.homeDirectory
   });
-  const request = candidate => ({ headers: { host: '127.0.0.1:4320', 'x-leesh-loop-token': candidate } });
+  const request = candidate => ({ headers: { host: '127.0.0.1:4320', 'x-leesh-loop-token': candidate }, socket: { remoteAddress: '127.0.0.1' } });
 
   assert.notEqual(token, masterToken);
   assert.notEqual(token, managerApiToken(masterToken, 'runtime-version-1'));
@@ -911,13 +924,37 @@ export function installRuntimeDistribution(sourceRoot, { environment }) {
   assert.equal(updated.body.changed, true);
 });
 
-test('Manager browser bootstrap keeps its credential in the private local bootstrap document', () => {
-  const token = 'd'.repeat(64);
-  const html = managerBrowserBootstrapHtml('http://127.0.0.1:4320', token);
+test('browser session credentials require a same-origin loopback fetch and manager stop leaves Loops untouched', async t => {
+  let shutdowns = 0;
+  const paths = await fixture(t);
+  const manager = await startManagerFixture(t, paths, { managerShutdown: () => { shutdowns += 1; } });
+  const credential = await fetch(`${manager.url}/api/v1/session`, {
+    headers: {
+      origin: manager.url,
+      'sec-fetch-site': 'same-origin',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-dest': 'empty'
+    }
+  });
+  assert.equal(credential.status, 200);
+  assert.equal((await credential.json()).token, manager.token);
 
-  assert.match(html, new RegExp(`location\\.replace\\("http://127\\.0\\.0\\.1:4320/#manager-token=${token}"\\)`));
-  assert.match(html, /Content-Security-Policy/);
-  assert.match(html, /no-referrer/);
+  const crossOrigin = await fetch(`${manager.url}/api/v1/session`, {
+    headers: {
+      origin: 'https://attacker.example',
+      'sec-fetch-site': 'cross-site',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-dest': 'empty'
+    }
+  });
+  assert.equal(crossOrigin.status, 403);
+
+  const stopped = await api(manager, '/api/v1/manager/stop', { method: 'POST', origin: manager.url });
+  assert.equal(stopped.response.status, 202);
+  assert.equal(stopped.body.loops_continue, true);
+  assert.equal(shutdowns, 0);
+  await new Promise(resolveSleep => setTimeout(resolveSleep, 350));
+  assert.equal(shutdowns, 1);
 });
 
 test('Manager serializes start and stop requests for the same instance', async t => {
@@ -1809,21 +1846,36 @@ test('CLI init and list use the same central instance registry as the Manager UI
     if (browserArgument === undefined) await new Promise(resolveSleep => setTimeout(resolveSleep, 20));
   }
   assert.ok(browserArgument);
-  assert.equal(new URL(browserArgument).protocol, 'file:');
+  assert.equal(new URL(browserArgument).protocol, 'http:');
   assert.ok(!browserArgument.includes(manager.token));
-  const bootstrapPath = fileURLToPath(new URL(browserArgument));
-  const bootstrapHtml = await readFile(bootstrapPath, 'utf8');
-  assert.ok(bootstrapHtml.includes(`#manager-token=${manager.token}`));
-  assert.equal((await lstat(bootstrapPath)).mode & 0o077, 0);
+  assert.equal(browserArgument, manager.url);
+  await assert.rejects(lstat(managedPaths.managerBrowserBootstrap), { code: 'ENOENT' });
 
   const repository = await makeRepository(join(paths.directory, 'repositories'), 'cli-project');
   const cli = resolve(import.meta.dirname, '../../../bin/leesh-loop.mjs');
   const initialized = await execFile(process.execPath, [cli, 'init'], { cwd: repository, env: paths.environment, encoding: 'utf8', timeout: 10_000 });
-  assert.match(initialized.stdout, /Leesh Loop instance created: cli-project/);
+  assert.match(initialized.stdout, /Added project cli-project/);
   const listed = await execFile(process.execPath, [cli, 'list'], { cwd: paths.directory, env: paths.environment, encoding: 'utf8', timeout: 10_000 });
   assert.match(listed.stdout, /cli-project/);
   assert.match(listed.stdout, new RegExp(repository.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.doesNotMatch(listed.stdout, /r\s+e\s+p\s+o\s+i\s+t/);
+
+  const nestedDirectory = join(repository, 'nested');
+  await mkdir(nestedDirectory);
+  const stoppedFromNestedDirectory = await execFile(process.execPath, [cli, 'stop', nestedDirectory], { cwd: paths.directory, env: paths.environment, encoding: 'utf8', timeout: 10_000 });
+  assert.match(stoppedFromNestedDirectory.stdout, new RegExp(`cli-project at ${repository.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}: Loop Stopped`));
+
+  const duplicateRepository = await makeRepository(join(paths.directory, 'second-team'), 'cli-project');
+  const addedByPath = await execFile(process.execPath, [cli, 'add', duplicateRepository], { cwd: paths.directory, env: paths.environment, encoding: 'utf8', timeout: 10_000 });
+  assert.match(addedByPath.stdout, /Project: cli-project/);
+  assert.ok(addedByPath.stdout.includes(duplicateRepository));
+  const duplicateNames = await execFile(process.execPath, [cli, 'start', 'cli-project'], { cwd: paths.directory, env: paths.environment, encoding: 'utf8', timeout: 10_000 })
+    .then(result => ({ result }), error => ({ error }));
+  assert.equal(duplicateNames.error?.code, 1);
+  assert.match(duplicateNames.error.stderr, /Project name 'cli-project' is ambiguous/);
+  assert.ok(duplicateNames.error.stderr.includes(repository));
+  assert.ok(duplicateNames.error.stderr.includes(duplicateRepository));
+  assert.doesNotMatch(duplicateNames.error.stderr, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
 
   paths.environment.LEESH_LOOP_BROWSER_COMMAND = join(paths.directory, 'missing-browser-command');
   const openAttempt = await execFile(process.execPath, [cli], { cwd: paths.directory, env: paths.environment, encoding: 'utf8', timeout: 10_000 })
@@ -1831,8 +1883,8 @@ test('CLI init and list use the same central instance registry as the Manager UI
   assert.equal(openAttempt.error?.code, 1);
   assert.match(openAttempt.error.stderr, /Manager is running at http:\/\/127\.0\.0\.1:/);
   assert.match(openAttempt.error.stderr, /browser could not be opened/);
-  assert.match(openAttempt.error.stderr, /Open this private bootstrap file in a browser to sign in:/);
-  assert.ok(openAttempt.error.stderr.includes(pathToFileURL(managedPaths.managerBrowserBootstrap).toString()));
+  assert.match(openAttempt.error.stderr, /Open this local address in a browser: http:\/\/127\.0\.0\.1:/);
+  assert.doesNotMatch(openAttempt.error.stderr, /file:\/\//);
   assert.equal((await api(manager, '/api/v1/manager')).response.status, 200);
 
   const failingBrowserCommand = join(paths.directory, 'failing-browser.mjs');
@@ -1843,11 +1895,15 @@ test('CLI init and list use the same central instance registry as the Manager UI
     .then(result => ({ result }), error => ({ error }));
   assert.equal(failedDispatch.error?.code, 1);
   assert.match(failedDispatch.error.stderr, /exited unsuccessfully with status 23/);
-  assert.ok(failedDispatch.error.stderr.includes(pathToFileURL(managedPaths.managerBrowserBootstrap).toString()));
+  assert.match(failedDispatch.error.stderr, /Open this local address in a browser: http:\/\/127\.0\.0\.1:/);
+  assert.doesNotMatch(failedDispatch.error.stderr, /file:\/\//);
   assert.equal((await api(manager, '/api/v1/manager')).response.status, 200);
 
   const uiList = await api(manager, '/api/v1/instances');
-  assert.deepEqual(uiList.body.instances.map(instance => instance.repository_root), [repository]);
+  assert.deepEqual(uiList.body.instances.map(instance => instance.repository_root).sort(), [repository, duplicateRepository].sort());
+  assert.equal(new Set(uiList.body.instances.map(instance => instance.data_directory)).size, 2);
+  const stoppedAll = await execFile(process.execPath, [cli, 'stop', '--all'], { cwd: paths.directory, env: paths.environment, encoding: 'utf8', timeout: 10_000 });
+  assert.match(stoppedAll.stdout, /No active project Loops to stop/);
 });
 
 test('Workflow review and apply follow a custom instance-owned workflow_path', async t => {

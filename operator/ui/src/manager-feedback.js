@@ -22,6 +22,7 @@ export function lifecycleCompletionMessage(operation, instance) {
 export function managerOperationCompletionMessage(operation, instance) {
   if (operation === 'update-runtime') return 'Runtime update completed.';
   if (operation === 'update-workflow') return 'Workflow update completed.';
+  if (operation === 'stop-manager') return 'Manager Service stopped. Running Loops and Workers continue.';
   if (operation === 'start-loop' || operation === 'stop-loop') return lifecycleCompletionMessage(operation, instance);
   return 'Change saved.';
 }
