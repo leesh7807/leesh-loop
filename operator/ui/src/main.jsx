@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { createSerializedRefreshQueue } from './refresh-queue.js';
 import { clearPublicationDraft, readPublicationDraft, writePublicationDraft } from './publication-draft.js';
 import { groupTasksForOperatorDisplay } from './operator-task-display-order.js';
-import { readTaskDetailDraft } from './task-detail-draft.js';
+import { readTaskDetailDraft, writeTaskDetailDraft } from './task-detail-draft.js';
 import { bootstrapManagerToken } from './manager-auth.js';
 import { createManagerApiFetch } from './manager-api.js';
 import { managerLifecycleAction, managerStartBlockedByRuntimeRepair } from './manager-lifecycle-action.js';
@@ -325,7 +325,7 @@ function PublicationSurface({ config, instanceId, plan, state, selectedBlockers,
   );
 }
 
-function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTaskChanged, onTaskListRefresh, apiFetch }) {
+function TaskDetail({ config, instanceId, taskId, publicationReceipt, onBackToPublish, onTaskChanged, onTaskListRefresh, apiFetch }) {
   const [task, setTask] = useState(null);
   const [workpad, setWorkpad] = useState([]);
   const [comments, setComments] = useState([]);
@@ -364,9 +364,10 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       setComments(body.comments);
       setRefreshError('');
       if (firstRead) {
-        const draft = readTaskDetailDraft(body.task);
+        const draft = readTaskDetailDraft(body.task, { instanceId, states: config.states });
         setStateDraft(draft.state);
         setBlockerDraft(draft.blockedBy);
+        setCommentDraft(draft.comment);
       }
       detailLoaded.current = true;
     } catch (error) {
@@ -378,7 +379,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       if (current) setLoading(false);
       if (shouldRefresh) void currentRefresh.current?.();
     }
-  }, [taskId]);
+  }, [apiFetch, config.states, instanceId, taskId]);
   currentRefresh.current = refresh;
 
   useEffect(() => {
@@ -420,6 +421,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       taskRef.current = body.task;
       setTask(body.task);
       setStateDraft(body.task.state);
+      writeTaskDetailDraft(body.task, { state: body.task.state, blockedBy: blockerDraft, comment: commentDraft }, { instanceId });
       setStateFeedback({ kind: 'success', savedState: body.task.state, text: `Saved as ${body.task.state}.` });
       onTaskChanged(body.task);
       onTaskListRefresh();
@@ -447,6 +449,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       taskRef.current = body.task;
       setTask(body.task);
       setBlockerDraft(body.task.blockedBy);
+      writeTaskDetailDraft(body.task, { state: stateDraft, blockedBy: body.task.blockedBy, comment: commentDraft }, { instanceId });
       setBlockerFeedback({ kind: 'success', text: 'Blocked By saved.' });
       onTaskChanged(body.task);
       onTaskListRefresh();
@@ -473,6 +476,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
       const body = await responseJson(response);
       setComments(current => [...current, body.comment]);
       setCommentDraft('');
+      writeTaskDetailDraft(taskRef.current || task, { state: stateDraft, blockedBy: blockerDraft, comment: '' }, { instanceId });
       setCommentFeedback({ kind: 'success', text: 'Comment saved.' });
       onTaskListRefresh();
     } catch (error) {
@@ -485,6 +489,21 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
   }
 
   const taskSummary = config.tasks.find(value => value.id === taskId);
+  function persistTaskDraft(values) {
+    if (!task) return;
+    writeTaskDetailDraft(task, {
+      state: values.state ?? stateDraft,
+      blockedBy: values.blockedBy ?? blockerDraft,
+      comment: values.comment ?? commentDraft
+    }, { instanceId });
+  }
+  function toggleBlocker(value) {
+    const blockedBy = blockerDraft.includes(value.id)
+      ? blockerDraft.filter(id => id !== value.id)
+      : [...blockerDraft, value.id];
+    setBlockerDraft(blockedBy);
+    persistTaskDraft({ blockedBy });
+  }
   if (loading && !task) return <section className="work-panel detail-panel" aria-labelledby="task-detail-heading" aria-busy="true"><h2 id="task-detail-heading" className="panel-navigation-heading" tabIndex={-1}>{taskSummary?.title || 'Task detail'}</h2><p className="empty-state">Loading task detail…</p></section>;
   if (!task) return <section className="work-panel detail-panel" aria-labelledby="task-detail-heading"><h2 id="task-detail-heading" className="panel-navigation-heading" tabIndex={-1}>{taskSummary?.title || 'Task detail'}</h2><button type="button" className="text-button" onClick={onBackToPublish}>Back to Plan publication</button><p className="inline-message failure" role="alert">{refreshError || 'Task detail is unavailable.'}</p><button type="button" className="text-button" onClick={refresh}>Try again</button></section>;
 
@@ -504,7 +523,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
         <p className="current-state"><span>Saved State</span><strong>{task.state}</strong></p>
         <div className="state-controls">
           <label htmlFor="next-state">Choose next State</label>
-          <select id="next-state" value={stateDraft} onChange={event => { setStateDraft(event.target.value); setStateFeedback(null); }} disabled={Boolean(saving)}>
+          <select id="next-state" value={stateDraft} onChange={event => { setStateDraft(event.target.value); setStateFeedback(null); persistTaskDraft({ state: event.target.value }); }} disabled={Boolean(saving)}>
             {stateOptions.map(value => <option value={value} key={value}>{value}</option>)}
           </select>
           <button type="submit" className="primary-action" disabled={Boolean(saving) || !stateDraft || stateDraft === task.state} aria-busy={saving === 'state'}>{saving === 'state' ? 'Saving…' : 'Save State'}</button>
@@ -554,7 +573,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
         ) : <p className="quiet">No comments yet.</p>}
         <form className="comment-form" onSubmit={addComment}>
           <label htmlFor="comment">Add a comment</label>
-          <textarea id="comment" value={commentDraft} onChange={event => setCommentDraft(event.target.value)} disabled={Boolean(saving)} required />
+          <textarea id="comment" value={commentDraft} onChange={event => { setCommentDraft(event.target.value); persistTaskDraft({ comment: event.target.value }); }} disabled={Boolean(saving)} required />
           <button type="submit" disabled={Boolean(saving) || !commentDraft.trim()}>{saving === 'comment' ? 'Saving…' : 'Add comment'}</button>
           {commentFeedback && <p className={`action-feedback ${commentFeedback.kind}`} role={commentFeedback.kind === 'failure' ? 'alert' : 'status'}>{commentFeedback.text}</p>}
         </form>
@@ -568,7 +587,7 @@ function TaskDetail({ config, taskId, publicationReceipt, onBackToPublish, onTas
             <BlockerOptions
               tasks={availableBlockers}
               selectedItems={selectedBlockerItems}
-              onToggle={value => setBlockerDraft(current => current.includes(value.id) ? current.filter(id => id !== value.id) : [...current, value.id])}
+              onToggle={toggleBlocker}
               disabled={Boolean(saving)}
             />
           ) : <p className="quiet">No other tasks are available as blockers.</p>}
@@ -728,6 +747,7 @@ function OperatorApp({ instanceId }) {
           <TaskDetail
             key={selectedTaskId}
             config={{ ...config, tasks }}
+            instanceId={instanceId}
             taskId={selectedTaskId}
             publicationReceipt={publicationReceipt}
             onBackToPublish={returnToPublication}
