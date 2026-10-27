@@ -56,6 +56,10 @@ defmodule SymphonyElixir.LocalTaskStoreAdapterTest do
              "local_task_add_blocked_by"
            ]
 
+    publish_spec = Enum.find(Adapter.agent_tool_specs(), &(&1["name"] == "local_task_publish_plan"))
+    assert publish_spec["inputSchema"]["properties"] == %{"plan" => %{"type" => "string"}}
+    assert publish_spec["inputSchema"]["required"] == ["plan"]
+
     task = call_tool("local_task_read", %{}, binding)
     assert task["id"] == tasks["blocked"]
     assert task["acceptedPlan"] == "# blocked\nAccepted Local input.\n"
@@ -80,8 +84,20 @@ defmodule SymphonyElixir.LocalTaskStoreAdapterTest do
     assert call_tool("local_task_read", %{}, binding)["acceptedPlan"] == "# blocked\nAccepted Local input.\n"
 
     publication = call_tool("local_task_publish_plan", %{"plan" => "# follow-up\nPublished from the Worker tool.\n"}, binding)
-    assert publication["state"] == "Backlog"
+    assert publication["state"] == "Ready"
+    assert publication["task"]["state"] == "Ready"
+    assert publication["task"]["blockedBy"] == []
     assert publication["page_id"] != tasks["blocked"]
+
+    assert {:ok, [published_issue]} = Adapter.fetch_issues_by_ids([publication["page_id"]])
+    assert published_issue.state == "Ready"
+    assert published_issue.dispatchable
+    assert published_issue.blocked_by == []
+
+    source_task = call_tool("local_task_read", %{}, binding)
+
+    assert MapSet.new(Enum.map(source_task["blockedBy"], & &1["id"])) ==
+             MapSet.new([tasks["blocker"], tasks["second_blocker"]])
 
     assert Adapter.bind_session(%{}, %Issue{id: tasks["blocked"]}) == %{local_task_id: tasks["blocked"]}
     assert call_tool("local_task_read", %{"task_id" => tasks["blocker"]}, binding)["id"] == tasks["blocked"]

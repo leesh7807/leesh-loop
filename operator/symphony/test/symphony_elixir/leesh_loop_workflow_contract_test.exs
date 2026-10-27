@@ -20,7 +20,7 @@ defmodule SymphonyElixir.LeeshLoopWorkflowContractTest do
     assert prompt =~ "remote_base: <configured-base remote commit | none>"
     assert prompt =~ "fetch and resolve the configured remote base"
     assert prompt =~ "create the PR with explicit configured base"
-    assert prompt =~ "Use the Local Task surface"
+    assert prompt =~ "Use task-bound Local Task tools"
     refute prompt =~ "notion_task_"
     refute prompt =~ "origin/main"
     refute prompt =~ "remote `main`"

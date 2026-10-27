@@ -16,7 +16,7 @@ defmodule SymphonyElixir.LocalTaskStore.AgentTool do
         "priority" => %{"type" => ["integer", "null"]},
         "labels" => %{"type" => "array", "items" => %{"type" => "string"}}
       }),
-      spec("local_task_publish_plan", "Publish a complete Plan to the same Local Task Store as a new Backlog task.", %{"plan" => %{"type" => "string"}}, ["plan"]),
+      spec("local_task_publish_plan", "Publish a complete Plan to the same Local Task Store as a new Ready task.", %{"plan" => %{"type" => "string"}}, ["plan"]),
       spec("local_task_add_blocked_by", "Add a task ID to the Blocked By relation of the currently bound Local Task.", %{"blocker_task_id" => %{"type" => "string"}}, ["blocker_task_id"])
     ]
   end
@@ -80,7 +80,7 @@ defmodule SymphonyElixir.LocalTaskStore.AgentTool do
 
   defp dispatch("local_task_publish_plan", _task_id, arguments) do
     case exact_string_arg(arguments, "plan") do
-      {:ok, plan} -> respond(Client.run("publish_task", %{"plan" => plan, "state" => "Backlog", "blockedBy" => []}))
+      {:ok, plan} -> respond(Client.run("publish_task", %{"plan" => plan, "state" => "Ready", "blockedBy" => []}))
       error -> failure(error)
     end
   end

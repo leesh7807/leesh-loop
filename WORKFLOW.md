@@ -89,7 +89,7 @@ If task-bound access fails, preserve recoverable workspace changes and report th
 
 ### Worker follow-up capabilities
 
-* `local_task_publish_plan` publishes a complete Plan as a new `Backlog` task and returns its `identifier` and Local task ID (`page_id`).
+* `local_task_publish_plan` publishes a complete Plan as a new `Ready` task and returns its `identifier` and Local task ID (`page_id`).
 * `local_task_add_blocked_by` adds the published task to this task's `Blocked By` relation, preserving existing blockers.
 
 Use these task-bound operations for follow-up publication and dependency changes.
@@ -149,6 +149,8 @@ Earlier Workpad entries remain historical and do not guide the new implementatio
 Use `SYMPHONY_GITHUB_REPOSITORY_URL` and `SYMPHONY_GITHUB_BASE_BRANCH` as repository/base authority. If the configured base is initially missing, the Operator may bootstrap it from the repository default branch. All task branches, continuations, PRs, and merges target the configured base.
 
 Before initial implementation, fetch and resolve the configured remote base; fail safely if unavailable. Branch from that exact commit, commit only task-related changes, push only the task branch, and create the PR with explicit configured base. Never direct-push or direct-merge into the configured base.
+
+Verify material outcomes through representative execution or observation of the delivered result, retaining evidence sufficient for independent review where code and tests alone are inadequate. Prefer direct evidence of the actual result. If the means to obtain or retain it are missing, first consider reasonable permitted alternatives or building the necessary verification tools, within the current work or as a justified follow-up Plan. Do not bypass explicit security or permission boundaries. Indirect evidence may substitute only when direct evidence cannot reasonably be obtained; distinguish what is observed, test-verified, inferred, or simulated, and do not count an unverified requirement as complete.
 
 Before delivery, inspect final diff/status, perform applicable repository checks and `git diff --check`, and compare the actual result to Accepted Plan and Repository Plan. Make any necessary durable Plan correction, move the delivered Plan to `docs/plans/completed/`, and read the PR back from GitHub. A valid delivery PR must target the configured base, source the task branch, and identify its exact `delivered_head`. Do not silently substitute another PR or a later HEAD.
 
@@ -227,13 +229,7 @@ outcomes or evidence the worker submitted. Treat the Accepted Plan and
 repository contracts as authority, and assess reviewability rather than
 implementation correctness.
 
-Decide whether those outcomes are sufficiently reviewable. If direct execution
-or experience is unavailable, actively consider reasonable indirect
-representations, such as a behavior description, representative images,
-captures of relevant states, or test results. Do not require perfect
-verification, reproduction of every state, or a particular evidence format.
-Distinguish direct observation or test verification from descriptions,
-inferences, and synthetic or composite material.
+Determine whether the available evidence allows independent assessment of the actual delivered outcomes, judging each source by what it establishes rather than its format or presentation. Prefer direct evidence where the relevant result cannot be adequately assessed from code and tests alone. If direct evidence is missing, consider whether reasonable permitted means, including enabling verification tools, could make it available before accepting indirect substitutes. Indirect evidence may support review but must not be treated as proof of outcomes it does not demonstrate. Do not require perfect verification, reproduction of every state, or a particular evidence format. Distinguish direct observation, test verification, description, inference, and synthetic material.
 
 Use available tools for this read-only review when useful. If a tool is
 unavailable or approval-gated, continue with accessible evidence and report
@@ -242,10 +238,7 @@ any material limitation.
 # Verdict
 PASS | FINDINGS
 
-PASS when reasonable means make outcomes worth later review sufficiently
-reviewable and no worthwhile reviewability gap remains. FINDINGS when such an
-outcome is not sufficiently reviewable and a reasonable improvement is
-available.
+PASS when the actual material outcomes are sufficiently reviewable and no worthwhile reviewability gap remains. FINDINGS when a material outcome cannot be adequately assessed and a reasonable improvement to the evidence or means of verification is available.
 
 # Findings
 None. | findings
@@ -428,31 +421,38 @@ Once a finished delivery review entered `Human Review` with `reason: review`, a 
 
 ## Review and publish a follow-up Plan
 
-When work reveals a follow-up task, write a complete Candidate Plan using `docs/PLAN.md`. Review it through the existing `chatgpt-shot` submission/polling/failure flow, leaving delivery Review Confidence unchanged.
+When work reveals a justified, separable follow-up task, write a complete Candidate Plan using `docs/PLAN.md`. Review it through the existing `chatgpt-shot` submission/polling/failure flow, leaving delivery Review Confidence unchanged. Publishing a follow-up does not discharge the current task's accepted obligations.
 
 Use:
 
 ```text
 Review the complete Candidate Plan below as a proposal, not as an Accepted Plan.
-Review its Objective, Intent, and Verification Requirements as the planning
-contract itself against the supplied current work context and evidence.
 
-Find only material omissions or distortions of the current objective, missing
-guarantees, unnecessary constraints or complexity, or verification gaps that
-could lead a reasonable implementation to a materially different result or count
-a failure as success. Focus on intended execution and observable evidence. Apply
-KISS, YAGNI, and DRY. Do not flag ordinary implementation choices that converge
-under existing contracts/conventions, or simple unresolved choices best left to
-implementation. Do not treat claims made only by the Candidate Plan as evidence.
+Assess its necessity, justification for independent delivery, and completeness:
+- Necessity: Is the follow-up grounded in the current objective, observed results,
+  and available evidence?
+- Justification: Is separate delivery warranted without improperly deferring
+  the current task's responsibilities or introducing unnecessary work?
+- Completeness: Do its Objective, Intent, and Verification Requirements form a
+  coherent contract sufficient for correct implementation and verification?
 
-Return PASS or findings. For each finding, state affected contract, concrete
-evidence, and material consequence. If context does not establish a material
-problem, do not invent one.
+Find only material problems in these judgments, including unsupported needs,
+unjustified separation, missing guarantees, unnecessary constraints or
+complexity, and verification gaps that could cause a reasonable implementation
+to deliver a materially different result or count failure as success.
+Apply KISS, YAGNI, and DRY. Leave ordinary implementation choices to execution.
+Do not treat claims made only by the Candidate Plan as evidence.
+
+Return PASS or findings. For each finding, state the affected judgment or
+contract, concrete evidence, and material consequence. Do not invent findings
+when the context does not establish a material problem.
 
 Current work context:
 Current objective: <...>
 Observed result: <...>
-Follow-up boundary: <...>
+Follow-up rationale: <...>
+Separation boundary: <...>
+Current-task dependency: <yes/no and why>
 User requirement: <... | none>
 Evidence: <... | none>
 
@@ -462,8 +462,8 @@ Candidate Plan:
 
 Incorporate supported material findings into the Candidate Plan, re-reviewing the complete revised Plan after material changes. Publish when all valid findings are resolved.
 
-Record Candidate Plan identity, review outcome, disposition, evidence, and published identity in Workpad.
+Publish through `local_task_publish_plan` in `Ready` state. Determine `Blocked By` independently: add the published task as a blocker only when the current task's completion genuinely depends on its result. Otherwise, continue the current task without adding a dependency. Publishing a follow-up never satisfies an unmet requirement of the current task.
 
-Publish through `local_task_publish_plan`, retain canonical `identifier`/`page_id`, and *before* calling `local_task_add_blocked_by`, record publication and why this task will yield to that blocker. A successful blocker relation update is the last normal lifecycle mutation for this execution. If publication succeeds but relation update fails, record the incomplete relation and use Human Review blocker handoff. After resuming, inspect existing task identities and relations; do not publish redundant follow-up tasks based on an incomplete Workpad narrative.
+Record the Candidate Plan identity, review outcome, disposition, publication identity, and dependency decision with its rationale in Workpad. Before adding a blocker, record why the current task must yield to it. A successful blocker relation update is the last normal lifecycle mutation for this execution. If the required relation update fails, record the incomplete relation and use Human Review blocker handoff. After resuming, inspect existing task identities and relations; do not publish redundant follow-up tasks based on an incomplete Workpad narrative.
 
 A blocked continuation preserves an unfinished delivery review pass. Rework remains a nonterminal continuation of this task and uses final Plan comparison and the move back to `completed/` before the next delivery handoff.
