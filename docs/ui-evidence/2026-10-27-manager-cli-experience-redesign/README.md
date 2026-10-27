@@ -1,5 +1,39 @@
 # Manager and CLI redesign evidence
 
+## Latest direct UI evidence at PR #122 HEAD `b1977ec0e60a34a7f60328e8d1505ffdbc859121`
+
+The four screenshots below were captured from the actual Chrome tab rendering the isolated Manager at `http://127.0.0.1:45741/`. The Manager Runtime was `ff1e7e64a2269e0a01c0299e33992fb92abc3f9859d1b012de0ac0170398b41c`; its UI code came from `bc32a53b5f26a964c2d5e4c32b2687964417db45`. Comparing that code commit with PR HEAD `b1977ec0e60a34a7f60328e8d1505ffdbc859121` shows only the Repository Plan move and evidence README changed, so the rendered UI code is identical at both commits.
+
+Desktop screenshots are 1217×519 browser pixels. Narrow screenshots were captured with a 390×844 CSS-pixel viewport at device pixel ratio 1.25; the saved page images are 378×817 pixels. The document client width and scroll width were both 378 CSS pixels, so the inspected pages had no horizontal overflow. The browser displayed the isolated `repository` project, with its Loop already `Stopped`, and three test Tasks: one `In Progress`, one `Backlog`, and one `Done`. The Manager Service was running. This continuation did not start, stop, or restart any Manager or Loop. The user-profile Manager at `127.0.0.1:4320` and its Loop were left untouched.
+
+These are direct Chrome screenshots, not reconstructed images. The CUA screenshot bytes were written by `receive-browser-capture.mjs`, a one-shot receiver bound to `127.0.0.1` that accepts a token-authenticated PNG or JPEG into this evidence directory. No API or lifecycle action was used to produce the screenshots. The Work and System pages were switched through their visible navigation controls and their rendered accessibility trees were read before capture.
+
+### Work at desktop width
+
+The unfinished `Backlog` group and Task card are directly visible in the main queue.
+
+![Actual Chrome Work page at desktop width](work-backlog-desktop-b1977ec.jpg)
+
+### Work at 390px CSS width
+
+Active Work, Backlog, the `Past Tasks` disclosure, and the next Task action remain visible in the narrow layout.
+
+![Actual Chrome Work page at a 390px CSS viewport](work-backlog-narrow-390px-b1977ec.jpg)
+
+### System at desktop width
+
+The shared Runtime and Manager Service responsibilities appear without project Loop controls.
+
+![Actual Chrome System page at desktop width](system-runtime-manager-desktop-b1977ec.jpg)
+
+### System at 390px CSS width
+
+The same system scope remains readable in the narrow layout without horizontal overflow.
+
+![Actual Chrome System page at a 390px CSS viewport](system-runtime-manager-narrow-390px-b1977ec.jpg)
+
+The older observation at code commit `bc32a53` initially lacked repository image files. This section closes that evidence gap for the unchanged UI code at PR HEAD `b1977ec`; the capture source, Runtime, test data, and viewport are stated above so reviewers can assess that relationship directly.
+
 ## Latest direct Loop and Worker continuity evidence
 
 The new `worker-continuity/` record captures the final local source checkout at HEAD `60979699b09ec74e5f1faaf12bb8f34a067d268d` using Runtime `050b74f7e1e1c7cf4af9d572a3f9e983838e076c3787ee1d830821171cc6c59d`. The two JPGs are screenshots taken directly from the actual Chrome Manager UI after Manager reentry; they show the same selected project and the completed Task with both Workpad records. The screenshots are 1217×570 browser pixels.
