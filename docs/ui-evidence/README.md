@@ -1,8 +1,10 @@
 # Operator UI evidence
 
-## Current Manager screenshots
+## Previous Manager screenshots (historical)
 
-These captures show the current Manager UI rendered by Chrome against the actual Manager Service and its authenticated HTTP API. The source checkout was at `0a6cb4df78b6aeb6ad0a125c6c95a5680816e122`; subsequent changes in this delivery add only evidence artifacts and documentation. The Manager Runtime was installed from that checkout through the normal CLI path.
+The captures below document the Manager before the 2026-10-27 experience redesign. They are retained as historical evidence and do not depict the latest delivery. The newest direct evidence is in [`2026-10-27-manager-cli-experience-redesign/`](2026-10-27-manager-cli-experience-redesign/README.md).
+
+These captures show an earlier Manager UI rendered by Chrome against the actual Manager Service and its authenticated HTTP API. The source checkout was at `0a6cb4df78b6aeb6ad0a125c6c95a5680816e122`, and the Manager Runtime was installed from that checkout through the normal CLI path. They predate the 2026-10-27 redesign and are retained only as historical evidence.
 
 The isolated Manager registered two temporary local Git repositories through `leesh-loop init`: `leesh-loop` and `operator-docs`. Its API returned both instance IDs and `Stopped` states before capture. Their settings, Workflow files, and empty Task Stores were kept under a temporary XDG data root. The `operator-docs` remote was illustrative metadata; neither temporary repository was cloned from GitHub. The selected `leesh-loop` instance's temporary `WORKFLOW.md` received two local review-note lines so the real Manager API returned a visible comparison. That comparison was only viewed; it was not applied. No user repository or `.leesh-loop/` data was used.
 
