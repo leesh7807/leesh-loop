@@ -27,6 +27,9 @@ hooks:
 agent:
   max_turns: 20
 codex:
+  thread_sandbox: danger-full-access
+  turn_sandbox_policy:
+    type: dangerFullAccess
   command: |
     env PATH="$CHATGPT_SHOT_WORKER_INTERFACE_ROOT:$PATH" bash -c '
       codex_args=()

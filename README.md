@@ -57,3 +57,5 @@ npm run e2e
 ```
 
 System responsibilities and data boundaries are described in [docs/SYSTEM.md](docs/SYSTEM.md).
+
+<sub>임시 조치: Symphony Codex 작업은 `danger-full-access` / `dangerFullAccess`로 샌드박스가 해제된 상태입니다.</sub>
