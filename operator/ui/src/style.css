@@ -23,7 +23,7 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; background: var(--surface); }
+body { margin: 0; background: var(--surface); }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled, select:disabled, textarea:disabled { cursor: wait; opacity: .58; }
