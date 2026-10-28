@@ -204,6 +204,7 @@ test('Local Task mutations reject cross-origin browser requests and non-JSON bod
 
 test('rendered UI source keeps Task actions, manager hierarchy, state cues, and responsive styles', async () => {
   const source = await readFile(join(root, 'operator/ui/src/main.jsx'), 'utf8');
+  const projectWorkerSettings = await readFile(join(root, 'operator/ui/src/project-worker-settings.jsx'), 'utf8');
   const styles = await readFile(join(root, 'operator/ui/src/style.css'), 'utf8');
   assert.match(source, /Human Review/);
   assert.match(source, /taskGroup\('Active work', groups\.activeWork/);
@@ -224,13 +225,14 @@ test('rendered UI source keeps Task actions, manager hierarchy, state cues, and 
   assert.match(source, /manager-runtime-start-disabled/);
   assert.match(source, /className="manager-management"/);
   assert.match(source, /Add a Git repository/);
-  assert.match(source, /function ProjectWorkerSettings\(/);
-  assert.match(source, /project-worker-settings\?/);
-  assert.match(source, /JSON\.stringify\(\{ \[key\]: value \}\)/);
-  assert.match(source, /saveSetting\(key, null\)/);
-  assert.match(source, /Changes apply on the next Loop start/);
-  assert.match(source, /Manager confirms this Loop has no active process/);
-  assert.match(source, /Review the Loop diagnosis and resolve process ownership/);
+  assert.match(source, /import \{ ProjectWorkerSettings \} from '\.\/project-worker-settings\.jsx'/);
+  assert.match(projectWorkerSettings, /export function ProjectWorkerSettings\(/);
+  assert.match(projectWorkerSettings, /project-worker-settings\?/);
+  assert.match(projectWorkerSettings, /JSON\.stringify\(\{ \[key\]: value \}\)/);
+  assert.match(projectWorkerSettings, /saveSetting\(key, null\)/);
+  assert.match(projectWorkerSettings, /Changes apply on the next Loop start/);
+  assert.match(projectWorkerSettings, /Manager confirms this Loop has no active process/);
+  assert.match(projectWorkerSettings, /Review the Loop diagnosis and resolve process ownership/);
   assert.match(styles, /\.project-worker-setting-controls \{ display: grid/);
   assert.match(styles, /\.project-worker-settings/);
   assert.match(source, /Unregister Loop/);
