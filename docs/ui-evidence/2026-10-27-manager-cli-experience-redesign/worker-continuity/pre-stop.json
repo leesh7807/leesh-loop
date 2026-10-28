@@ -1,0 +1,96 @@
+{
+  "captured_at": "2026-10-27T09:57:38.469Z",
+  "source_head": "60979699b09ec74e5f1faaf12bb8f34a067d268d",
+  "runtime_id": "050b74f7e1e1c7cf4af9d572a3f9e983838e076c3787ee1d830821171cc6c59d",
+  "manager": {
+    "pid": 54054,
+    "start_ticks": "421868",
+    "recorded_start_ticks": "421868",
+    "port": 45738
+  },
+  "instance": {
+    "id": "07dd7d8c-492e-4767-a545-4fd4b2cfb5c8",
+    "name": "repository",
+    "repository_root": "/tmp/leesh-loop-manager-continuity.3PetOR/fixture/repository",
+    "status": "running",
+    "loop_pid": 61800,
+    "loop_start_ticks": "462641",
+    "owner_pid": 61800,
+    "owner_start_ticks": "462641"
+  },
+  "worker": {
+    "pid": 62628,
+    "comm": "codex",
+    "start_ticks": "465564",
+    "ancestry": [
+      {
+        "pid": 62628,
+        "comm": "codex",
+        "ppid": 61976,
+        "startTicks": "465564",
+        "state": "S"
+      },
+      {
+        "pid": 62715,
+        "comm": "node_repl",
+        "ppid": 62628,
+        "startTicks": "465590",
+        "state": "S"
+      },
+      {
+        "pid": 62716,
+        "comm": "MainThread",
+        "ppid": 62628,
+        "startTicks": "465590",
+        "state": "S"
+      },
+      {
+        "pid": 62730,
+        "comm": "npm exec github",
+        "ppid": 62628,
+        "startTicks": "465592",
+        "state": "S"
+      },
+      {
+        "pid": 63036,
+        "comm": "codex-code-mode",
+        "ppid": 62628,
+        "startTicks": "465935",
+        "state": "S"
+      },
+      {
+        "pid": 63383,
+        "comm": "bash",
+        "ppid": 62628,
+        "startTicks": "466836",
+        "state": "S"
+      },
+      {
+        "pid": 63943,
+        "comm": "sleep",
+        "ppid": 63383,
+        "startTicks": "468142",
+        "state": "S"
+      }
+    ]
+  },
+  "wait_process": {
+    "pid": 63943,
+    "comm": "sleep",
+    "start_ticks": "468142"
+  },
+  "task": {
+    "identifier": "PLAN-FBACE631-4F6F-4277-A718-F91E0B16B60C",
+    "id": "7bb11af8-60b5-4022-b932-d6cb4e85e790",
+    "state": "Ready",
+    "workpad_observed": [
+      {
+        "sequence": 3,
+        "author": "worker",
+        "created_at": "2026-10-27T09:57:15.650Z",
+        "content": "continuity-phase: before-manager-stop"
+      }
+    ],
+    "workpad_source": "Direct SQLite readback after Manager shutdown; before-stop line was also visibly rendered in the actual Manager UI before the CLI stop."
+  }
+}

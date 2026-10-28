@@ -20,8 +20,10 @@ test('default npm start opens the central Manager and the CLI exposes instance o
   assert.equal(manifest.scripts.update, 'node bin/leesh-loop.mjs update');
 
   const { stdout } = await execFile(process.execPath, [join(root, 'bin/leesh-loop.mjs'), '--help'], { cwd: root });
-  assert.match(stdout, /leesh-loop\s+start <id>/);
-  assert.match(stdout, /leesh-loop\s+stop <id>/);
+  assert.match(stdout, /leesh-loop\s+start \[project\]/);
+  assert.match(stdout, /leesh-loop\s+stop \[project\]/);
+  assert.match(stdout, /leesh-loop\s+manager stop/);
+  assert.match(stdout, /leesh-loop\s+add \[path\]/);
   assert.doesNotMatch(stdout, /project\.toml|skip-external-readiness/);
   assert.equal(parseStartArguments([]).configurationPath, join(root, 'project.toml'));
 });
@@ -63,7 +65,7 @@ test('central CLI rejects malformed commands without starting a Loop', async () 
     error => {
       assert.equal(error.code, 2);
       assert.match(error.stderr, /leesh-loop init/);
-      assert.match(error.stderr, /leesh-loop start <id>/);
+      assert.match(error.stderr, /leesh-loop start \[project\]/);
       return true;
     }
   );

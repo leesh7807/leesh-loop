@@ -50,6 +50,7 @@ test('publishes complete local tasks idempotently and keeps Accepted Plan unchan
     state: 'In Progress',
     acceptedPlan: '# blocker\n'
   }));
+  while (Date.now() <= Date.parse(blocker.createdAt)) await new Promise(resolve => setTimeout(resolve, 1));
   const taskInput = publication({
     priority: 3,
     labels: ['symphony', 'local-store'],

@@ -2,36 +2,24 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { bootstrapManagerToken } from '../src/manager-auth.js';
 
-function makeBrowserContext(hash, storedToken = null) {
-  const values = new Map(storedToken ? [['leesh-loop.manager.token.v1', storedToken]] : []);
-  const context = {
-    location: { hash, pathname: '/', search: '?view=manager' },
-    history: {
-      state: { existing: true },
-      replaceState(state, _title, url) { context.replaced = { state, url }; }
-    },
-    storage: {
-      getItem(key) { return values.get(key) ?? null; },
-      setItem(key, value) { values.set(key, value); }
-    },
-    values
-  };
-  return context;
-}
-
-test('Manager token bootstrap consumes a URL fragment into session storage and removes it from browser history', () => {
+test('Manager session bootstrap requests a short-lived in-memory API credential from its own origin', async () => {
   const token = 'a'.repeat(64);
-  const context = makeBrowserContext(`#manager-token=${token}`);
+  let request;
+  const result = await bootstrapManagerToken(async (input, init) => {
+    request = { input, init };
+    return new Response(JSON.stringify({ token }), { headers: { 'content-type': 'application/json' } });
+  });
 
-  assert.equal(bootstrapManagerToken(context), token);
-  assert.equal(context.values.get('leesh-loop.manager.token.v1'), token);
-  assert.deepEqual(context.replaced, { state: context.history.state, url: '/?view=manager' });
+  assert.equal(result, token);
+  assert.equal(request.input, '/api/v1/session');
+  assert.equal(request.init.cache, 'no-store');
+  assert.equal(request.init.credentials, 'same-origin');
+  assert.equal(request.init.headers.accept, 'application/json');
 });
 
-test('Manager token bootstrap reuses only a stored token when the URL has no valid credential', () => {
-  const token = 'b'.repeat(64);
-  const context = makeBrowserContext('#manager-token=invalid', token);
-
-  assert.equal(bootstrapManagerToken(context), token);
-  assert.equal(context.replaced, undefined);
+test('Manager session bootstrap explains when the local session endpoint is unavailable', async () => {
+  await assert.rejects(
+    bootstrapManagerToken(async () => new Response(JSON.stringify({ error: 'Open Manager directly from this local address.' }), { status: 403 })),
+    /Open Manager directly from this local address/
+  );
 });

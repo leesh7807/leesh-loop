@@ -238,8 +238,9 @@ export async function createLoopInstance(repositoryPath, { sourceRoot, environme
   await Promise.all([ensurePrivateDirectory(paths.dataRoot), ensurePrivateDirectory(paths.instancesRoot), ensurePrivateDirectory(paths.configRoot)]);
   const target = await resolveTargetRepository(repositoryPath);
   const registry = await readRegistry(paths);
-  if (registry.instances.some(value => value.repository_root === target.repositoryRoot)) {
-    throw Object.assign(new Error(`This Git repository is already managed as ${registry.instances.find(value => value.repository_root === target.repositoryRoot).id}.`), { status: 409 });
+  const duplicate = registry.instances.find(value => value.repository_root === target.repositoryRoot);
+  if (duplicate) {
+    throw Object.assign(new Error(`This Git repository is already managed as ${duplicate.repository_name} at ${duplicate.repository_root}. Select that project from the Manager project list.`), { status: 409 });
   }
   const id = randomUUID();
   const dataDirectory = join(paths.instancesRoot, id);

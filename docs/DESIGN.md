@@ -4,6 +4,42 @@ Leesh Loop의 UI는 사용자가 중요한 정보와 행동을 자연스럽게 �
 
 디자인은 화면을 정돈하는 일이 아니라 정보와 행동의 의미와 우선순위를 드러내는 일이다.
 
+## Interface structure
+
+Manager navigation follows the user's work: **Work** is the selected project's Task workspace, **Projects** is where repositories are checked, registered, switched, or unregistered, and **System** is where shared Runtime and Manager Service are managed. The selected project and its Loop state remain available in the header across these areas. Project names are always paired with their repository paths where a choice could be ambiguous.
+
+Project registration shows the resolved repository root and Git upstream before the user adds it. The selected project's Task Store and workspace remain separate from the Git checkout. Work stays the default view after selecting or adding a project; projects are added or unregistered from the project management area, and shared Runtime controls do not compete with Task work.
+
+## Color tokens and use
+
+The interface uses grayscale for structure and a single restrained warning hue for a real problem that needs attention.
+
+| Token | Value | Meaning |
+| --- | --- | --- |
+| `--ink` | `#191919` | Main text, primary actions, and active navigation |
+| `--text-strong` | `#3d3d3d` | Strong secondary text and supporting controls |
+| `--muted` | `#666666` | Supporting text and secondary context |
+| `--subtle` | `#777777` | Tertiary metadata and quiet indicators |
+| `--line` | `#d7d7d7` | Structural separators |
+| `--line-strong` | `#aaaaaa` | Input boundaries and stronger dividers |
+| `--surface` | `#f6f6f6` | Page background |
+| `--surface-raised` | `#ffffff` | Inputs and controls that need a distinct surface |
+| `--surface-muted` | `#ededed` | Quiet supporting areas such as logs and long text |
+| `--surface-soft` | `#f2f2f2` | Low-contrast code and comparison surfaces |
+| `--disabled` | `#898989` | Disabled primary action surface |
+| `--warning` | `#8a3b24` | Failed or unconfirmed work, authorization trouble, or required recovery |
+| `--warning-soft` | `#f5ece8` | Background paired with warning text or a warning boundary |
+
+All CSS color values are defined in this token set; component rules refer to the tokens instead of introducing local colors. Running, Starting, Stopped, success, and selection stay monochrome. Failed and Unconfirmed also include their written labels; warning color never carries meaning by itself. Use the warning hue for an actual failure, uncertain process ownership, required repair, or action the user must take. Do not use it for normal progress, selected navigation, decorative emphasis, or successful completion.
+
+The UI does not use green or red to distinguish added and removed Workflow lines. The `+` and `−` markers and neutral surfaces carry that meaning. Focus uses a high-contrast dark outline and does not borrow the warning hue.
+
+## Disclosure
+
+Project switching, Loop control, Task work, repository registration, and the shared System destination remain visible in the main structure. Do not hide these repeated actions inside `<details>` or another disclosure.
+
+Use disclosure for optional, lengthy supporting information: complete Accepted Plan text, extra Blocked By entries, full Workflow files, Loop logs, and detailed recovery diagnostics. Keep a visible label and a keyboard-operable summary. If the contents contain a primary next action, move that action into the relevant Work, Projects, or System area instead of hiding it.
+
 ## Reflect the user's work
 
 좋은 화면 구조는 내부 구현이나 데이터 구조보다 사용자의 실제 작업 구조를 반영한다.

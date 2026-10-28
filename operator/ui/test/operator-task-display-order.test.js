@@ -4,7 +4,7 @@ import { groupTasksForOperatorDisplay } from '../src/operator-task-display-order
 
 const task = (title, state) => ({ title, state });
 
-test('the Operator view groups Human Review first and sorts active States ahead of remaining work', () => {
+test('the Operator view groups Human Review and active work before the visible Backlog and past-task history', () => {
   const tasks = [
     task('Completed task', 'Done'),
     task('Work in progress', 'In Progress'),
@@ -19,7 +19,8 @@ test('the Operator view groups Human Review first and sorts active States ahead 
 
   assert.deepEqual(groups.humanReview.map(item => item.title), ['Review needed']);
   assert.deepEqual(groups.activeWork.map(item => item.title), ['Merging task', 'Work in progress', 'Ready task', 'Rework task']);
-  assert.deepEqual(groups.remainingTasks.map(item => item.title), ['Completed task', 'Waiting task']);
+  assert.deepEqual(groups.backlog.map(item => item.title), ['Waiting task']);
+  assert.deepEqual(groups.pastTasks.map(item => item.title), ['Completed task']);
 });
 
 test('tasks with equal attention retain their canonical read order', () => {
@@ -38,7 +39,8 @@ test('tasks with equal attention retain their canonical read order', () => {
 
   assert.deepEqual(groups.humanReview.map(item => item.title), ['First review', 'Second review']);
   assert.deepEqual(groups.activeWork.map(item => item.title), ['Merging task', 'First in progress', 'Second in progress']);
-  assert.deepEqual(groups.remainingTasks.map(item => item.title), ['First backlog', 'Done task', 'Second backlog']);
+  assert.deepEqual(groups.backlog.map(item => item.title), ['First backlog', 'Second backlog']);
+  assert.deepEqual(groups.pastTasks.map(item => item.title), ['Done task']);
   assert.deepEqual(tasks.map(item => item.title), [
     'First review', 'First in progress', 'Second review', 'Merging task', 'Second in progress', 'First backlog', 'Done task', 'Second backlog'
   ]);

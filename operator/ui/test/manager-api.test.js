@@ -30,3 +30,25 @@ test('Manager-wide requests remove any caller-supplied instance routing header',
 
   assert.equal(requestHeaders.get('x-leesh-loop-instance-id'), null);
 });
+
+test('Manager API refreshes its in-memory credential after a Runtime change', async () => {
+  const requests = [];
+  let credentialsIssued = 0;
+  const apiFetch = createManagerApiFetch({
+    tokenProvider: async () => {
+      credentialsIssued += 1;
+      return credentialsIssued === 1 ? 'old-runtime-token' : 'active-runtime-token';
+    },
+    fetchImpl: async (_input, init) => {
+      const token = init.headers.get('x-leesh-loop-token');
+      requests.push(token);
+      return new Response('{}', { status: token === 'old-runtime-token' ? 401 : 200 });
+    }
+  });
+
+  const response = await apiFetch('/api/v1/manager');
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(requests, ['old-runtime-token', 'active-runtime-token']);
+  assert.equal(credentialsIssued, 2);
+});

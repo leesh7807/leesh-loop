@@ -1,0 +1,47 @@
+{
+  "captured_at": "2026-10-27T09:59:11.718Z",
+  "manager": {
+    "pid": 54054,
+    "start_ticks": "421868",
+    "identity_absent": true,
+    "service_record_exists": false,
+    "port": 45738,
+    "connection_refused": true,
+    "cli_result": "Manager Service stopped. Running Loops and Workers continue independently. Continuing: repository"
+  },
+  "loop": {
+    "id": "07dd7d8c-492e-4767-a545-4fd4b2cfb5c8",
+    "pid": 61800,
+    "start_ticks": "462641",
+    "identity_same": true,
+    "comm": "beam.smp"
+  },
+  "worker": {
+    "pid": 62628,
+    "start_ticks": "465564",
+    "identity_same": true,
+    "comm": "codex",
+    "wait_processes": [
+      {
+        "pid": 67559,
+        "start_ticks": "477469",
+        "comm": "sleep"
+      }
+    ]
+  },
+  "task": {
+    "id": "7bb11af8-60b5-4022-b932-d6cb4e85e790",
+    "identifier": "PLAN-FBACE631-4F6F-4277-A718-F91E0B16B60C",
+    "state": "Ready",
+    "updated_at": "2026-10-27T09:57:15.650Z",
+    "workpad": [
+      {
+        "sequence": 3,
+        "author": "worker",
+        "created_at": "2026-10-27T09:57:15.650Z",
+        "content": "continuity-phase: before-manager-stop"
+      }
+    ]
+  },
+  "signal_file_exists": false
+}
