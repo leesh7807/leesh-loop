@@ -1,10 +1,10 @@
 # Manager and CLI redesign evidence
 
-## Latest direct UI evidence at PR #122 HEAD `b1977ec0e60a34a7f60328e8d1505ffdbc859121`
+## Direct Work and System UI evidence at source HEAD `bc32a53b5f26a964c2d5e4c32b2687964417db45`
 
-The four screenshots below were captured from the actual Chrome tab rendering the isolated Manager at `http://127.0.0.1:45741/`. The Manager Runtime was `ff1e7e64a2269e0a01c0299e33992fb92abc3f9859d1b012de0ac0170398b41c`; its UI code came from `bc32a53b5f26a964c2d5e4c32b2687964417db45`. Comparing that code commit with PR HEAD `b1977ec0e60a34a7f60328e8d1505ffdbc859121` shows only the Repository Plan move and evidence README changed, so the rendered UI code is identical at both commits.
+The screenshots below were captured from the actual Chrome tab rendering the isolated Manager at `http://127.0.0.1:45741/`. The Manager Runtime was `ff1e7e64a2269e0a01c0299e33992fb92abc3f9859d1b012de0ac0170398b41c`; its UI code came from `bc32a53b5f26a964c2d5e4c32b2687964417db45`. At capture time PR #122 was at `241bf9bd8a25d7d70d7b8a1c39f9be61741263d9`. Comparing `operator/ui/` and `operator/app/` at that PR HEAD with `bc32a53` shows no source differences, so the rendered application code is identical.
 
-Desktop screenshots are 1217×519 browser pixels. Narrow screenshots were captured with a 390×844 CSS-pixel viewport at device pixel ratio 1.25; the saved page images are 378×817 pixels. The document client width and scroll width were both 378 CSS pixels, so the inspected pages had no horizontal overflow. The browser displayed the isolated `repository` project, with its Loop already `Stopped`, and three test Tasks: one `In Progress`, one `Backlog`, and one `Done`. The Manager Service was running. This continuation did not start, stop, or restart any Manager or Loop. The user-profile Manager at `127.0.0.1:4320` and its Loop were left untouched.
+Desktop screenshots are 1217×519 browser pixels. Narrow screenshots use a 390×844 CSS-pixel viewport at device pixel ratio 1.25; the saved page images are 378×817 pixels. The document client width and scroll width were both 378 CSS pixels, so the inspected pages had no horizontal overflow. The browser displayed the isolated `repository` project, with its Loop already `Stopped`, and three test Tasks: one `In Progress`, one `Backlog`, and one `Done`. The Manager Service was running. This continuation did not start, stop, or restart any Manager or Loop. The user-profile Manager at `127.0.0.1:4320` and its Loop were left untouched.
 
 These are direct Chrome screenshots, not reconstructed images. The CUA screenshot bytes were written by `receive-browser-capture.mjs`, a one-shot receiver bound to `127.0.0.1` that accepts a token-authenticated PNG or JPEG into this evidence directory. No API or lifecycle action was used to produce the screenshots. The Work and System pages were switched through their visible navigation controls and their rendered accessibility trees were read before capture.
 
@@ -32,7 +32,27 @@ The same system scope remains readable in the narrow layout without horizontal o
 
 ![Actual Chrome System page at a 390px CSS viewport](system-runtime-manager-narrow-390px-b1977ec.jpg)
 
-The older observation at code commit `bc32a53` initially lacked repository image files. This section closes that evidence gap for the unchanged UI code at PR HEAD `b1977ec`; the capture source, Runtime, test data, and viewport are stated above so reviewers can assess that relationship directly.
+The older observation at code commit `bc32a53` initially lacked repository image files. These direct captures close that gap; the capture source, Runtime, test data, and viewport are stated above so reviewers can assess that relationship directly.
+
+## Current Projects and Task evidence at PR #122 capture HEAD `241bf9bd8a25d7d70d7b8a1c39f9be61741263d9`
+
+These additional screenshots were captured from actual Chrome at `http://127.0.0.1:45741/` during the continuation. The isolated Manager served Runtime `ff1e7e64a2269e0a01c0299e33992fb92abc3f9859d1b012de0ac0170398b41c`; its UI and Manager source matched `bc32a53` and had no differences at PR HEAD `241bf9b`. The isolated XDG profile was `/tmp/leesh-loop-manager-design-final.lmZXTJ`. It initially contained a temporary `repository` project with three synthetic Tasks (`In Progress`, `Backlog`, and `Done`), and its Loop was `Stopped`.
+
+Using the Projects UI, I previewed this task repository at `/home/lees/.local/share/leesh-loop/instances/ecba54d4-a86f-47b2-8d28-91a99cccd38d/workspaces/PLAN-1868AE86-F7F6-4C08-8DC4-27228F91DDD6`. The rendered preview identified its repository root, upstream branch `origin/task/2026-10-27-manager-cli-experience-redesign`, and remote URL. A second preview showed the concrete inaccessible-directory error for `/tmp/leesh-loop-manager-redesign-missing-repository`; a repeated preview of the registered path showed the existing project identity and disabled Add action. I then registered the task repository only in the isolated XDG profile. The Manager reported success, displayed two projects with distinct repository paths and Loop data directories, and showed the new project as `Stopped`. No Loop was started.
+
+I opened the test `Backlog` Task `PLAN-49B342EB-18AD-432F-8913-8EBBD1B99615` and entered the synthetic comment draft `Draft continuity check — not submitted.` without submitting it. I navigated to Projects, switched to the second project and back, and confirmed the original project and selected Task returned with the draft still in the comment field while the Task still displayed `No comments yet.`. This is direct UI evidence of draft recovery and project-scoped Task selection; no comment or State mutation was submitted. The plan publication form was separately observed with its Accepted Plan input, Blocked By choices, State selector, and disabled submit action while the Plan was empty.
+
+The narrow captures use `window.innerWidth = 390` and `window.innerHeight = 844`. On the captured narrow Project, duplicate-preview, Task, and publication screens, `document.documentElement.clientWidth` matched `scrollWidth` (378 CSS pixels where the browser reserved the scrollbar gutter), so those pages had no horizontal overflow. Desktop Project captures were 1217×563 pixels; the taller Task detail capture was 1217×892 pixels.
+
+The current direct captures are:
+
+- Valid Git preview and missing-path error at desktop width: [valid preview](projects-valid-preview-desktop-bc32a53.jpg), [missing path](projects-invalid-path-desktop-bc32a53.jpg).
+- Project identity and separate Loop data at desktop width: [two registered projects](projects-two-registered-desktop-bc32a53.jpg).
+- Project list, project details, and duplicate-path response at 390px: [project list](projects-two-registered-narrow-390px-bc32a53.jpg), [project details](projects-details-narrow-390px-bc32a53.jpg), [duplicate-path response](projects-duplicate-preview-narrow-390px-bc32a53.jpg).
+- Task detail before draft entry and after navigating across projects: [Task detail](task-detail-current-desktop-bc32a53.jpg), [restored draft at desktop width](task-detail-draft-restored-desktop-bc32a53.jpg), [restored draft at 390px](task-draft-restored-narrow-390px-bc32a53.jpg).
+- Plan publication form at desktop and 390px: [desktop](plan-publication-current-desktop-bc32a53.jpg), [narrow](plan-publication-narrow-390px-bc32a53.jpg).
+
+These are direct Chrome screenshots, not reconstructed images. Screenshot bytes were sent to the existing one-shot `receive-browser-capture.mjs` receiver, bound only to `127.0.0.1` and protected by a per-capture token. No synthetic screenshot or headless rendering was used. The current user's Manager PID `5313` on `127.0.0.1:4320` and Loop/Symphony PID `167481` on `127.0.0.1:4100` remained alive and listening in before-and-after process/port readback. The isolated Manager PID `144193` on `127.0.0.1:45741` also remained running; its two registered Loops stayed `Stopped`.
 
 ## Latest direct Loop and Worker continuity evidence
 
@@ -46,11 +66,11 @@ The gated Task first wrote `continuity-phase: before-manager-stop` and waited fo
 
 This direct active-Worker run resolves the earlier reviewability gap that an inactive or failed Loop had been used for Manager stop/reopen evidence. It verifies one isolated Codex Worker task across Manager shutdown and reentry; it does not generalize to every Worker failure or Runtime update scenario.
 
-## Design finding follow-up at PR #122 HEAD `bc32a53b5f26a964c2d5e4c32b2687964417db45`
+## Historical Design observation and gap closure
 
 The latest UI changes make unfinished `Backlog` tasks visible in Work and scope the selected project's Loop status, attention message, and controls out of System. Workpad sequence 28 records direct observation of those states in Chrome at `http://127.0.0.1:45741/` with Runtime `ff1e7e64a2269e0a01c0299e33992fb92abc3f9859d1b012de0ac0170398b41c`. The Work view showed the Backlog heading and Task card without a disclosure; System retained the project selector and shared Runtime/Manager controls without the project Loop status or controls.
 
-That observation did not produce a screenshot file in this repository. The existing saved Manager screenshots in this document were captured from UI source HEADs `60979699` or `7f3098a`, before this Design follow-up; neither set proves the appearance of HEAD `bc32a53`. No synthetic screenshot is used as a substitute. Exact-HEAD visual evidence remains incomplete for independent review.
+At that point the observation had no screenshot file, and the saved screenshots came from earlier UI source commits. The gap was recorded in Workpad sequence 30 and the PR #122 Preparation finding. The four Work/System captures above were later captured from the actual Runtime at `bc32a53`; the Projects and Task captures in this section add direct evidence for registration, Task detail, publication, and draft recovery. The older Workpad note describes the earlier evidence state and is not the current evidence boundary.
 
 ## Artifact identity for the original Manager captures below
 
