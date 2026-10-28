@@ -177,7 +177,7 @@ function BlockerOptions({ tasks, selectedItems, onToggle, disabled }) {
   );
 }
 
-function TaskSurface({ tasks, selectedTaskId, loading, error, refreshedAt, onRetry, onSelect }) {
+function TaskSurface({ tasks, selectedTaskId, loading, error, refreshedAt, onRetry, onNewTask, onSelect }) {
   const groups = groupTasksForOperatorDisplay(tasks);
   const taskGroup = (name, items, groupClass) => (
     <section className={`task-group ${groupClass}`} aria-labelledby={`${groupClass}-heading`}>
@@ -200,6 +200,7 @@ function TaskSurface({ tasks, selectedTaskId, loading, error, refreshedAt, onRet
         <div><p className="eyebrow">Work queue</p><h2 id="tasks-heading" tabIndex={-1}>Tasks</h2></div>
         <div className="task-surface-meta">
           <span className="task-total">{tasks.length}</span>
+          <button type="button" className="quiet-button task-new-button" onClick={onNewTask}>New Task</button>
           <button type="button" className="quiet-button" onClick={onRetry} disabled={loading}>Refresh</button>
         </div>
       </div>
@@ -743,7 +744,7 @@ function OperatorApp({ instanceId }) {
         </nav>
       </header>
       <main className="work-layout">
-        <TaskSurface tasks={tasks} selectedTaskId={selectedTaskId} loading={loading} error={error} refreshedAt={refreshedAt} onRetry={refresh} onSelect={openTask} />
+        <TaskSurface tasks={tasks} selectedTaskId={selectedTaskId} loading={loading} error={error} refreshedAt={refreshedAt} onRetry={refresh} onNewTask={returnToPublication} onSelect={openTask} />
         {selectedTaskId ? (
           <TaskDetail
             key={selectedTaskId}
