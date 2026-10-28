@@ -5,8 +5,8 @@ import { constants, readFileSync } from 'node:fs';
 import { lstat, open, readFile, truncate, unlink } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { applyInstanceWorkflow, managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readInstanceWorkflow, readJsonFile, unregisterLoopInstance, validateManagedInstanceStateDirectory, writeAtomic, writeAtomicJson } from './manager-storage.mjs';
-import { discoverRunningLoops, loopInstanceStatus, readLoopLogs, startLoopInstance, stopLoopInstance } from './manager-lifecycle.mjs';
+import { applyInstanceWorkflow, managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readInstanceWorkflow, readJsonFile, resolveManagedProject, unregisterLoopInstance, validateManagedInstanceStateDirectory, writeAtomic, writeAtomicJson } from './manager-storage.mjs';
+import { discoverRunningLoops, loopInstanceStatus, readLoopLogs, readProjectWorkerSettings, startLoopInstance, stopLoopInstance, updateProjectWorkerSettings } from './manager-lifecycle.mjs';
 import { activeRuntime, currentRuntimeSource, inspectRuntimeSource, installRuntimeDistribution, installRuntimeDistributionInWorker, listRuntimeDistributions, managerMustRestartForRuntime, reconcileRuntimeRecoveryRecord, recordRuntimeSource, runtimeDiagnostic } from './runtime-distribution.mjs';
 import { openLoopTaskStore } from './local-task-store-runtime.mjs';
 import { readProjectConfiguration } from '../project-config.mjs';
@@ -61,6 +61,28 @@ function requireRepositoryPath(value) {
 function requireInstanceId(value) {
   if (typeof value !== 'string' || !idPattern.test(value)) throw Object.assign(new Error('Instance ID is invalid.'), { status: 400 });
   return value;
+}
+
+function projectSettingsSelector(url) {
+  const allowed = new Set(['projectName', 'repositoryPath']);
+  if ([...url.searchParams.keys()].some(key => !allowed.has(key))) {
+    throw Object.assign(new Error('Use only projectName or repositoryPath to select a managed project.'), { status: 400 });
+  }
+  const names = url.searchParams.getAll('projectName');
+  const paths = url.searchParams.getAll('repositoryPath');
+  if (names.length + paths.length !== 1 || names.length > 1 || paths.length > 1) {
+    throw Object.assign(new Error('Select one project by repository name or repository path.'), { status: 400 });
+  }
+  if (names.length) {
+    const projectName = names[0];
+    if (!projectName.trim()) throw Object.assign(new Error('Project name must be non-empty.'), { status: 400 });
+    return { repositoryName: projectName };
+  }
+  const repositoryPath = paths[0];
+  if (!repositoryPath.trim() || repositoryPath.includes('\0') || !isAbsolute(repositoryPath)) {
+    throw Object.assign(new Error('Repository path must be an absolute local path.'), { status: 400 });
+  }
+  return { repositoryPath };
 }
 
 async function ensureManagerToken(paths) {
@@ -308,6 +330,23 @@ export function createManagerController({ runtimeRoot, token, port, sourceRoot =
       const instance = await operation;
       respond(response, 201, { instance });
       return true;
+    }
+    if (pathname === '/api/v1/project-worker-settings') {
+      const selector = projectSettingsSelector(url);
+      const instance = await resolveManagedProject(selector, { environment, homeDirectory });
+      if (request.method === 'GET') {
+        respond(response, 200, await readProjectWorkerSettings(instance.id, lifecycleStatusOptions()));
+        return true;
+      }
+      if (request.method === 'PUT') {
+        if (unregisteringInstances.has(instance.id)) throw Object.assign(new Error('This Loop is being unregistered from Manager.'), { status: 409 });
+        const submitted = await requestJson(request);
+        if (unregisteringInstances.has(instance.id)) throw Object.assign(new Error('This Loop is being unregistered from Manager.'), { status: 409 });
+        const result = await serializeLifecycle(instance.id, () => updateProjectWorkerSettings(instance.id, submitted, { environment, homeDirectory }));
+        respond(response, 200, result);
+        return true;
+      }
+      throw Object.assign(new Error('Method not allowed.'), { status: 405 });
     }
     const instanceRoute = pathname.match(/^\/api\/v1\/instances\/([^/]+)(?:\/(start|stop|logs|workflow))?$/);
     if (instanceRoute) {

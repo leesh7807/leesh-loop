@@ -1,0 +1,46 @@
+Command: leesh-loop settings settings-worker
+Profile: isolated XDG; test project only
+
+Direct CLI output (repository path sanitized):
+Project: settings-worker
+Repository: <isolated-XDG>/repositories/settings-worker
+Loop status: Stopped
+codex_model: gpt-6-luna
+codex_reasoning_effort: Not set (Codex default)
+Changes apply on the next Loop start; a running Loop is unchanged.
+
+Direct CLI set/clear outputs (all writes occurred only after Manager confirmed `Stopped`; saved status and the other field are shown after each operation):
+
+```text
+settings settings-worker --clear codex_model
+Loop status: Stopped
+codex_model: Not set (Codex default)
+codex_reasoning_effort: Not set (Codex default)
+Saved. Changes apply on the next Loop start; a running Loop is unchanged.
+
+settings settings-worker --set codex_reasoning_effort=medium
+Loop status: Stopped
+codex_model: Not set (Codex default)
+codex_reasoning_effort: medium
+Saved. Changes apply on the next Loop start; a running Loop is unchanged.
+
+settings settings-worker --clear codex_reasoning_effort
+Loop status: Stopped
+codex_model: Not set (Codex default)
+codex_reasoning_effort: Not set (Codex default)
+Saved. Changes apply on the next Loop start; a running Loop is unchanged.
+
+settings <repository-path> --set codex_model=gpt-6-luna
+Loop status: Stopped
+codex_model: gpt-6-luna
+codex_reasoning_effort: Not set (Codex default)
+Saved. Changes apply on the next Loop start; a running Loop is unchanged.
+
+settings (from the repository current directory)
+Loop status: Stopped
+codex_model: gpt-6-luna
+codex_reasoning_effort: Not set (Codex default)
+Changes apply on the next Loop start; a running Loop is unchanged.
+```
+
+Before the Worker start, the UI independently set the model and cleared reasoning effort. During the real Worker run, CLI reads by project name and repository path agreed with UI and Manager readback. The focused automated CLI test also exercised unique name, absolute path, current-directory (including nested-directory), and ambiguous same-name targeting; ambiguity reported both repository paths and performed no write.

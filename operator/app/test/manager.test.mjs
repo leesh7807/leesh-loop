@@ -16,6 +16,7 @@ import { allocatePort, discoverRunningLoops, loopInstanceStatus, startLoopInstan
 import { createLoopInstance, listLoopInstances, managerPaths } from '../manager-storage.mjs';
 import { activeRuntime, installRuntimeDistributionInWorker, writeRuntimeRecoveryRecord } from '../runtime-distribution.mjs';
 import { openLoopTaskStore } from '../local-task-store-runtime.mjs';
+import { parseProjectToml } from '../../project-config.mjs';
 
 const execFile = promisify(execute);
 const sourceRoot = resolve(import.meta.dirname, '../../..');
@@ -1825,6 +1826,38 @@ test('CLI init and list use the same central instance registry as the Manager UI
   assert.match(listed.stdout, new RegExp(repository.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.doesNotMatch(listed.stdout, /r\s+e\s+p\s+o\s+i\s+t/);
 
+  const settingsByCurrentDirectory = await execFile(process.execPath, [cli, 'settings'], { cwd: repository, env: paths.environment, encoding: 'utf8', timeout: 10_000 });
+  assert.match(settingsByCurrentDirectory.stdout, /Project: cli-project/);
+  assert.match(settingsByCurrentDirectory.stdout, new RegExp(repository.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  const nestedRepositoryDirectory = join(repository, 'nested-context');
+  await mkdir(nestedRepositoryDirectory);
+  const settingsByNestedCurrentDirectory = await execFile(process.execPath, [cli, 'settings'], { cwd: nestedRepositoryDirectory, env: paths.environment, encoding: 'utf8', timeout: 10_000 });
+  assert.match(settingsByNestedCurrentDirectory.stdout, /Project: cli-project/);
+  assert.match(settingsByNestedCurrentDirectory.stdout, new RegExp(repository.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  const settingsByName = await execFile(process.execPath, [cli, 'settings', 'cli-project', '--set', 'codex_model=cli-review-model'], { cwd: paths.directory, env: paths.environment, encoding: 'utf8', timeout: 10_000 });
+  assert.match(settingsByName.stdout, /codex_model: cli-review-model/);
+  assert.match(settingsByName.stdout, /Changes apply on the next Loop start/);
+  const settingsByPath = await execFile(process.execPath, [cli, 'settings', repository, '--set', 'codex_reasoning_effort=medium'], { cwd: paths.directory, env: paths.environment, encoding: 'utf8', timeout: 10_000 });
+  assert.match(settingsByPath.stdout, /codex_reasoning_effort: medium/);
+  const clearedSettings = await execFile(process.execPath, [cli, 'settings', 'cli-project', '--clear', 'codex_model'], { cwd: paths.directory, env: paths.environment, encoding: 'utf8', timeout: 10_000 });
+  assert.match(clearedSettings.stdout, /codex_model: Not set \(Codex default\)/);
+  assert.match(clearedSettings.stdout, /codex_reasoning_effort: medium/);
+  const duplicateRepository = await makeRepository(join(paths.directory, 'other-repositories'), 'cli-project');
+  const duplicateInit = await execFile(process.execPath, [cli, 'init'], { cwd: duplicateRepository, env: paths.environment, encoding: 'utf8', timeout: 10_000 });
+  assert.match(duplicateInit.stdout, /Leesh Loop instance created: cli-project/);
+  const firstSettingsFile = join((await listLoopInstances(paths)).find(instance => instance.repository_root === repository).data_directory, 'project.toml');
+  const secondSettingsFile = join((await listLoopInstances(paths)).find(instance => instance.repository_root === duplicateRepository).data_directory, 'project.toml');
+  const firstSettingsBeforeAmbiguous = await readFile(firstSettingsFile, 'utf8');
+  const secondSettingsBeforeAmbiguous = await readFile(secondSettingsFile, 'utf8');
+  const ambiguousSettings = await execFile(process.execPath, [cli, 'settings', 'cli-project', '--set', 'codex_model=must-not-be-chosen'], { cwd: paths.directory, env: paths.environment, encoding: 'utf8', timeout: 10_000 })
+    .then(result => ({ result }), error => ({ error }));
+  assert.equal(ambiguousSettings.error?.code, 1);
+  assert.match(ambiguousSettings.error.stderr, /matches multiple repositories/);
+  assert.ok(ambiguousSettings.error.stderr.includes(repository));
+  assert.ok(ambiguousSettings.error.stderr.includes(duplicateRepository));
+  assert.equal(await readFile(firstSettingsFile, 'utf8'), firstSettingsBeforeAmbiguous);
+  assert.equal(await readFile(secondSettingsFile, 'utf8'), secondSettingsBeforeAmbiguous);
+
   paths.environment.LEESH_LOOP_BROWSER_COMMAND = join(paths.directory, 'missing-browser-command');
   const openAttempt = await execFile(process.execPath, [cli], { cwd: paths.directory, env: paths.environment, encoding: 'utf8', timeout: 10_000 })
     .then(result => ({ result }), error => ({ error }));
@@ -1847,7 +1880,7 @@ test('CLI init and list use the same central instance registry as the Manager UI
   assert.equal((await api(manager, '/api/v1/manager')).response.status, 200);
 
   const uiList = await api(manager, '/api/v1/instances');
-  assert.deepEqual(uiList.body.instances.map(instance => instance.repository_root), [repository]);
+  assert.deepEqual(uiList.body.instances.map(instance => instance.repository_root), [repository, duplicateRepository]);
 });
 
 test('Workflow review and apply follow a custom instance-owned workflow_path', async t => {
@@ -2125,4 +2158,250 @@ test('Workflow repair recovers a confirmed-exited pre-ready runtime without its 
   assert.equal(repaired.response.status, 200);
   assert.equal(repaired.body.updated, true);
   assert.equal(await readFile(repaired.body.backup, 'utf8'), current);
+});
+
+test('project Worker settings share Manager targeting and safely change only the named overrides', async t => {
+  const paths = await fixture(t);
+  const repositories = join(paths.directory, 'repositories');
+  const firstRoot = await makeRepository(repositories, 'settings-first');
+  const secondRoot = await makeRepository(repositories, 'settings-second');
+  const first = await createLoopInstance(firstRoot, { sourceRoot, ...paths });
+  const second = await createLoopInstance(secondRoot, { sourceRoot, ...paths });
+  const manager = await startManagerFixture(t, paths);
+  const firstProject = join(first.data_directory, 'project.toml');
+  const secondProject = join(second.data_directory, 'project.toml');
+  const firstBefore = await readFile(firstProject, 'utf8');
+  const secondBefore = await readFile(secondProject, 'utf8');
+  const firstConfigBefore = parseProjectToml(firstBefore);
+  const firstInodeBefore = (await lstat(firstProject)).ino;
+  const firstHeadBefore = (await git(firstRoot, 'rev-parse', 'HEAD')).stdout.trim();
+  const firstGitStatusBefore = (await git(firstRoot, 'status', '--porcelain')).stdout;
+  const secondHeadBefore = (await git(secondRoot, 'rev-parse', 'HEAD')).stdout.trim();
+
+  async function snapshotInstanceData(directory) {
+    const snapshot = {};
+    async function visit(current, prefix = '') {
+      for (const entry of await readdir(current, { withFileTypes: true })) {
+        if (!prefix && entry.name === 'project.toml') continue;
+        const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+        const absolutePath = join(current, entry.name);
+        if (entry.isDirectory()) await visit(absolutePath, relativePath);
+        else if (entry.isFile()) snapshot[relativePath] = (await readFile(absolutePath)).toString('base64');
+        else snapshot[relativePath] = entry.isSymbolicLink() ? 'symlink' : 'other';
+      }
+    }
+    await visit(directory);
+    return snapshot;
+  }
+
+  const firstDataBefore = await snapshotInstanceData(first.data_directory);
+  const secondDataBefore = await snapshotInstanceData(second.data_directory);
+  const pathSelector = `/api/v1/project-worker-settings?repositoryPath=${encodeURIComponent(firstRoot)}`;
+  const nameSelector = `/api/v1/project-worker-settings?projectName=settings-first`;
+  const initial = await api(manager, pathSelector);
+  assert.equal(initial.response.status, 200);
+  assert.equal(initial.body.project.name, 'settings-first');
+  assert.equal(initial.body.project.repositoryPath, firstRoot);
+  assert.equal(initial.body.status, 'Stopped');
+  assert.equal(initial.body.canUpdate, true);
+  assert.equal(initial.body.settings.codex_model, 'gpt-6-luna');
+  assert.equal(initial.body.settings.codex_reasoning_effort, 'xhigh');
+
+  const modelUpdate = await api(manager, pathSelector, {
+    method: 'PUT', origin: manager.url, body: { codex_model: 'settings-review-model' }
+  });
+  assert.equal(modelUpdate.response.status, 200, modelUpdate.body.error);
+  assert.equal(modelUpdate.body.settings.codex_model, 'settings-review-model');
+  assert.equal(modelUpdate.body.settings.codex_reasoning_effort, 'xhigh');
+  assert.notEqual((await lstat(firstProject)).ino, firstInodeBefore, 'settings write replaces the file atomically');
+
+  const effortUpdate = await api(manager, nameSelector, {
+    method: 'PUT', origin: manager.url, body: { codex_reasoning_effort: 'medium' }
+  });
+  assert.equal(effortUpdate.response.status, 200, effortUpdate.body.error);
+  assert.deepEqual(effortUpdate.body.settings, { codex_model: 'settings-review-model', codex_reasoning_effort: 'medium' });
+
+  const clearModel = await api(manager, pathSelector, {
+    method: 'PUT', origin: manager.url, body: { codex_model: null }
+  });
+  assert.equal(clearModel.response.status, 200, clearModel.body.error);
+  assert.deepEqual(clearModel.body.settings, { codex_model: null, codex_reasoning_effort: 'medium' });
+
+  const clearEffort = await api(manager, nameSelector, {
+    method: 'PUT', origin: manager.url, body: { codex_reasoning_effort: null }
+  });
+  assert.equal(clearEffort.response.status, 200, clearEffort.body.error);
+  assert.deepEqual(clearEffort.body.settings, { codex_model: null, codex_reasoning_effort: null });
+
+  const afterConfig = parseProjectToml(await readFile(firstProject, 'utf8'));
+  const withoutOverrides = value => Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !['codex_model', 'codex_reasoning_effort'].includes(key)));
+  assert.deepEqual(withoutOverrides(afterConfig), withoutOverrides(firstConfigBefore));
+  assert.equal(await readFile(secondProject, 'utf8'), secondBefore);
+  assert.deepEqual(await snapshotInstanceData(first.data_directory), firstDataBefore);
+  assert.deepEqual(await snapshotInstanceData(second.data_directory), secondDataBefore);
+  assert.equal((await git(firstRoot, 'rev-parse', 'HEAD')).stdout.trim(), firstHeadBefore);
+  assert.equal((await git(firstRoot, 'status', '--porcelain')).stdout, firstGitStatusBefore);
+  assert.equal((await git(secondRoot, 'rev-parse', 'HEAD')).stdout.trim(), secondHeadBefore);
+  assert.deepEqual((await readdir(first.data_directory)).filter(name => name.startsWith('project.toml.') && name.endsWith('.tmp')), []);
+
+  const failedExecutionDirectory = join(managerPaths(paths).loopExecutionRoot, first.id);
+  await mkdir(failedExecutionDirectory, { recursive: true });
+  await writeFile(join(failedExecutionDirectory, 'execution.json'), `${JSON.stringify({
+    schema_version: 1, id: first.id, status: 'Failed', detail: 'failed with no recorded process'
+  })}\n`);
+  const confirmedFailed = await api(manager, pathSelector);
+  assert.equal(confirmedFailed.body.status, 'Failed');
+  assert.equal(confirmedFailed.body.canUpdate, true);
+  const failedStatusUpdate = await api(manager, pathSelector, {
+    method: 'PUT', origin: manager.url, body: { codex_model: 'failed-status-model' }
+  });
+  assert.equal(failedStatusUpdate.response.status, 200, failedStatusUpdate.body.error);
+  assert.equal(failedStatusUpdate.body.settings.codex_model, 'failed-status-model');
+
+  const beforeInvalid = await readFile(firstProject, 'utf8');
+  for (const body of [
+    {},
+    { codex_model: '' },
+    { codex_model: 7 },
+    { arbitrary_file: 'project.toml' }
+  ]) {
+    const invalid = await api(manager, pathSelector, { method: 'PUT', origin: manager.url, body });
+    assert.equal(invalid.response.status, 400);
+    assert.match(invalid.body.error, /codex_model|codex_reasoning_effort|non-empty|Only/);
+    assert.equal(await readFile(firstProject, 'utf8'), beforeInvalid);
+  }
+
+  const crossOrigin = await api(manager, pathSelector, {
+    method: 'PUT', origin: 'https://untrusted.example', body: { codex_model: 'cross-origin-change' }
+  });
+  assert.equal(crossOrigin.response.status, 403);
+  assert.equal(await readFile(firstProject, 'utf8'), beforeInvalid);
+  const unauthenticated = await fetch(`${manager.url}${pathSelector}`);
+  assert.equal(unauthenticated.status, 403);
+
+  const malformed = await fetch(`${manager.url}${pathSelector}`, {
+    method: 'PUT',
+    headers: { 'x-leesh-loop-token': manager.token, origin: manager.url, 'content-type': 'application/json' },
+    body: '{"codex_model":'
+  });
+  assert.equal(malformed.status, 400);
+  assert.equal(await readFile(firstProject, 'utf8'), beforeInvalid);
+});
+
+test('project Worker settings reject ambiguous names and unsafe process states without touching files or processes', async t => {
+  const paths = await fixture(t);
+  const repositories = join(paths.directory, 'repositories');
+  const duplicateA = await makeRepository(join(repositories, 'left'), 'duplicate-project');
+  const duplicateB = await makeRepository(join(repositories, 'right'), 'duplicate-project');
+  const runningRoot = await makeRepository(repositories, 'settings-running');
+  const unconfirmedRoot = await makeRepository(repositories, 'settings-unconfirmed');
+  const duplicateInstanceA = await createLoopInstance(duplicateA, { sourceRoot, ...paths });
+  const duplicateInstanceB = await createLoopInstance(duplicateB, { sourceRoot, ...paths });
+  const runningInstance = await createLoopInstance(runningRoot, { sourceRoot, ...paths });
+  const unconfirmedInstance = await createLoopInstance(unconfirmedRoot, { sourceRoot, ...paths });
+  const manager = await startManagerFixture(t, paths);
+  const duplicateProjectA = join(duplicateInstanceA.data_directory, 'project.toml');
+  const duplicateProjectB = join(duplicateInstanceB.data_directory, 'project.toml');
+  const duplicateBeforeA = await readFile(duplicateProjectA, 'utf8');
+  const duplicateBeforeB = await readFile(duplicateProjectB, 'utf8');
+  const ambiguousPath = '/api/v1/project-worker-settings?projectName=duplicate-project';
+  const ambiguousRead = await api(manager, ambiguousPath);
+  assert.equal(ambiguousRead.response.status, 409);
+  assert.match(ambiguousRead.body.error, new RegExp(duplicateA.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(ambiguousRead.body.error, new RegExp(duplicateB.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  const ambiguousWrite = await api(manager, ambiguousPath, {
+    method: 'PUT', origin: manager.url, body: { codex_model: 'must-not-be-chosen' }
+  });
+  assert.equal(ambiguousWrite.response.status, 409);
+  assert.equal(await readFile(duplicateProjectA, 'utf8'), duplicateBeforeA);
+  assert.equal(await readFile(duplicateProjectB, 'utf8'), duplicateBeforeB);
+
+  const runtime = await installTestRuntime(paths, 'settings-running-runtime');
+  const port = await unusedLoopbackPort();
+  const runtimeId = 'settings-runtime-instance';
+  const child = spawn(process.execPath, ['-e', `
+    const { createServer } = require('node:http');
+    createServer((_request, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ runtime_id: ${JSON.stringify(runtimeId)}, pid: process.pid, dispatch_capable: true }));
+    }).listen(${port}, '127.0.0.1');
+    setInterval(() => {}, 1000);
+  `], { stdio: 'ignore' });
+  t.after(async () => {
+    if (processStartTicks(child.pid)) await stopRecordedProcess(child.pid, processStartTicks(child.pid));
+  });
+  await new Promise((resolveSpawn, rejectSpawn) => {
+    child.once('spawn', resolveSpawn);
+    child.once('error', rejectSpawn);
+  });
+  let childTicks = processStartTicks(child.pid);
+  for (let attempt = 0; attempt < 50 && !childTicks; attempt += 1) {
+    await new Promise(resolveSleep => setTimeout(resolveSleep, 10));
+    childTicks = processStartTicks(child.pid);
+  }
+  assert.ok(childTicks);
+  let runningRuntimeResponse;
+  for (let attempt = 0; attempt < 100 && !runningRuntimeResponse; attempt += 1) {
+    runningRuntimeResponse = await fetch(`http://127.0.0.1:${port}/api/v1/runtime`)
+      .then(response => response.json())
+      .catch(() => null);
+    if (!runningRuntimeResponse) await new Promise(resolveSleep => setTimeout(resolveSleep, 10));
+  }
+  assert.deepEqual(runningRuntimeResponse, { runtime_id: runtimeId, pid: child.pid, dispatch_capable: true });
+  const runningExecutionDirectory = join(managerPaths(paths).loopExecutionRoot, runningInstance.id);
+  await mkdir(runningExecutionDirectory, { recursive: true });
+  const ownershipPath = join(runningExecutionDirectory, 'ownership.json');
+  const acknowledgementPath = join(runningExecutionDirectory, 'dispatch-acknowledgement.json');
+  const dashboard = `http://127.0.0.1:${port}`;
+  await writeFile(ownershipPath, `${JSON.stringify({ project_root: runtime.path, runtime_id: runtimeId, pid: child.pid, process_start_ticks: childTicks })}\n`);
+  await writeFile(acknowledgementPath, `${JSON.stringify({ runtime_id: runtimeId, pid: child.pid, dispatch_capable: true })}\n`);
+  await writeFile(join(runningExecutionDirectory, 'runtime.json'), `${JSON.stringify({
+    status: 'running', runtime_id: runtimeId, pid: child.pid, process_start_ticks: childTicks,
+    effective: { dashboard }, ownership_path: ownershipPath, acknowledgement_path: acknowledgementPath
+  })}\n`);
+  await writeFile(join(runningExecutionDirectory, 'execution.json'), `${JSON.stringify({
+    schema_version: 1, id: runningInstance.id, status: 'Running', runtime_path: runtime.path,
+    runtime_version: runtime.id, runtime_id: runtimeId, pid: child.pid,
+    process_start_ticks: childTicks, port
+  })}\n`);
+
+  const runningProject = join(runningInstance.data_directory, 'project.toml');
+  const runningBefore = await readFile(runningProject, 'utf8');
+  const runningPathSelector = `/api/v1/project-worker-settings?repositoryPath=${encodeURIComponent(runningRoot)}`;
+  const runningRead = await api(manager, runningPathSelector);
+  assert.equal(runningRead.body.status, 'Running', JSON.stringify(runningRead.body));
+  assert.equal(runningRead.body.canUpdate, false);
+  const runningWrite = await api(manager, runningPathSelector, {
+    method: 'PUT', origin: manager.url, body: { codex_model: 'unsafe-change' }
+  });
+  assert.equal(runningWrite.response.status, 409);
+  assert.match(runningWrite.body.error, /Stop the Loop in Manager/);
+  assert.equal(await readFile(runningProject, 'utf8'), runningBefore);
+  assert.equal(processStartTicks(child.pid), childTicks);
+  const runtimeStillResponds = await fetch(`${dashboard}/api/v1/runtime`).then(response => response.json());
+  assert.deepEqual(runtimeStillResponds, { runtime_id: runtimeId, pid: child.pid, dispatch_capable: true });
+
+  const unconfirmedExecutionDirectory = join(managerPaths(paths).loopExecutionRoot, unconfirmedInstance.id);
+  await mkdir(unconfirmedExecutionDirectory, { recursive: true });
+  const currentStat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+  const currentTicks = currentStat.slice(currentStat.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
+  await writeFile(join(unconfirmedExecutionDirectory, 'execution.json'), `${JSON.stringify({
+    schema_version: 1, id: unconfirmedInstance.id, status: 'Running',
+    runtime_path: runtime.path, runtime_version: runtime.id, pid: process.pid,
+    process_start_ticks: currentTicks, port: await unusedLoopbackPort()
+  })}\n`);
+  const unconfirmedProject = join(unconfirmedInstance.data_directory, 'project.toml');
+  const unconfirmedBefore = await readFile(unconfirmedProject, 'utf8');
+  const unconfirmedSelector = `/api/v1/project-worker-settings?repositoryPath=${encodeURIComponent(unconfirmedRoot)}`;
+  const unconfirmedRead = await api(manager, unconfirmedSelector);
+  assert.equal(unconfirmedRead.body.status, 'Unconfirmed');
+  assert.equal(unconfirmedRead.body.canUpdate, false);
+  const unconfirmedWrite = await api(manager, unconfirmedSelector, {
+    method: 'PUT', origin: manager.url, body: { codex_reasoning_effort: 'unsafe-change' }
+  });
+  assert.equal(unconfirmedWrite.response.status, 409);
+  assert.match(unconfirmedWrite.body.error, /Review the Loop diagnosis and confirm process ownership/);
+  assert.equal(await readFile(unconfirmedProject, 'utf8'), unconfirmedBefore);
+  assert.equal(processStartTicks(process.pid), currentTicks);
 });

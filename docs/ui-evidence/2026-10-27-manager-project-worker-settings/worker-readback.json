@@ -1,0 +1,17 @@
+{
+  "source_head": "af48112c53ae6d49cef1dd71479f977ea53a8158",
+  "runtime": "443bfe233e4460bd35d9a545fbb7445656996e4b893ec56c4dbf3f2cd01c185a",
+  "manager_instance": "settings-worker",
+  "manager_status": "Running",
+  "codex_process": {
+    "pid": 198315,
+    "start_ticks": "1791338",
+    "command": "codex --config model=gpt-6-luna app-server",
+    "model_environment": "SYMPHONY_CODEX_MODEL=gpt-6-luna",
+    "reasoning_effort_environment_present": false
+  },
+  "task_store": {
+    "identifier": "PLAN-CDBA9D43-9F6E-4F85-9EC3-6CABFE50BCD4",
+    "state": "Done"
+  }
+}

@@ -19,6 +19,7 @@ import { createWorkflowDiff } from './workflow-diff.js';
 import { runtimeLabel } from './runtime-label.js';
 import { canUnregisterLoop } from './manager-unregister-eligibility.js';
 import { runtimeUpdateCompletionMessage } from './manager-runtime-feedback.js';
+import { ProjectWorkerSettings } from './project-worker-settings.jsx';
 import './style.css';
 
 const REFRESH_INTERVAL_MS = 7500;
@@ -1221,6 +1222,8 @@ function ManagerApp() {
                 <p className="manager-help" id="manager-unregister-guidance">Available when Manager confirms Stopped, or confirms a Failed Loop has no active process. Unregistering removes the registry entry; it does not stop a process or delete the Git repository, Workflow, Task Store, or workspace.</p>
               </div>
             </section>
+
+            <ProjectWorkerSettings key={selectedId} selected={selected} apiFetch={apiFetch} responseJson={responseJson} />
 
             <div className={`manager-folders${workflowOpen ? ' manager-folders-workflow-open' : ''}`}>
             <details open={workflowOpen} onToggle={event => setWorkflowOpen(event.currentTarget.open)}>

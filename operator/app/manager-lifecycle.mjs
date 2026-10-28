@@ -6,9 +6,9 @@ import { promisify } from 'node:util';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readJsonFile, validateManagedInstanceConfiguration, writeAtomicJson } from './manager-storage.mjs';
+import { managerPaths, ensurePrivateDirectory, getLoopInstance, listLoopInstances, readJsonFile, validateManagedInstanceConfiguration, writeAtomic, writeAtomicJson } from './manager-storage.mjs';
 import { resolveRuntimePath } from './runtime-distribution.mjs';
-import { readProjectConfiguration } from '../project-config.mjs';
+import { parseProjectToml, readProjectConfiguration, stringifyProjectConfiguration, validateProjectConfiguration } from '../project-config.mjs';
 import { validateWorkspaceFiles } from './workspace-files.mjs';
 
 const execFile = promisify(execFileCallback);
@@ -440,6 +440,82 @@ async function readProject(instance) {
   await validateManagedInstanceConfiguration(instance, config);
   await validateWorkspaceFiles(config.workspace_files);
   return config;
+}
+
+const PROJECT_WORKER_SETTING_KEYS = new Set(['codex_model', 'codex_reasoning_effort']);
+
+function validateProjectWorkerSettingsPatch(patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw Object.assign(new Error('Project Worker settings must be an object.'), { status: 400 });
+  }
+  const keys = Object.keys(patch);
+  if (keys.length === 0) throw Object.assign(new Error('Set or clear codex_model or codex_reasoning_effort.'), { status: 400 });
+  for (const key of keys) {
+    if (!PROJECT_WORKER_SETTING_KEYS.has(key)) {
+      throw Object.assign(new Error('Only codex_model and codex_reasoning_effort can be changed.'), { status: 400 });
+    }
+    const value = patch[key];
+    if (value !== null && (typeof value !== 'string' || !value.trim())) {
+      throw Object.assign(new Error(`${key} must be a non-empty string or null to clear it.`), { status: 400 });
+    }
+  }
+  return patch;
+}
+
+function projectWorkerSettingsResult(instance, config, status) {
+  const canUpdate = status.status === 'Stopped'
+    || (status.status === 'Failed' && status.process_absence_confirmed === true);
+  return {
+    project: { name: instance.repository_name, repositoryPath: instance.repository_root },
+    status: status.status,
+    ...(status.detail ? { detail: status.detail } : {}),
+    canUpdate,
+    settings: {
+      codex_model: config.codex_model ?? null,
+      codex_reasoning_effort: config.codex_reasoning_effort ?? null
+    }
+  };
+}
+
+export async function readProjectWorkerSettings(id, options = {}) {
+  const instance = await getLoopInstance(id, options);
+  const [config, status] = await Promise.all([
+    readProject(instance),
+    loopInstanceStatus(id, { ...options, persistObservedStatus: false })
+  ]);
+  return projectWorkerSettingsResult(instance, config, status);
+}
+
+export async function updateProjectWorkerSettings(id, patch, options = {}) {
+  const submitted = validateProjectWorkerSettingsPatch(patch);
+  const instance = await getLoopInstance(id, options);
+  const status = await loopInstanceStatus(id, { ...options, persistObservedStatus: false });
+  const canUpdate = status.status === 'Stopped'
+    || (status.status === 'Failed' && status.process_absence_confirmed === true);
+  if (!canUpdate) {
+    const nextStep = status.status === 'Running'
+      ? 'Stop the Loop in Manager, then try again.'
+      : status.status === 'Failed'
+        ? 'Resolve process ownership so Manager can confirm there is no active process, then try again.'
+        : status.status === 'Unconfirmed'
+          ? 'Review the Loop diagnosis and confirm process ownership before trying again.'
+          : 'Wait until Manager confirms the Loop is Stopped, then try again.';
+    throw Object.assign(new Error(`Worker settings can be changed only when Manager confirms Stopped or Failed with no active process. Current status: ${status.status}. ${nextStep}`), { status: 409 });
+  }
+
+  await readProject(instance);
+  const details = await lstat(instance.project_file);
+  if (details.isSymbolicLink() || !details.isFile()) throw Object.assign(new Error('instance project.toml must be a regular file'), { status: 409 });
+  const source = await readFile(instance.project_file, 'utf8');
+  const current = validateProjectConfiguration(parseProjectToml(source, instance.project_file));
+  const updated = { ...current };
+  for (const [key, value] of Object.entries(submitted)) {
+    if (value === null) delete updated[key];
+    else updated[key] = value;
+  }
+  const contents = stringifyProjectConfiguration(updated);
+  if (contents !== `${source.trimEnd()}\n`) await writeAtomic(instance.project_file, contents, 0o600);
+  return readProjectWorkerSettings(id, options);
 }
 
 async function invokeLoopCommand({ runtimePath, instance, command, args = [], timeout = 30_000, environment = process.env }) {

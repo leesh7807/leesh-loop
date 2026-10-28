@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { installRuntimeDistribution, managerMustRestartForRuntime } from '../operator/app/runtime-distribution.mjs';
 import { managerPaths, readJsonFile } from '../operator/app/manager-storage.mjs';
@@ -20,7 +21,9 @@ const usage = [
   '  leesh-loop update          Install and activate the central Runtime',
   '  leesh-loop list            List managed Loop instances',
   '  leesh-loop start <id>      Start one managed Loop instance',
-  '  leesh-loop stop <id>       Stop one managed Loop instance'
+  '  leesh-loop stop <id>       Stop one managed Loop instance',
+  '  leesh-loop settings [project-name|repository-path] [--set key=value] [--clear key]',
+  '                             Inspect or change Codex settings; defaults to the current repository'
 ].join('\n');
 
 function printInstances(instances) {
@@ -47,6 +50,60 @@ function formatDuration(durationMs) {
 function reportRuntimeInstallLockWait(wait) {
   const owner = wait.owner_pid === null ? 'an owner with unknown PID' : `PID ${wait.owner_pid}`;
   console.error(`Waiting for the Runtime installation lock held by ${owner} (owner age ${formatDuration(wait.owner_age_ms)}; waited ${formatDuration(wait.waited_ms)} of ${formatDuration(wait.wait_timeout_ms)}). Ctrl-C cancels this wait without stopping the owner.`);
+}
+
+function currentRepositoryRoot() {
+  try {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: process.cwd(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']
+    }).trim();
+  } catch {
+    throw new Error('settings without a project argument must run inside a Git repository; pass a managed project name or repository path.');
+  }
+}
+
+function parseSettingsArguments(args) {
+  let project;
+  const changes = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--set') {
+      const assignment = args[++index];
+      const equals = assignment?.indexOf('=') ?? -1;
+      if (equals < 0) throw new Error('settings --set expects key=value.');
+      const key = assignment.slice(0, equals);
+      if (Object.hasOwn(changes, key)) throw new Error(`Project setting ${key} was specified more than once.`);
+      changes[key] = assignment.slice(equals + 1);
+    } else if (argument === '--clear') {
+      const key = args[++index];
+      if (!key || key.startsWith('--')) throw new Error('settings --clear expects a setting name.');
+      if (Object.hasOwn(changes, key)) throw new Error(`Project setting ${key} was specified more than once.`);
+      changes[key] = null;
+    } else if (argument.startsWith('--')) {
+      throw new Error(`Unknown settings option: ${argument}`);
+    } else if (project === undefined) {
+      project = argument;
+    } else {
+      throw new Error('settings accepts one project name or repository path.');
+    }
+  }
+  const projectPath = project !== undefined
+    && (isAbsolute(project) || project.includes('/') || project === '.' || project === '..' || existsSync(resolve(project)));
+  const query = new URLSearchParams();
+  if (project === undefined) query.set('repositoryPath', currentRepositoryRoot());
+  else if (projectPath) query.set('repositoryPath', resolve(project));
+  else query.set('projectName', project);
+  return { path: `/api/v1/project-worker-settings?${query}`, changes };
+}
+
+function printProjectWorkerSettings(result, saved = false) {
+  console.log(`Project: ${result.project.name}`);
+  console.log(`Repository: ${result.project.repositoryPath}`);
+  console.log(`Loop status: ${result.status}`);
+  console.log(`codex_model: ${result.settings.codex_model ?? 'Not set (Codex default)'}`);
+  console.log(`codex_reasoning_effort: ${result.settings.codex_reasoning_effort ?? 'Not set (Codex default)'}`);
+  if (saved) console.log('Saved. Changes apply on the next Loop start; a running Loop is unchanged.');
+  else console.log('Changes apply on the next Loop start; a running Loop is unchanged.');
 }
 
 async function waitForManagerExit(record) {
@@ -113,6 +170,16 @@ async function main() {
     const manager = await ensureReadyManager();
     const result = await managerRequest(manager, `/api/v1/instances/${encodeURIComponent(args[0])}/stop`, { method: 'POST' });
     console.log(`Loop ${result.instance.id}: ${result.instance.status}`);
+    return;
+  }
+  if (selectedCommand === 'settings' || selectedCommand === 'project-settings') {
+    const operation = parseSettingsArguments(args);
+    const manager = await ensureReadyManager();
+    const result = await managerRequest(manager, operation.path, {
+      method: Object.keys(operation.changes).length ? 'PUT' : 'GET',
+      ...(Object.keys(operation.changes).length ? { body: operation.changes } : {})
+    });
+    printProjectWorkerSettings(result, Object.keys(operation.changes).length > 0);
     return;
   }
   if (selectedCommand === 'update' && args.length === 0) {

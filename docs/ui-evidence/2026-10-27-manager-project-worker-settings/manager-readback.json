@@ -1,0 +1,32 @@
+{
+  "source_head": "af48112c53ae6d49cef1dd71479f977ea53a8158",
+  "runtime": "443bfe233e4460bd35d9a545fbb7445656996e4b893ec56c4dbf3f2cd01c185a",
+  "manager_api": {
+    "status": "Running",
+    "canUpdate": false,
+    "project": "settings-worker",
+    "repositoryPath": "<isolated-XDG>/repositories/settings-worker",
+    "settings": {
+      "codex_model": "gpt-6-luna",
+      "codex_reasoning_effort": null
+    }
+  },
+  "manager_api_after_smoke_and_cli_roundtrip": {
+    "status": "Stopped",
+    "canUpdate": true,
+    "settings": {
+      "codex_model": "gpt-6-luna",
+      "codex_reasoning_effort": null
+    }
+  },
+  "project_toml": {
+    "workflow_path": "WORKFLOW.md",
+    "symphony_workspace_root": "<isolated-instance>/workspaces",
+    "state_directory": "<isolated-instance>/state",
+    "github_repository_url": "https://github.com/octocat/Hello-World.git",
+    "github_base_branch": "master",
+    "workspace_files": [],
+    "skip_external_readiness": true,
+    "codex_model": "gpt-6-luna"
+  }
+}
