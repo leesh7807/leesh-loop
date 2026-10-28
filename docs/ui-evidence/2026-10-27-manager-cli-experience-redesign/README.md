@@ -54,6 +54,22 @@ The current direct captures are:
 
 These are direct Chrome screenshots, not reconstructed images. Screenshot bytes were sent to the existing one-shot `receive-browser-capture.mjs` receiver, bound only to `127.0.0.1` and protected by a per-capture token. No synthetic screenshot or headless rendering was used. The current user's Manager PID `5313` on `127.0.0.1:4320` and Loop/Symphony PID `167481` on `127.0.0.1:4100` remained alive and listening in before-and-after process/port readback. The isolated Manager PID `144193` on `127.0.0.1:45741` also remained running; its two registered Loops stayed `Stopped`.
 
+## New Task navigation at source HEAD `245d4e15f6b611547ef4ffa34534dad9c231ed20`
+
+These captures show the current Operator after adding `New Task` beside the Task count and `Refresh` action. At capture time PR #122 pointed to the same source HEAD. An isolated Runtime built from that source was active as `14604c6cb91895cbdabf1ad2ddf6fd6fd565c8c933b4590738981dfa90f0f358`; its Manager ran at `http://127.0.0.1:45742/` under `/tmp/leesh-loop-manager-newtask.FcHBUc`. The test project was registered with the real CLI, and its Loop remained `Stopped`.
+
+Eight synthetic Accepted Plan fixtures were published through the actual Operator into this isolated project's Local Task Store. Read-only SQLite inspection confirmed eight Tasks, all `Ready`; no Loop or Worker was started. With a 390×844 CSS-pixel viewport, `window.innerWidth`/`innerHeight` were `390`/`844`, the document `clientWidth` and `scrollWidth` were both `378` CSS pixels, and the direct Chrome screenshots are 378×817 pixels. The queue capture shows `New Task` in the Task header while the queue contains eight items. From a selected Task, clicking `New Task` scrolled to and focused `Publish a Plan`; the Plan draft `# Draft continuity check` remained in the form. The draft was not submitted and no comment or Task State was changed.
+
+The desktop capture is 1217×519 browser pixels. All three images were captured directly from the actual Chrome tab through its screenshot API and passed to the one-shot loopback receiver; they are not reconstructed or headless screenshots.
+
+![Actual Chrome Task queue with New Task at 390px and eight Tasks](operator-new-task-queue-narrow-390px-245d4e1.jpg)
+
+![Actual Chrome Plan draft restored after Task navigation at 390px](operator-new-task-draft-restored-narrow-390px-245d4e1.jpg)
+
+![Actual Chrome desktop Operator with New Task and restored Plan draft](operator-new-task-draft-restored-desktop-245d4e1.jpg)
+
+Before/after process readback showed the user's Manager PID `5313` and Loop/Symphony PID `167481` still listening on their original ports. The prior isolated Manager PID `144193` also remained active. This verification did not issue a stop, start, or restart action to those processes.
+
 ## Latest direct Loop and Worker continuity evidence
 
 The new `worker-continuity/` record captures the final local source checkout at HEAD `60979699b09ec74e5f1faaf12bb8f34a067d268d` using Runtime `050b74f7e1e1c7cf4af9d572a3f9e983838e076c3787ee1d830821171cc6c59d`. The two JPGs are screenshots taken directly from the actual Chrome Manager UI after Manager reentry; they show the same selected project and the completed Task with both Workpad records. The screenshots are 1217×570 browser pixels.
